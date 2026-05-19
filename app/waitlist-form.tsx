@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { sendGAEvent } from "@next/third-parties/google";
 
 type State =
   | { kind: "idle" }
@@ -8,7 +9,13 @@ type State =
   | { kind: "success"; position?: number }
   | { kind: "error"; message: string };
 
-export function WaitlistForm({ compact = false }: { compact?: boolean }) {
+export function WaitlistForm({
+  compact = false,
+  variationId,
+}: {
+  compact?: boolean;
+  variationId: string;
+}) {
   const [state, setState] = useState<State>({ kind: "idle" });
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -19,7 +26,11 @@ export function WaitlistForm({ compact = false }: { compact?: boolean }) {
     const payload = {
       email: String(data.get("email") ?? "").trim(),
       phone: String(data.get("phone") ?? "").trim(),
-      source: typeof window !== "undefined" ? window.location.pathname : "/",
+      variation: variationId,
+      source:
+        typeof window !== "undefined"
+          ? window.location.pathname + window.location.search
+          : "/",
     };
 
     if (!payload.email || !payload.email.includes("@")) {
@@ -39,6 +50,10 @@ export function WaitlistForm({ compact = false }: { compact?: boolean }) {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        sendGAEvent("event", "waitlist_error", {
+          variation: variationId,
+          status: res.status,
+        });
         setState({
           kind: "error",
           message: body?.error ?? "Something went wrong. Try again.",
@@ -46,9 +61,20 @@ export function WaitlistForm({ compact = false }: { compact?: boolean }) {
         return;
       }
       const body = await res.json().catch(() => ({}));
+      sendGAEvent("event", "waitlist_submit", {
+        variation: variationId,
+        position: body?.position,
+      });
+      sendGAEvent("event", "conversion", {
+        variation: variationId,
+      });
       setState({ kind: "success", position: body?.position });
       form.reset();
     } catch {
+      sendGAEvent("event", "waitlist_error", {
+        variation: variationId,
+        status: "network",
+      });
       setState({
         kind: "error",
         message: "Network error. Try again.",
@@ -97,6 +123,7 @@ export function WaitlistForm({ compact = false }: { compact?: boolean }) {
         compact ? "" : "shadow-[0_1px_0_rgba(0,0,0,0.04)]"
       }`}
     >
+      <input type="hidden" name="variation" value={variationId} />
       <div className="flex flex-col gap-3 sm:gap-4">
         <label className="block">
           <span className="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
@@ -130,6 +157,8 @@ export function WaitlistForm({ compact = false }: { compact?: boolean }) {
         <button
           type="submit"
           disabled={state.kind === "submitting"}
+          data-cta="waitlist-submit"
+          data-variation={variationId}
           className="mt-2 inline-flex items-center justify-center rounded-lg bg-[var(--color-ink)] px-6 py-3.5 text-base font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)] disabled:opacity-60"
         >
           {state.kind === "submitting"

@@ -7,6 +7,7 @@ type Payload = {
   email?: string;
   phone?: string;
   source?: string;
+  variation?: string;
 };
 
 function normalizeEmail(raw: string) {
@@ -27,6 +28,7 @@ async function notifyWebhook(entry: {
   email: string;
   phone: string;
   source: string;
+  variation: string;
   ua: string;
   ip: string;
 }) {
@@ -36,7 +38,7 @@ async function notifyWebhook(entry: {
     const isSlack = url.includes("hooks.slack.com");
     const body = isSlack
       ? {
-          text: `*New braintech waitlist signup*\n• Email: ${entry.email}\n• Phone: ${entry.phone}\n• Source: ${entry.source}\n• IP: ${entry.ip}`,
+          text: `*New braintech waitlist signup*\n• Email: ${entry.email}\n• Phone: ${entry.phone}\n• Variation: ${entry.variation}\n• Source: ${entry.source}\n• IP: ${entry.ip}`,
         }
       : entry;
     await fetch(url, {
@@ -53,6 +55,7 @@ async function persistToPostgres(entry: {
   email: string;
   phone: string;
   source: string;
+  variation: string;
   ua: string;
   ip: string;
 }): Promise<number | null> {
@@ -68,15 +71,19 @@ async function persistToPostgres(entry: {
         email       TEXT NOT NULL UNIQUE,
         phone       TEXT NOT NULL,
         source      TEXT,
+        variation   TEXT,
         user_agent  TEXT,
         ip          TEXT,
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `;
+    await sql`ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS variation TEXT;`;
     const rows = (await sql`
-      INSERT INTO waitlist (email, phone, source, user_agent, ip)
-      VALUES (${entry.email}, ${entry.phone}, ${entry.source}, ${entry.ua}, ${entry.ip})
-      ON CONFLICT (email) DO UPDATE SET phone = EXCLUDED.phone
+      INSERT INTO waitlist (email, phone, source, variation, user_agent, ip)
+      VALUES (${entry.email}, ${entry.phone}, ${entry.source}, ${entry.variation}, ${entry.ua}, ${entry.ip})
+      ON CONFLICT (email) DO UPDATE SET
+        phone = EXCLUDED.phone,
+        variation = EXCLUDED.variation
       RETURNING id;
     `) as { id: number }[];
     return rows[0]?.id ?? null;
@@ -97,6 +104,7 @@ export async function POST(req: Request) {
   const email = normalizeEmail(body.email ?? "");
   const phone = normalizePhone(body.phone ?? "");
   const source = (body.source ?? "/").slice(0, 200);
+  const variation = (body.variation ?? "0").toString().slice(0, 32);
 
   if (!isValidEmail(email)) {
     return NextResponse.json({ error: "Invalid email" }, { status: 400 });
@@ -111,7 +119,7 @@ export async function POST(req: Request) {
     req.headers.get("x-real-ip") ??
     "";
 
-  const entry = { email, phone, source, ua, ip };
+  const entry = { email, phone, source, variation, ua, ip };
 
   const [id] = await Promise.all([
     persistToPostgres(entry),
@@ -121,6 +129,7 @@ export async function POST(req: Request) {
   console.log("[waitlist] signup", {
     email,
     phone,
+    variation,
     source,
     id,
     persisted: id !== null,

@@ -1,21 +1,30 @@
 import { WaitlistForm } from "./waitlist-form";
+import { getVariation, type Variation } from "./variations";
 
-export default function Home() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: SearchParams;
+}) {
+  const params = await searchParams;
+  const variation = getVariation(params.variation);
   return (
-    <main className="flex flex-1 flex-col">
-      <Nav />
-      <Hero />
+    <main className="flex flex-1 flex-col" data-variation={variation.id}>
+      <Nav variation={variation} />
+      <Hero variation={variation} />
       <Problem />
       <HowItWorks />
       <Examples />
-      <Pricing />
+      <Pricing variation={variation} />
       <FAQ />
       <Footer />
     </main>
   );
 }
 
-function Nav() {
+function Nav({ variation }: { variation: Variation }) {
   return (
     <nav className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6 sm:px-10">
       <div className="flex items-center gap-2">
@@ -24,6 +33,8 @@ function Nav() {
       </div>
       <a
         href="#waitlist"
+        data-cta="nav"
+        data-variation={variation.id}
         className="rounded-full border border-[var(--color-ink)] px-4 py-1.5 text-sm font-medium text-[var(--color-ink)] transition hover:bg-[var(--color-ink)] hover:text-[var(--color-cream)]"
       >
         Join waitlist
@@ -52,34 +63,38 @@ function Logo() {
   );
 }
 
-function Hero() {
+function Hero({ variation }: { variation: Variation }) {
   return (
     <section className="relative mx-auto w-full max-w-6xl px-6 pb-16 pt-8 sm:px-10 sm:pb-24 sm:pt-12">
       <div className="grid items-start gap-12 lg:grid-cols-[1.1fr_1fr] lg:gap-16">
         <div className="fade-up">
           <div className="inline-flex items-center gap-2 rounded-full border border-[var(--color-rule)] bg-white/60 px-3 py-1 text-xs font-medium text-[var(--color-ink-soft)]">
             <span className="size-1.5 rounded-full bg-[var(--color-accent)] pulse-dot" />
-            First batch — 1,000 devices
+            {variation.eyebrow}
           </div>
           <h1 className="serif mt-6 text-[44px] leading-[1.02] tracking-[-0.02em] sm:text-6xl lg:text-[80px]">
-            Your kid wants TikTok.
+            {variation.headlineTop}
             <br />
-            <em className="not-italic text-[var(--color-accent)]">Make them earn it.</em>
+            <em className="not-italic text-[var(--color-accent)]">
+              {variation.headlineAccent}
+            </em>
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-[var(--color-ink-soft)] sm:text-xl">
-            A small device plugs between your router and your Wi-Fi. You text
-            it like a friend. It turns every screen in your house into
-            something your kid has to <em>earn</em>.
+            {variation.subhead}
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
             <a
               href="#waitlist"
+              data-cta="hero-primary"
+              data-variation={variation.id}
               className="inline-flex items-center justify-center rounded-lg bg-[var(--color-ink)] px-6 py-3.5 text-base font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)]"
             >
-              Reserve a founding device →
+              {variation.cta}
             </a>
             <a
               href="#how-it-works"
+              data-cta="hero-secondary"
+              data-variation={variation.id}
               className="inline-flex items-center justify-center rounded-lg border border-[var(--color-rule)] px-6 py-3.5 text-base font-medium text-[var(--color-ink)] transition hover:border-[var(--color-ink)]"
             >
               See how it works
@@ -99,7 +114,10 @@ function Hero() {
 
 function HeroPhone() {
   return (
-    <div className="relative mx-auto w-full max-w-md fade-up" style={{ animationDelay: "120ms" }}>
+    <div
+      className="relative mx-auto w-full max-w-md fade-up"
+      style={{ animationDelay: "120ms" }}
+    >
       <div className="absolute -inset-6 -z-10 rounded-[3rem] bg-gradient-to-br from-[var(--color-accent)]/15 via-transparent to-[var(--color-ink)]/5 blur-2xl" />
       <div className="rounded-[2.5rem] border border-[var(--color-rule)] bg-[var(--color-night)] p-3 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.35)]">
         <div className="rounded-[2rem] bg-[#1c1c1f] p-5">
@@ -151,8 +169,8 @@ function Bubble({
           isOut
             ? "rounded-br-md bg-[#2b8aff] text-white"
             : muted
-            ? "rounded-bl-md bg-white/8 text-white/90"
-            : "rounded-bl-md bg-white/12 text-white",
+              ? "rounded-bl-md bg-white/8 text-white/90"
+              : "rounded-bl-md bg-white/12 text-white",
         ].join(" ")}
       >
         {children}
@@ -220,7 +238,10 @@ function HowItWorks() {
   ];
 
   return (
-    <section id="how-it-works" className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-28">
+    <section
+      id="how-it-works"
+      className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-28"
+    >
       <div className="max-w-2xl">
         <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
           How it works
@@ -317,9 +338,12 @@ function Examples() {
   );
 }
 
-function Pricing() {
+function Pricing({ variation }: { variation: Variation }) {
   return (
-    <section id="waitlist" className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-28">
+    <section
+      id="waitlist"
+      className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-28"
+    >
       <div className="grid items-start gap-12 lg:grid-cols-[1fr_1.1fr] lg:gap-16">
         <div>
           <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
@@ -352,7 +376,7 @@ function Pricing() {
           </p>
         </div>
         <div>
-          <WaitlistForm />
+          <WaitlistForm variationId={variation.id} />
         </div>
       </div>
     </section>
