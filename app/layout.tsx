@@ -14,7 +14,11 @@ const instrumentSerif = Instrument_Serif({
   subsets: ["latin"],
 });
 
-const siteUrl = "https://braintech.app";
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : "https://braintech-sigma.vercel.app");
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
