@@ -8,11 +8,13 @@
     "start": "next start"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.97.1",
     "@neondatabase/serverless": "^1.1.0",
     "@next/third-parties": "^16.2.6",
     "next": "16.2.6",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "twilio": "^6.0.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

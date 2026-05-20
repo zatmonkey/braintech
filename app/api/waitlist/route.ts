@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { getSql, ensureSmsSchema } from "@/app/lib/db";
+import { twilioConfigured, sendSms } from "@/app/lib/twilio";
+import { generateOpener } from "@/app/lib/conversation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,6 +96,41 @@ async function persistToPostgres(entry: {
   }
 }
 
+/**
+ * Sends the LLM-generated welcome SMS and seeds the conversation, but only the
+ * first time we see this phone (so re-signups don't re-trigger the interview).
+ */
+async function startSmsConversation(phone: string, email: string): Promise<void> {
+  if (!twilioConfigured()) return;
+  const sql = getSql();
+  if (!sql) return;
+  try {
+    await ensureSmsSchema(sql);
+
+    const existing = (await sql`
+      SELECT 1 FROM sms_messages WHERE phone = ${phone} LIMIT 1;
+    `) as unknown[];
+    if (existing.length > 0) return; // already in a conversation
+
+    await sql`
+      INSERT INTO sms_users (phone, email)
+      VALUES (${phone}, ${email})
+      ON CONFLICT (phone) DO UPDATE SET email = COALESCE(EXCLUDED.email, sms_users.email), updated_at = NOW();
+    `;
+
+    const opener = await generateOpener(email);
+    const sent = await sendSms(phone, opener);
+    if (sent) {
+      await sql`
+        INSERT INTO sms_messages (phone, direction, body)
+        VALUES (${phone}, 'outbound', ${opener});
+      `;
+    }
+  } catch (err) {
+    console.error("[waitlist] startSmsConversation failed", err);
+  }
+}
+
 export async function POST(req: Request) {
   let body: Payload;
   try {
@@ -134,6 +172,9 @@ export async function POST(req: Request) {
     id,
     persisted: id !== null,
   });
+
+  // Kick off the SMS discovery interview (best-effort; never blocks the signup).
+  await startSmsConversation(phone, email);
 
   return NextResponse.json({
     ok: true,
