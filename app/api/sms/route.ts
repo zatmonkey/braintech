@@ -33,6 +33,26 @@ export async function POST(req: Request) {
     });
   }
 
+  // Carrier-compliance keywords. (Twilio Advanced Opt-Out may also handle STOP
+  // upstream; this is a defensive fallback so we're always compliant.)
+  const keyword = body.trim().toUpperCase();
+  if (["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(keyword)) {
+    return new Response(
+      twiml(
+        "You're opted out of Braintech texts and won't receive more. Reply START to opt back in.",
+      ),
+      { headers: XML_HEADERS },
+    );
+  }
+  if (["HELP", "INFO"].includes(keyword)) {
+    return new Response(
+      twiml(
+        "Braintech: parental control by text. Help: braintech.app. Msg&data rates may apply. Reply STOP to opt out.",
+      ),
+      { headers: XML_HEADERS },
+    );
+  }
+
   const sql = getSql();
   if (!sql) {
     return new Response(

@@ -172,6 +172,12 @@ export function WaitlistForm({
           No charge today. Founding members lock in $249/year for life. We&apos;ll
           confirm before your card is ever touched.
         </p>
+        <p className="text-[11px] leading-relaxed text-[var(--color-ink-soft)]/80">
+          By joining, you agree to receive recurring automated texts from
+          Braintech at the number provided to set up your account and answer a
+          few questions. Consent is not a condition of purchase. Msg &amp; data
+          rates may apply. Reply STOP to opt out, HELP for help.
+        </p>
       </div>
     </form>
   );
