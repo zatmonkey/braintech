@@ -18,9 +18,17 @@ function normalizeEmail(raw: string) {
 }
 
 function normalizePhone(raw: string) {
-  const digits = raw.replace(/[^\d+]/g, "");
+  const hadPlus = raw.trim().startsWith("+");
+  const digits = raw.replace(/\D/g, "");
   if (!digits) return "";
-  return digits.startsWith("+") ? digits : `+${digits.replace(/^\+/, "")}`;
+  // Explicit country code provided — trust it.
+  if (hadPlus) return `+${digits}`;
+  // Bare 10-digit number → assume US/Canada (+1). This is a US product.
+  if (digits.length === 10) return `+1${digits}`;
+  // 11 digits starting with 1 → US/Canada with country code, just add +.
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  // Otherwise assume the digits already include a country code.
+  return `+${digits}`;
 }
 
 function isValidEmail(email: string) {
