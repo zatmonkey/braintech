@@ -12,28 +12,28 @@ export function getSql(): NeonQueryFunction<false, false> | null {
 let schemaReady = false;
 
 /**
- * Idempotently creates the two SMS tables:
- *  - sms_users:    one row per phone number, holding the facts we learn
- *  - sms_messages: the full inbound/outbound conversation log
+ * Idempotently creates:
+ *  - leads:        one row per person, keyed by email. phone is optional.
+ *                  `memory` is a compact blob the LLM maintains during the
+ *                  discovery interview.
+ *  - sms_messages: the full inbound/outbound conversation log (keyed by phone,
+ *                  the identifier Twilio gives us on inbound).
  */
 export async function ensureSmsSchema(
   sql: NeonQueryFunction<false, false>,
 ): Promise<void> {
   if (schemaReady) return;
   await sql`
-    CREATE TABLE IF NOT EXISTS sms_users (
-      phone               TEXT PRIMARY KEY,
-      email               TEXT,
-      parent_name         TEXT,
-      num_kids            INTEGER,
-      kids_ages           TEXT,
-      goal                TEXT,
-      notes               TEXT,
+    CREATE TABLE IF NOT EXISTS leads (
+      email               TEXT PRIMARY KEY,
+      phone               TEXT,
+      memory              TEXT,
       interview_complete  BOOLEAN NOT NULL DEFAULT FALSE,
       created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
+  await sql`CREATE INDEX IF NOT EXISTS leads_phone_idx ON leads (phone);`;
   await sql`
     CREATE TABLE IF NOT EXISTS sms_messages (
       id          SERIAL PRIMARY KEY,

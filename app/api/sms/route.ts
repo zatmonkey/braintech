@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ensureSmsSchema, getSql } from "@/app/lib/db";
 import { verifyTwilioSignature, twiml } from "@/app/lib/twilio";
-import { runConversationTurn, type Profile } from "@/app/lib/conversation";
+import { runConversationTurn } from "@/app/lib/conversation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,14 +44,30 @@ export async function POST(req: Request) {
   try {
     await ensureSmsSchema(sql);
 
-    // Ensure a user row exists and load known facts.
-    const userRows = (await sql`
-      INSERT INTO sms_users (phone)
-      VALUES (${from})
-      ON CONFLICT (phone) DO UPDATE SET updated_at = NOW()
-      RETURNING parent_name, num_kids, kids_ages, goal, notes, interview_complete;
-    `) as Profile[];
-    const knownProfile: Profile = userRows[0] ?? {};
+    // Resolve the lead by phone. Leads are keyed by email — for a normal
+    // waitlist signup the row already exists with this phone. For a cold
+    // inbound from an unknown number, create a placeholder keyed on the phone.
+    const leadRows = (await sql`
+      SELECT email, memory FROM leads
+      WHERE phone = ${from}
+      ORDER BY updated_at DESC
+      LIMIT 1;
+    `) as { email: string; memory: string | null }[];
+
+    let email: string;
+    let currentMemory: string;
+    if (leadRows.length > 0) {
+      email = leadRows[0].email;
+      currentMemory = leadRows[0].memory ?? "";
+    } else {
+      email = `${from}@sms.unknown`;
+      currentMemory = "";
+      await sql`
+        INSERT INTO leads (email, phone)
+        VALUES (${email}, ${from})
+        ON CONFLICT (email) DO UPDATE SET phone = ${from}, updated_at = NOW();
+      `;
+    }
 
     // Log the inbound message.
     await sql`
@@ -73,20 +89,16 @@ export async function POST(req: Request) {
         content: r.body,
       }));
 
-    const { reply, profile } = await runConversationTurn({
+    const { reply } = await runConversationTurn({
       history,
-      knownProfile,
-      saveProfile: async (p) => {
+      currentMemory,
+      saveMemory: async (memory, complete) => {
         await sql`
-          UPDATE sms_users SET
-            parent_name = COALESCE(${p.parent_name ?? null}, parent_name),
-            num_kids = COALESCE(${p.num_kids ?? null}, num_kids),
-            kids_ages = COALESCE(${p.kids_ages ?? null}, kids_ages),
-            goal = COALESCE(${p.goal ?? null}, goal),
-            notes = COALESCE(${p.notes ?? null}, notes),
-            interview_complete = COALESCE(${p.interview_complete ?? null}, interview_complete),
+          UPDATE leads SET
+            memory = ${memory},
+            interview_complete = ${complete},
             updated_at = NOW()
-          WHERE phone = ${from};
+          WHERE email = ${email};
         `;
       },
     });
@@ -97,7 +109,6 @@ export async function POST(req: Request) {
       VALUES (${from}, 'outbound', ${reply});
     `;
 
-    void profile;
     return new Response(twiml(reply), { headers: XML_HEADERS });
   } catch (err) {
     console.error("[sms] handler error", err);

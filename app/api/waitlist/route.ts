@@ -113,9 +113,9 @@ async function startSmsConversation(phone: string, email: string): Promise<void>
     if (existing.length > 0) return; // already in a conversation
 
     await sql`
-      INSERT INTO sms_users (phone, email)
-      VALUES (${phone}, ${email})
-      ON CONFLICT (phone) DO UPDATE SET email = COALESCE(EXCLUDED.email, sms_users.email), updated_at = NOW();
+      INSERT INTO leads (email, phone)
+      VALUES (${email}, ${phone})
+      ON CONFLICT (email) DO UPDATE SET phone = COALESCE(EXCLUDED.phone, leads.phone), updated_at = NOW();
     `;
 
     const opener = await generateOpener(email);

@@ -8,15 +8,6 @@ function getClient(): Anthropic {
   return client;
 }
 
-export type Profile = {
-  parent_name?: string | null;
-  num_kids?: number | null;
-  kids_ages?: string | null;
-  goal?: string | null;
-  notes?: string | null;
-  interview_complete?: boolean | null;
-};
-
 // Static, cacheable. Product facts so the bot can answer easy product questions,
 // the interview goal, the on-topic guardrail, and SMS style rules.
 const SYSTEM_PROMPT = `You are "Bri", the friendly onboarding concierge for Braintech, texting a parent who just joined the waitlist. You are warm, brief, and human — this is SMS, not email.
@@ -36,8 +27,8 @@ Naturally learn three things, ONE question at a time (never interrogate):
 3. The #1 thing they want Braintech to help with (their biggest screen-time pain or goal).
 Open warm, acknowledge each answer briefly, then ask the next thing. When you have all three, thank them warmly, tell them we'll text when their founding device ships, and stop asking questions.
 
-# Recording facts
-Whenever you learn a fact (name, number of kids, ages, their goal), call the update_profile tool with what you learned. Set interview_complete=true once you have num_kids, kids_ages, and goal. Always reply to the parent in words too — the tool call alone is not a reply.
+# Your memory (important)
+You maintain a single compact memory blob holding everything you've learned about this parent and their family. Whenever you learn anything new — their name, number of kids, ages, their goal, their router, concerns, anything useful — call the update_memory tool with the FULL rewritten memory (incorporate old + new), kept compact: short shorthand notes, not prose. Set interview_complete=true once you know the number of kids, the kids' ages, AND their top goal. Always also reply to the parent in words — a tool call alone is not a reply.
 
 # Guardrails
 - Only discuss Braintech, parenting, kids, and screen time. If asked about anything off-topic (coding help, news, math, jokes, other products, etc.), politely redirect: you can only help with Braintech. Don't answer off-topic questions even if you know the answer.
@@ -49,81 +40,62 @@ Whenever you learn a fact (name, number of kids, ages, their goal), call the upd
 - Warm and casual, like a helpful human. At most one emoji, only when it fits.
 - One question per message.`;
 
-const UPDATE_PROFILE_TOOL: Anthropic.Tool = {
-  name: "update_profile",
+const UPDATE_MEMORY_TOOL: Anthropic.Tool = {
+  name: "update_memory",
   description:
-    "Record facts learned about this parent during the conversation. Call whenever you learn or update any field. Omit fields you haven't learned yet.",
+    "Save your compact running memory of everything you've learned about this parent and their family. Call this whenever you learn something new. Always pass the FULL updated memory (rewrite to fold in the new fact), kept compact — short shorthand notes, not sentences.",
   input_schema: {
     type: "object",
     properties: {
-      parent_name: { type: "string", description: "The parent's first name" },
-      num_kids: { type: "integer", description: "How many kids they have" },
-      kids_ages: {
-        type: "string",
-        description: "The kids' ages as stated, e.g. '7 and 10' or 'twins, 5'",
-      },
-      goal: {
+      memory: {
         type: "string",
         description:
-          "The #1 thing they want Braintech to help with / their biggest screen-time concern",
-      },
-      notes: {
-        type: "string",
-        description: "Any other useful context about this family",
+          "The complete compact profile of everything learned so far. Rewrite in full each call. e.g. \"Name: Sarah. 2 kids: Maya 7, Liam 10. Goal: cut TikTok, more reading. Router: eero. Worried re: bedtime scrolling.\"",
       },
       interview_complete: {
         type: "boolean",
-        description: "True once num_kids, kids_ages, and goal are all known",
+        description:
+          "True once number of kids, kids' ages, and top goal are all known.",
       },
     },
-    required: [],
+    required: ["memory"],
   },
 };
 
-function mergeProfile(base: Profile, incoming: Partial<Profile>): Profile {
-  const out: Profile = { ...base };
-  for (const [k, v] of Object.entries(incoming)) {
-    if (v !== undefined && v !== null && v !== "") {
-      // @ts-expect-error dynamic key assignment across known Profile fields
-      out[k] = v;
-    }
-  }
-  return out;
-}
-
-function systemBlocks(profile: Profile): Anthropic.TextBlockParam[] {
+function systemBlocks(memory: string): Anthropic.TextBlockParam[] {
   return [
     { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
     {
       type: "text",
-      text: `Known so far about this parent (don't re-ask what you already know): ${JSON.stringify(
-        profile,
-      )}`,
+      text: `Your memory so far about this parent (build on this, don't re-ask what you already know):\n${
+        memory?.trim() ? memory.trim() : "(nothing yet — this is the start)"
+      }`,
     },
   ];
 }
 
-type RunResult = { reply: string; profile: Profile };
+type RunResult = { reply: string; memory: string; complete: boolean };
 
 /**
- * Runs one turn of the interview. Executes the update_profile tool inline
- * (persisting via saveProfile) and loops until the model produces a text reply.
+ * Runs one turn of the interview. Executes the update_memory tool inline
+ * (persisting via saveMemory) and loops until the model produces a text reply.
  */
 export async function runConversationTurn(opts: {
   history: Anthropic.MessageParam[];
-  knownProfile: Profile;
-  saveProfile: (p: Profile) => Promise<void>;
+  currentMemory: string;
+  saveMemory: (memory: string, complete: boolean) => Promise<void>;
 }): Promise<RunResult> {
   const messages: Anthropic.MessageParam[] = [...opts.history];
-  let profile: Profile = { ...opts.knownProfile };
+  let memory = opts.currentMemory ?? "";
+  let complete = false;
   let reply = "";
 
   for (let i = 0; i < 4; i++) {
     const resp = await getClient().messages.create({
       model: MODEL,
       max_tokens: 400,
-      system: systemBlocks(profile),
-      tools: [UPDATE_PROFILE_TOOL],
+      system: systemBlocks(memory),
+      tools: [UPDATE_MEMORY_TOOL],
       tool_choice: { type: "auto" },
       messages,
     });
@@ -144,8 +116,14 @@ export async function runConversationTurn(opts: {
     if (resp.stop_reason === "tool_use" && toolUses.length > 0) {
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const tu of toolUses) {
-        profile = mergeProfile(profile, tu.input as Partial<Profile>);
-        await opts.saveProfile(profile);
+        const input = tu.input as { memory?: string; interview_complete?: boolean };
+        if (typeof input.memory === "string" && input.memory.trim()) {
+          memory = input.memory.trim();
+        }
+        if (typeof input.interview_complete === "boolean") {
+          complete = input.interview_complete;
+        }
+        await opts.saveMemory(memory, complete);
         results.push({
           type: "tool_result",
           tool_use_id: tu.id,
@@ -161,7 +139,7 @@ export async function runConversationTurn(opts: {
   if (!reply) {
     reply = "Got it — thank you! We'll text you when your founding device ships.";
   }
-  return { reply, profile };
+  return { reply, memory, complete };
 }
 
 /**
@@ -175,7 +153,7 @@ export async function generateOpener(parentEmail?: string): Promise<string> {
   const resp = await getClient().messages.create({
     model: MODEL,
     max_tokens: 200,
-    system: systemBlocks({}),
+    system: systemBlocks(""),
     messages: [{ role: "user", content: seed }],
   });
 
