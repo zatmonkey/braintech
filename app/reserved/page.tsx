@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { getStripe, SHIP_DATE } from "@/app/lib/stripe";
 import { getSql, ensureSmsSchema } from "@/app/lib/db";
+import { PurchaseTracker } from "./purchase-tracker";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,7 @@ export default async function ReservedPage({
       <div className="w-full max-w-lg rounded-2xl border border-[var(--color-rule)] bg-white p-8 text-center shadow-[0_1px_0_rgba(0,0,0,0.04)] sm:p-12">
         {result.paid ? (
           <>
+            <PurchaseTracker value={50} />
             <div className="mx-auto grid size-14 place-items-center rounded-full bg-[var(--color-accent)]/15 text-[var(--color-accent)]">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="size-7">
                 <path d="M20 6 9 17l-5-5" />

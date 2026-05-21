@@ -3,6 +3,11 @@
 import { useState } from "react";
 import { sendGAEvent } from "@next/third-parties/google";
 
+function fbqTrack(event: string, params?: Record<string, unknown>) {
+  const w = window as typeof window & { fbq?: (...a: unknown[]) => void };
+  if (typeof w.fbq === "function") w.fbq("track", event, params);
+}
+
 type State =
   | { kind: "idle" }
   | { kind: "submitting" }
@@ -22,6 +27,11 @@ export function WaitlistForm({
   async function startCheckout(email: string, phone: string) {
     setReserving(true);
     sendGAEvent("event", "reserve_click", { variation: variationId });
+    fbqTrack("InitiateCheckout", {
+      value: 50,
+      currency: "USD",
+      variation: variationId,
+    });
     try {
       const res = await fetch("/api/checkout", {
         method: "POST",
@@ -89,6 +99,7 @@ export function WaitlistForm({
       sendGAEvent("event", "conversion", {
         variation: variationId,
       });
+      fbqTrack("Lead", { content_name: "waitlist", variation: variationId });
       setState({
         kind: "success",
         position: body?.position,
