@@ -4,7 +4,8 @@ export function twilioConfigured(): boolean {
   return Boolean(
     process.env.TWILIO_ACCOUNT_SID &&
       process.env.TWILIO_AUTH_TOKEN &&
-      process.env.TWILIO_PHONE_NUMBER,
+      (process.env.TWILIO_MESSAGING_SERVICE_SID ||
+        process.env.TWILIO_PHONE_NUMBER),
   );
 }
 
@@ -12,13 +13,20 @@ export async function sendSms(to: string, body: string): Promise<boolean> {
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
   const from = process.env.TWILIO_PHONE_NUMBER;
-  if (!sid || !token || !from) {
+  const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
+  if (!sid || !token || (!from && !messagingServiceSid)) {
     console.error("[twilio] not configured; cannot send");
     return false;
   }
   try {
     const client = twilio(sid, token);
-    await client.messages.create({ to, from, body });
+    // Prefer the Messaging Service (associates the send with the registered
+    // A2P campaign) once one is configured; fall back to the bare number.
+    await client.messages.create(
+      messagingServiceSid
+        ? { to, body, messagingServiceSid }
+        : { to, body, from: from! },
+    );
     return true;
   } catch (err) {
     console.error("[twilio] send failed", err);
