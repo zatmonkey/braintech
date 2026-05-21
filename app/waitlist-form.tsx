@@ -6,7 +6,7 @@ import { sendGAEvent } from "@next/third-parties/google";
 type State =
   | { kind: "idle" }
   | { kind: "submitting" }
-  | { kind: "success"; position?: number }
+  | { kind: "success"; position?: number; email: string; phone: string }
   | { kind: "error"; message: string };
 
 export function WaitlistForm({
@@ -17,6 +17,27 @@ export function WaitlistForm({
   variationId: string;
 }) {
   const [state, setState] = useState<State>({ kind: "idle" });
+  const [reserving, setReserving] = useState(false);
+
+  async function startCheckout(email: string, phone: string) {
+    setReserving(true);
+    sendGAEvent("event", "reserve_click", { variation: variationId });
+    try {
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, phone }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.url) {
+        window.location.href = data.url as string;
+        return;
+      }
+    } catch {
+      /* fall through to reset */
+    }
+    setReserving(false);
+  }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -68,7 +89,12 @@ export function WaitlistForm({
       sendGAEvent("event", "conversion", {
         variation: variationId,
       });
-      setState({ kind: "success", position: body?.position });
+      setState({
+        kind: "success",
+        position: body?.position,
+        email: payload.email,
+        phone: payload.phone,
+      });
       form.reset();
     } catch {
       sendGAEvent("event", "waitlist_error", {
@@ -92,25 +118,37 @@ export function WaitlistForm({
         <div className="inline-flex items-center gap-2 rounded-full bg-[var(--color-accent)]/10 px-3 py-1 text-xs font-medium text-[var(--color-accent)]">
           <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
           You&apos;re on the list
+          {state.position ? (
+            <span className="text-[var(--color-ink-soft)]">
+              · #{state.position} of 1,000
+            </span>
+          ) : null}
         </div>
-        <h3 className="serif mt-4 text-2xl sm:text-3xl">
-          Welcome, founding parent.
+        <h3 className="serif mt-4 text-2xl leading-snug sm:text-3xl">
+          Lock in one of the first 1,000 — now.
         </h3>
         <p className="mt-2 text-[var(--color-ink-soft)]">
-          We&apos;ll text you when your device ships
-          {state.position ? (
-            <>
-              {" "}
-              — you&apos;re <strong>#{state.position}</strong> of the first
-              1,000.
-            </>
-          ) : (
-            "."
-          )}{" "}
-          Forward this to a parent who needs it.
+          Ships <strong>worldwide September 1</strong>. Reserve your build slot
+          with a <strong>$50 deposit</strong> — fully refundable, and applied
+          toward your $249/yr founding membership.
         </p>
-        <p className="mt-4 font-mono text-xs text-[var(--color-ink-soft)]">
-          braintech.app
+        <button
+          type="button"
+          onClick={() => startCheckout(state.email, state.phone)}
+          disabled={reserving}
+          data-cta="reserve-deposit"
+          data-variation={variationId}
+          className="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-[var(--color-accent)] px-6 py-3.5 text-base font-medium text-white transition hover:brightness-95 disabled:opacity-60"
+        >
+          {reserving ? "Taking you to checkout…" : "Reserve my device — $50 →"}
+        </button>
+        <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
+          Secure checkout via Stripe. The deposit only holds your spot in the
+          first batch — refundable anytime before your device ships.
+        </p>
+        <p className="mt-4 border-t border-[var(--color-rule)] pt-4 text-sm text-[var(--color-ink-soft)]">
+          Not ready? You&apos;re still on the list — we&apos;ll text you before
+          the batch ships.
         </p>
       </div>
     );

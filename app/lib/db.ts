@@ -25,15 +25,28 @@ export async function ensureSmsSchema(
   if (schemaReady) return;
   await sql`
     CREATE TABLE IF NOT EXISTS leads (
-      email               TEXT PRIMARY KEY,
-      phone               TEXT,
-      memory              TEXT,
-      interview_complete  BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      email                   TEXT PRIMARY KEY,
+      phone                   TEXT,
+      memory                  TEXT,
+      interview_complete      BOOLEAN NOT NULL DEFAULT FALSE,
+      deposit_paid            BOOLEAN NOT NULL DEFAULT FALSE,
+      deposit_amount          INTEGER,
+      deposit_at              TIMESTAMPTZ,
+      stripe_session_id       TEXT,
+      stripe_payment_intent   TEXT,
+      shipping_country        TEXT,
+      created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS leads_phone_idx ON leads (phone);`;
+  // Add deposit columns to pre-existing leads tables.
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS deposit_paid BOOLEAN NOT NULL DEFAULT FALSE;`;
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS deposit_amount INTEGER;`;
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS deposit_at TIMESTAMPTZ;`;
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS stripe_session_id TEXT;`;
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS stripe_payment_intent TEXT;`;
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS shipping_country TEXT;`;
   await sql`
     CREATE TABLE IF NOT EXISTS sms_messages (
       id          SERIAL PRIMARY KEY,
