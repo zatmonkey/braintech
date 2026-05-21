@@ -226,8 +226,8 @@ function HowItWorks() {
     },
     {
       n: "03",
-      title: "Your kid learns to unlock screens",
-      body: "Braintech serves the lesson, grades the answer, and only unlocks the app when your kid actually engaged. No timers. No nagging.",
+      title: "Your kid earns it by learning",
+      body: "Braintech serves a real lesson — a TED talk, a Khan Academy problem, a chapter — and checks your kid genuinely engaged before the app opens. The screen becomes something they earn with curiosity, not a button they tap. No timers. No nagging.",
     },
   ];
 
