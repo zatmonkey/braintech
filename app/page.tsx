@@ -468,7 +468,15 @@ function Footer() {
             </p>
           </div>
           <div className="text-sm text-[var(--color-cream)]/60">
-            <p>© {new Date().getFullYear()} Braintech</p>
+            <div className="mb-3 flex gap-5 sm:justify-end">
+              <a href="/privacy" className="hover:text-[var(--color-cream)]">
+                Privacy
+              </a>
+              <a href="/terms" className="hover:text-[var(--color-cream)]">
+                SMS Terms
+              </a>
+            </div>
+            <p>© {new Date().getFullYear()} Braintech · Mutant Ventures LLC</p>
             <p className="mt-1">Built for parents who&apos;d rather not fight.</p>
           </div>
         </div>

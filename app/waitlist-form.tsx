@@ -176,7 +176,15 @@ export function WaitlistForm({
           By joining, you agree to receive recurring automated texts from
           Braintech at the number provided to set up your account and answer a
           few questions. Consent is not a condition of purchase. Msg &amp; data
-          rates may apply. Reply STOP to opt out, HELP for help.
+          rates may apply. Reply STOP to opt out, HELP for help. See our{" "}
+          <a href="/terms" className="underline">
+            SMS Terms
+          </a>{" "}
+          &amp;{" "}
+          <a href="/privacy" className="underline">
+            Privacy Policy
+          </a>
+          .
         </p>
       </div>
     </form>
