@@ -55,8 +55,10 @@ export async function GET() {
           </div>
 
           <div style={{ marginTop: 24, display: "flex", alignItems: "flex-start", gap: 14 }}>
-            <div style={{ width: 26, height: 26, borderRadius: 6, background: "#d94f1a", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 700, flexShrink: 0 }}>
-              ✓
+            <div style={{ width: 26, height: 26, borderRadius: 6, background: "#d94f1a", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
             </div>
             <div style={{ fontSize: 19, lineHeight: 1.5, color: "#4a443d" }}>
               I agree to receive recurring automated texts from Braintech (Mutant
