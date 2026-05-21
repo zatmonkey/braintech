@@ -47,7 +47,7 @@ export async function POST(req: Request) {
   if (["HELP", "INFO"].includes(keyword)) {
     return new Response(
       twiml(
-        "Braintech: parental control by text. Help: braintech.app. Msg&data rates may apply. Reply STOP to opt out.",
+        "Braintech: parental control by text. Help: getbraintech.com. Msg&data rates may apply. Reply STOP to opt out.",
       ),
       { headers: XML_HEADERS },
     );

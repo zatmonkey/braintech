@@ -10,7 +10,7 @@ function siteUrl(req: Request): string {
   if (process.env.VERCEL_PROJECT_PRODUCTION_URL)
     return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
   const proto = req.headers.get("x-forwarded-proto") ?? "https";
-  const host = req.headers.get("host") ?? "braintech-sigma.vercel.app";
+  const host = req.headers.get("host") ?? "getbraintech.com";
   return `${proto}://${host}`;
 }
 

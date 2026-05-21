@@ -121,7 +121,7 @@ export default async function OGImage() {
             color: "#4a443d",
           }}
         >
-          <span>braintech.app</span>
+          <span>getbraintech.com</span>
           <span style={{ fontWeight: 600, color: "#1a1714" }}>
             Founding members $249/yr
           </span>

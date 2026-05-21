@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 const CONTACT = "support@mutant.ventures";
-const SMS_NUMBER = "+1 (912) 912-6353";
+const SMS_NUMBER = "+1 (888) 464-4087";
 
 export default function TermsPage() {
   return (
