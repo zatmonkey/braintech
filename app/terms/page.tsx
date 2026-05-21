@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     "Terms for the Braintech SMS program: description, message frequency, message and data rates, support contact, and how to opt out.",
 };
 
-const CONTACT = "alex@mutant.ventures";
+const CONTACT = "support@mutant.ventures";
 const SMS_NUMBER = "+1 (912) 912-6353";
 
 export default function TermsPage() {

@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     "How Braintech collects, uses, and protects your information. We do not sell your data or share it with third parties for marketing.",
 };
 
-const CONTACT = "alex@mutant.ventures";
+const CONTACT = "support@mutant.ventures";
 
 export default function PrivacyPage() {
   return (
