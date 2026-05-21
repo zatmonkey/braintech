@@ -210,20 +210,29 @@ export function WaitlistForm({
           No charge today. Founding members lock in $249/year for life. We&apos;ll
           confirm before your card is ever touched.
         </p>
-        <p className="text-[11px] leading-relaxed text-[var(--color-ink-soft)]/80">
-          By joining, you agree to receive recurring automated texts from
-          Braintech at the number provided to set up your account and answer a
-          few questions. Consent is not a condition of purchase. Msg &amp; data
-          rates may apply. Reply STOP to opt out, HELP for help. See our{" "}
-          <a href="/terms" className="underline">
-            SMS Terms
-          </a>{" "}
-          &amp;{" "}
-          <a href="/privacy" className="underline">
-            Privacy Policy
-          </a>
-          .
-        </p>
+        <label className="flex items-start gap-2 text-[11px] leading-relaxed text-[var(--color-ink-soft)]/80">
+          <input
+            type="checkbox"
+            name="sms_consent"
+            required
+            className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]"
+          />
+          <span>
+            I agree to receive recurring automated texts from Braintech (Mutant
+            Ventures LLC) at the number provided — a welcome message and a few
+            onboarding questions. Consent is not a condition of purchase. Message
+            frequency varies. Msg &amp; data rates may apply. Reply STOP to opt
+            out, HELP for help. See our{" "}
+            <a href="/terms" className="underline">
+              SMS Terms
+            </a>{" "}
+            &amp;{" "}
+            <a href="/privacy" className="underline">
+              Privacy Policy
+            </a>
+            .
+          </span>
+        </label>
       </div>
     </form>
   );
