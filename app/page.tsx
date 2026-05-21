@@ -227,7 +227,7 @@ function HowItWorks() {
     {
       n: "03",
       title: "Your kid earns it by learning",
-      body: "Braintech serves a real lesson — a TED talk, a Khan Academy problem, a chapter — and checks your kid genuinely engaged before the app opens. The screen becomes something they earn with curiosity, not a button they tap. No timers. No nagging.",
+      body: "Braintech serves content that builds curiosity, skills, interests, and real knowledge — what matters most in the age of AI — and checks your kid genuinely engaged before the app opens. The screen becomes something they earn, not a button they tap. No timers, no nagging.",
     },
   ];
 
