@@ -1,11 +1,15 @@
 import { ImageResponse } from "next/og";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 export const alt = "Braintech — Your kid wants TikTok. Make them earn it.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 export default async function OGImage() {
+  const logo = await readFile(join(process.cwd(), "public", "logo.png"));
+  const logoSrc = `data:image/png;base64,${logo.toString("base64")}`;
   return new ImageResponse(
     (
       <div
@@ -31,23 +35,8 @@ export default async function OGImage() {
             letterSpacing: "-0.01em",
           }}
         >
-          <div
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 10,
-              background: "#1a1714",
-              color: "#f5f1ea",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 24,
-              fontWeight: 700,
-              fontFamily: "Helvetica, Arial, sans-serif",
-            }}
-          >
-            b
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={logoSrc} width={48} height={48} style={{ borderRadius: 10 }} />
           <span style={{ fontFamily: "Helvetica, Arial, sans-serif" }}>
             braintech
           </span>

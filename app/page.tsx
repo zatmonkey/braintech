@@ -46,21 +46,14 @@ function Nav({ variation }: { variation: Variation }) {
 
 function Logo() {
   return (
-    <div className="grid size-7 place-items-center rounded-md bg-[var(--color-ink)] text-[var(--color-cream)]">
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="size-4"
-      >
-        <path d="M9 2a3 3 0 0 0-3 3v1a3 3 0 0 0-3 3v2a3 3 0 0 0 1.5 2.6A3 3 0 0 0 6 19a3 3 0 0 0 3 3" />
-        <path d="M15 2a3 3 0 0 1 3 3v1a3 3 0 0 1 3 3v2a3 3 0 0 1-1.5 2.6A3 3 0 0 1 18 19a3 3 0 0 1-3 3" />
-        <path d="M12 4v18" />
-      </svg>
-    </div>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/logo.png"
+      alt="Braintech"
+      width={28}
+      height={28}
+      className="size-7 rounded-md"
+    />
   );
 }
 
