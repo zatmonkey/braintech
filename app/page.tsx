@@ -217,7 +217,7 @@ function HowItWorks() {
     {
       n: "01",
       title: "Plug it in",
-      body: "A small device sits between your ISP box and your Wi-Fi (eero, Nest, Orbi, anything). 90 seconds. No app to install on your kid's devices.",
+      body: "Two cables: one from your internet, one to your Wi-Fi (eero, Nest, any router). About 90 seconds — and nothing to install on your kids' phones or tablets.",
     },
     {
       n: "02",
@@ -241,10 +241,58 @@ function HowItWorks() {
           How it works
         </div>
         <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
-          One device. One text thread. Every screen in your house.
+          One little box. Set up in 90 seconds.
         </h2>
+        <p className="mt-4 text-lg text-[var(--color-ink-soft)]">
+          It sits quietly between your internet and your Wi-Fi and looks after
+          every screen in the house. Nothing to install on your kids&apos;
+          devices. If you can plug in a lamp, you can set this up.
+        </p>
       </div>
-      <div className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-rule)] sm:grid-cols-3">
+
+      {/* Device + the two things that make it tick */}
+      <div className="mt-12 grid items-center gap-8 lg:grid-cols-2 lg:gap-12">
+        <div className="relative flex items-center justify-center overflow-hidden rounded-3xl border border-[var(--color-rule)] bg-gradient-to-b from-[#17171c] to-[var(--color-night)] p-8 sm:p-12">
+          {/* pulsing glow behind the device — the brain "at work" */}
+          <div className="brain-glow pointer-events-none absolute left-1/2 top-1/2 size-56 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(245,241,234,0.55),transparent_65%)]" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/device-hero.svg"
+            alt="The Braintech device — a small black box with a glowing brain and an orange button"
+            className="relative z-10 w-full max-w-sm"
+          />
+        </div>
+
+        <div className="flex flex-col gap-5">
+          <Feature
+            glyph="brain"
+            title="The brain glows when a brain's at work"
+            body="It lights up while your kid is learning or enjoying screen time they earned — and goes dark the rest of the time. A glance from across the room tells you what's happening."
+          />
+          <Feature
+            glyph="button"
+            title="One orange button kills the brainrot"
+            body="Press it and every screen in the house goes brainrot-free at once — across all their devices — until you text Braintech to turn it back on. Dinner, homework, bedtime: handled."
+          />
+        </div>
+      </div>
+
+      {/* Placement — friendly, no jargon */}
+      <div className="mt-8 rounded-3xl border border-[var(--color-rule)] bg-white p-6 text-center sm:p-8">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/device-placement.svg"
+          alt="Braintech sits between your internet and your Wi-Fi router"
+          className="mx-auto w-full max-w-2xl"
+        />
+        <p className="mx-auto mt-4 max-w-xl text-sm text-[var(--color-ink-soft)]">
+          One cable from your internet, one to your Wi-Fi. That&apos;s the whole
+          install — your network keeps working exactly as it does today.
+        </p>
+      </div>
+
+      {/* The 3 steps */}
+      <div className="mt-8 grid gap-px overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-rule)] sm:grid-cols-3">
         {steps.map((s) => (
           <div key={s.n} className="bg-white p-7 sm:p-8">
             <div className="font-mono text-xs text-[var(--color-ink-soft)]">
@@ -258,6 +306,46 @@ function HowItWorks() {
         ))}
       </div>
     </section>
+  );
+}
+
+function Feature({
+  glyph,
+  title,
+  body,
+}: {
+  glyph: "brain" | "button";
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="flex gap-4 rounded-2xl border border-[var(--color-rule)] bg-white p-5 sm:p-6">
+      <div className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-xl bg-[var(--color-ink)]">
+        {glyph === "brain" ? (
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="size-5 text-[var(--color-cream)]"
+          >
+            <path d="M9 2a3 3 0 0 0-3 3v1a3 3 0 0 0-3 3v2a3 3 0 0 0 1.5 2.6A3 3 0 0 0 6 19a3 3 0 0 0 3 3" />
+            <path d="M15 2a3 3 0 0 1 3 3v1a3 3 0 0 1 3 3v2a3 3 0 0 1-1.5 2.6A3 3 0 0 1 18 19a3 3 0 0 1-3 3" />
+            <path d="M12 4v18" />
+          </svg>
+        ) : (
+          <span className="size-4 rounded-full bg-[var(--color-accent)]" />
+        )}
+      </div>
+      <div>
+        <h3 className="font-semibold">{title}</h3>
+        <p className="mt-1 text-sm leading-relaxed text-[var(--color-ink-soft)]">
+          {body}
+        </p>
+      </div>
+    </div>
   );
 }
 

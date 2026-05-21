@@ -1,0 +1,60 @@
+<svg viewBox="295 388 490 440" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="lidGrad" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#33333a"/><stop offset="0.55" stop-color="#1c1c20"/><stop offset="1" stop-color="#121215"/>
+    </linearGradient>
+    <linearGradient id="frontGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d1d21"/><stop offset="1" stop-color="#0c0c0e"/>
+    </linearGradient>
+    <linearGradient id="rightGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#161619"/><stop offset="1" stop-color="#0a0a0c"/>
+    </linearGradient>
+    <linearGradient id="btnFlat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#dd6238"/><stop offset="1" stop-color="#c44e29"/>
+    </linearGradient>
+    <radialGradient id="lidLight" cx="0.5" cy="0.45" r="0.55">
+      <stop offset="0" stop-color="#f2f3ee" stop-opacity="0.22"/><stop offset="1" stop-color="#f2f3ee" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="bloom" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="7"/></filter>
+    <filter id="softblur" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="18"/></filter>
+    <filter id="shadow" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="22"/></filter>
+  </defs>
+
+  <ellipse cx="540" cy="782" rx="200" ry="30" fill="#141416" opacity="0.16" filter="url(#shadow)"/>
+
+  <polygon points="695,430 760,690 760,760 695,500" fill="url(#rightGrad)"/>
+  <polygon points="320,690 760,690 760,760 320,760" fill="url(#frontGrad)"/>
+  <rect x="320" y="690" width="440" height="3" fill="#3a3a40" opacity="0.6"/>
+  <text x="540" y="732" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="16" font-weight="700" fill="#6f6f77" letter-spacing="2">braintech</text>
+  <circle cx="619" cy="727" r="3.6" fill="#d15730"/>
+
+  <polygon points="385,430 695,430 760,690 320,690" fill="url(#lidGrad)"/>
+  <line x1="385" y1="430" x2="695" y2="430" stroke="#46464d" stroke-width="2.5" opacity="0.7"/>
+  <line x1="695" y1="430" x2="760" y2="690" stroke="#3a3a40" stroke-width="2" opacity="0.5"/>
+
+  <ellipse cx="540" cy="548" rx="175" ry="135" fill="url(#lidLight)" filter="url(#softblur)"/>
+
+  <g transform="translate(515 548) scale(1,0.82)">
+    <g filter="url(#bloom)" opacity="0.9">
+      <g fill="none" stroke="#f2f3ee" stroke-width="15" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M0,-70 C14,-80 36,-75 41,-57 C60,-62 71,-44 60,-31 C75,-25 74,-5 60,-1 C73,5 70,27 53,28 C60,43 49,57 35,50 C38,61 25,65 17,56 C13,62 4,60 0,51"/>
+        <path d="M0,-70 C-14,-80 -36,-75 -41,-57 C-60,-62 -71,-44 -60,-31 C-75,-25 -74,-5 -60,-1 C-73,5 -70,27 -53,28 C-60,43 -49,57 -35,50 C-38,61 -25,65 -17,56 C-13,62 -4,60 0,51"/>
+        <line x1="0" y1="-58" x2="0" y2="46"/>
+      </g>
+    </g>
+    <g fill="none" stroke="#f4f5f0" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M0,-70 C14,-80 36,-75 41,-57 C60,-62 71,-44 60,-31 C75,-25 74,-5 60,-1 C73,5 70,27 53,28 C60,43 49,57 35,50 C38,61 25,65 17,56 C13,62 4,60 0,51"/>
+      <path d="M0,-70 C-14,-80 -36,-75 -41,-57 C-60,-62 -71,-44 -60,-31 C-75,-25 -74,-5 -60,-1 C-73,5 -70,27 -53,28 C-60,43 -49,57 -35,50 C-38,61 -25,65 -17,56 C-13,62 -4,60 0,51"/>
+      <line x1="0" y1="-58" x2="0" y2="46"/>
+    </g>
+    <g fill="none" stroke="#f4f5f0" stroke-width="9" stroke-linecap="round">
+      <path d="M30,-34 C20,-34 18,-24 27,-20"/><path d="M-30,-34 C-20,-34 -18,-24 -27,-20"/>
+      <path d="M33,2 C23,2 21,12 30,16"/><path d="M-33,2 C-23,2 -21,12 -30,16"/>
+    </g>
+  </g>
+
+  <!-- flush lock button: flat disc set level into the lid -->
+  <ellipse cx="654" cy="596" rx="28" ry="23" fill="#0c0c0e"/>
+  <ellipse cx="654" cy="596" rx="26" ry="21.3" fill="url(#btnFlat)"/>
+  <ellipse cx="654" cy="596" rx="26" ry="21.3" fill="none" stroke="#9d3c1e" stroke-width="1" opacity="0.45"/>
+</svg>

@@ -1,0 +1,55 @@
+<svg viewBox="0 0 620 230" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="panelGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26262b"/><stop offset="0.15" stop-color="#18181c"/><stop offset="1" stop-color="#0d0d10"/>
+    </linearGradient>
+  </defs>
+
+  <!-- panel -->
+  <rect x="20" y="48" width="580" height="128" rx="18" fill="url(#panelGrad)"/>
+  <rect x="20" y="48" width="580" height="4" rx="2" fill="#3a3a40" opacity="0.7"/>
+
+  <!-- USB-C power -->
+  <rect x="78" y="103" width="44" height="18" rx="9" fill="#050506" stroke="#3a3a40" stroke-width="1.5"/>
+  <!-- reset pinhole -->
+  <circle cx="172" cy="112" r="5" fill="#050506" stroke="#3a3a40" stroke-width="1.2"/>
+
+  <!-- INTERNET: globe icon + RJ45 -->
+  <g transform="translate(268 112)" fill="none" stroke="#d6cebf" stroke-width="2.4">
+    <circle cx="0" cy="0" r="20"/>
+    <ellipse cx="0" cy="0" rx="8.5" ry="20"/>
+    <line x1="-20" y1="0" x2="20" y2="0"/>
+    <line x1="-17" y1="-11" x2="17" y2="-11"/>
+    <line x1="-17" y1="11" x2="17" y2="11"/>
+  </g>
+  <g transform="translate(360 112)">
+    <rect x="-34" y="-30" width="68" height="60" rx="8" fill="#34343b" stroke="#0a0a0c" stroke-width="1.5"/>
+    <path d="M-24,-20 H24 V12 H9 V20 H-9 V12 H-24 Z" fill="#060608"/>
+    <g stroke="#c9c2b4" stroke-width="1.6">
+      <line x1="-16" y1="-16" x2="-16" y2="-6"/><line x1="-10" y1="-16" x2="-10" y2="-6"/>
+      <line x1="-4" y1="-16" x2="-4" y2="-6"/><line x1="2" y1="-16" x2="2" y2="-6"/>
+      <line x1="8" y1="-16" x2="8" y2="-6"/><line x1="14" y1="-16" x2="14" y2="-6"/>
+    </g>
+    <rect x="-30" y="-26" width="9" height="6" rx="2" fill="#5a8f6b"/>
+    <rect x="21" y="-26" width="9" height="6" rx="2" fill="#d39a3f"/>
+  </g>
+
+  <!-- WIFI: wifi icon + RJ45 -->
+  <g transform="translate(448 112)" fill="none" stroke="#d6cebf" stroke-width="2.6" stroke-linecap="round">
+    <path d="M-18,-4 a26,26 0 0 1 36,0"/>
+    <path d="M-11,5 a16,16 0 0 1 22,0"/>
+    <path d="M-4,14 a6,6 0 0 1 8,0"/>
+    <circle cx="0" cy="20" r="2.4" fill="#d6cebf" stroke="none"/>
+  </g>
+  <g transform="translate(540 112)">
+    <rect x="-34" y="-30" width="68" height="60" rx="8" fill="#34343b" stroke="#0a0a0c" stroke-width="1.5"/>
+    <path d="M-24,-20 H24 V12 H9 V20 H-9 V12 H-24 Z" fill="#060608"/>
+    <g stroke="#c9c2b4" stroke-width="1.6">
+      <line x1="-16" y1="-16" x2="-16" y2="-6"/><line x1="-10" y1="-16" x2="-10" y2="-6"/>
+      <line x1="-4" y1="-16" x2="-4" y2="-6"/><line x1="2" y1="-16" x2="2" y2="-6"/>
+      <line x1="8" y1="-16" x2="8" y2="-6"/><line x1="14" y1="-16" x2="14" y2="-6"/>
+    </g>
+    <rect x="-30" y="-26" width="9" height="6" rx="2" fill="#5a8f6b"/>
+    <rect x="21" y="-26" width="9" height="6" rx="2" fill="#d39a3f"/>
+  </g>
+</svg>
