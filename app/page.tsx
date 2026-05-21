@@ -16,6 +16,7 @@ export default async function Home({
       <Hero variation={variation} />
       <Problem />
       <HowItWorks />
+      <ContentPartners />
       <Examples />
       <Pricing variation={variation} />
       <FAQ />
@@ -262,6 +263,69 @@ function HowItWorks() {
             </p>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function ContentPartners() {
+  const sources = [
+    { name: "Khan Academy", color: "#14BF96" },
+    { name: "TED", color: "#E62B1E" },
+    { name: "National Geographic", color: "#111111", box: "#FFCC00" },
+    { name: "HISTORY", color: "#111111" },
+    { name: "PBS", color: "#2638C4" },
+    { name: "Smithsonian", color: "#111111" },
+    { name: "NASA", color: "#0B3D91" },
+    { name: "Science", color: "#2B6CB0" },
+  ];
+  return (
+    <section className="border-y border-[var(--color-rule)] bg-white">
+      <div className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-24">
+        <div className="mx-auto max-w-2xl text-center">
+          <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
+            The smart part
+          </div>
+          <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
+            Screen time becomes time with the world&apos;s best teachers.
+          </h2>
+          <p className="mt-4 text-lg text-[var(--color-ink-soft)]">
+            Braintech turns the apps your kids beg for into a doorway. To unlock
+            them, they spend a few minutes with world-class learning — a TED
+            talk, a Khan Academy lesson, a National Geographic documentary.
+            Curiosity in, brainrot out.
+          </p>
+        </div>
+
+        <div className="mt-12 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-rule)] sm:grid-cols-4">
+          {sources.map((s) => (
+            <div
+              key={s.name}
+              className="flex h-24 items-center justify-center bg-[var(--color-cream)] px-4"
+            >
+              {s.box ? (
+                <span
+                  className="px-2 py-1 text-sm font-bold tracking-tight"
+                  style={{ color: s.color, boxShadow: `inset 0 0 0 3px ${s.box}` }}
+                >
+                  {s.name}
+                </span>
+              ) : (
+                <span
+                  className="text-center text-base font-bold tracking-tight"
+                  style={{ color: s.color }}
+                >
+                  {s.name}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+        <p className="mt-5 text-center text-xs text-[var(--color-ink-soft)]/70">
+          Braintech directs kids to publicly available educational content.
+          Names and marks belong to their respective owners and don&apos;t imply
+          endorsement.
+        </p>
       </div>
     </section>
   );
