@@ -56,7 +56,7 @@ export async function POST(req: Request) {
         },
       ],
       metadata: { email, phone },
-      payment_intent_data: { metadata: { email, phone } },
+      payment_intent_data: { metadata: { email, phone }, receipt_email: email },
       success_url: `${base}/reserved?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${base}/?reserve=cancelled#waitlist`,
       // Capture where to ship the device.
