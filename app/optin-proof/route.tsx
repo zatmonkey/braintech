@@ -60,14 +60,16 @@ export async function GET() {
                 <path d="M20 6 9 17l-5-5" />
               </svg>
             </div>
-            <div style={{ fontSize: 19, lineHeight: 1.5, color: "#4a443d" }}>
-              <span style={{ fontWeight: 700, color: "#1a1714" }}>Yes, text me.</span>{" "}
-              I agree to receive recurring automated text messages from Braintech
-              (Mutant Ventures LLC) at the mobile number I provide — a welcome
-              message and a few setup questions. Consent isn&apos;t a condition
-              of purchase. Message frequency varies; message and data rates may
-              apply. Reply STOP to unsubscribe, HELP for help. See our SMS Terms
-              &amp; Privacy Policy.
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 19, lineHeight: 1.5, color: "#4a443d" }}>
+              <div style={{ fontWeight: 700, color: "#1a1714" }}>Yes, text me.</div>
+              <div>
+                I agree to receive recurring automated text messages from
+                Braintech (Mutant Ventures LLC) at the mobile number I provide —
+                a welcome message and a few setup questions. Consent is not a
+                condition of purchase. Message frequency varies; message and
+                data rates may apply. Reply STOP to unsubscribe, HELP for help.
+                See our SMS Terms &amp; Privacy Policy.
+              </div>
             </div>
           </div>
 
