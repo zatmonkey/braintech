@@ -265,14 +265,14 @@ function HowItWorks() {
 
         <div className="flex flex-col gap-5">
           <Feature
+            glyph="button"
+            title="One button to stop brainrot"
+            body="Press it and every screen in the house goes brainrot-free at once — across all their devices — until you text Braintech to turn it back on. Dinner, homework, bedtime: handled."
+          />
+          <Feature
             glyph="brain"
             title="The brain glows when a brain's at work"
             body="It lights up while your kid is learning or enjoying screen time they earned — and goes dark the rest of the time. A glance from across the room tells you what's happening."
-          />
-          <Feature
-            glyph="button"
-            title="One orange button kills the brainrot"
-            body="Press it and every screen in the house goes brainrot-free at once — across all their devices — until you text Braintech to turn it back on. Dinner, homework, bedtime: handled."
           />
         </div>
       </div>
