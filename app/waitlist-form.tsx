@@ -224,11 +224,12 @@ export function WaitlistForm({
             className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]"
           />
           <span>
-            I agree to receive recurring automated texts from Braintech (Mutant
-            Ventures LLC) at the number provided — a welcome message and a few
-            onboarding questions. Consent is not a condition of purchase. Message
-            frequency varies. Msg &amp; data rates may apply. Reply STOP to opt
-            out, HELP for help. See our{" "}
+            <strong>Yes, text me.</strong> I agree to receive recurring
+            automated text messages from Braintech (Mutant Ventures LLC) at the
+            mobile number I provide — a welcome message and a few setup
+            questions. Consent isn&apos;t a condition of purchase. Message
+            frequency varies; message and data rates may apply. Reply STOP to
+            unsubscribe, HELP for help. See our{" "}
             <a href="/terms" className="underline">
               SMS Terms
             </a>{" "}

@@ -61,12 +61,13 @@ export async function GET() {
               </svg>
             </div>
             <div style={{ fontSize: 19, lineHeight: 1.5, color: "#4a443d" }}>
-              I agree to receive recurring automated texts from Braintech (Mutant
-              Ventures LLC) at the number provided — a welcome message and a few
-              onboarding questions. Consent is not a condition of purchase.
-              Message frequency varies. Msg &amp; data rates may apply. Reply
-              STOP to opt out, HELP for help. See our SMS Terms &amp; Privacy
-              Policy.
+              <span style={{ fontWeight: 700, color: "#1a1714" }}>Yes, text me.</span>{" "}
+              I agree to receive recurring automated text messages from Braintech
+              (Mutant Ventures LLC) at the mobile number I provide — a welcome
+              message and a few setup questions. Consent isn&apos;t a condition
+              of purchase. Message frequency varies; message and data rates may
+              apply. Reply STOP to unsubscribe, HELP for help. See our SMS Terms
+              &amp; Privacy Policy.
             </div>
           </div>
 
