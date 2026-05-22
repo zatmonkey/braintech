@@ -252,9 +252,9 @@ function HowItWorks() {
 
       {/* Device + the two things that make it tick */}
       <div className="mt-12 grid items-center gap-8 lg:grid-cols-2 lg:gap-12">
-        <div className="relative flex items-center justify-center overflow-hidden rounded-3xl border border-[var(--color-rule)] bg-gradient-to-b from-[#17171c] to-[var(--color-night)] p-8 sm:p-12">
-          {/* pulsing glow behind the device — the brain "at work" */}
-          <div className="brain-glow pointer-events-none absolute left-1/2 top-1/2 size-56 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(245,241,234,0.55),transparent_65%)]" />
+        <div className="relative flex items-center justify-center overflow-hidden rounded-3xl border border-[var(--color-rule)] bg-gradient-to-b from-white to-[var(--color-cream)] p-8 sm:p-12">
+          {/* soft warm halo behind the device — a hint of the brain "at work" */}
+          <div className="brain-glow pointer-events-none absolute left-1/2 top-[42%] size-64 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(217,79,26,0.16),transparent_68%)]" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/device-hero.svg"
