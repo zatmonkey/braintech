@@ -129,11 +129,6 @@ export function WaitlistForm({
         <div className="inline-flex items-center gap-2 rounded-full bg-[var(--color-accent)]/10 px-3 py-1 text-xs font-medium text-[var(--color-accent)]">
           <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
           You&apos;re on the list
-          {state.position ? (
-            <span className="text-[var(--color-ink-soft)]">
-              · #{state.position} of 1,000
-            </span>
-          ) : null}
         </div>
         <h3 className="serif mt-4 text-2xl leading-snug sm:text-3xl">
           Lock in one of the first 1,000 — now.
