@@ -11,6 +11,7 @@ type Payload = {
   phone?: string;
   source?: string;
   variation?: string;
+  smsConsent?: boolean;
 };
 
 function normalizeEmail(raw: string) {
@@ -67,6 +68,7 @@ async function persistToPostgres(entry: {
   phone: string;
   source: string;
   variation: string;
+  smsConsent: boolean;
   ua: string;
   ip: string;
 }): Promise<number | null> {
@@ -83,18 +85,24 @@ async function persistToPostgres(entry: {
         phone       TEXT NOT NULL,
         source      TEXT,
         variation   TEXT,
+        sms_consent BOOLEAN NOT NULL DEFAULT FALSE,
+        sms_consent_at TIMESTAMPTZ,
         user_agent  TEXT,
         ip          TEXT,
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `;
     await sql`ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS variation TEXT;`;
+    await sql`ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS sms_consent BOOLEAN NOT NULL DEFAULT FALSE;`;
+    await sql`ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS sms_consent_at TIMESTAMPTZ;`;
     const rows = (await sql`
-      INSERT INTO waitlist (email, phone, source, variation, user_agent, ip)
-      VALUES (${entry.email}, ${entry.phone}, ${entry.source}, ${entry.variation}, ${entry.ua}, ${entry.ip})
+      INSERT INTO waitlist (email, phone, source, variation, sms_consent, sms_consent_at, user_agent, ip)
+      VALUES (${entry.email}, ${entry.phone}, ${entry.source}, ${entry.variation}, ${entry.smsConsent}, ${entry.smsConsent ? new Date().toISOString() : null}, ${entry.ua}, ${entry.ip})
       ON CONFLICT (email) DO UPDATE SET
         phone = EXCLUDED.phone,
-        variation = EXCLUDED.variation
+        variation = EXCLUDED.variation,
+        sms_consent = EXCLUDED.sms_consent OR waitlist.sms_consent,
+        sms_consent_at = COALESCE(waitlist.sms_consent_at, EXCLUDED.sms_consent_at)
       RETURNING id;
     `) as { id: number }[];
     return rows[0]?.id ?? null;
@@ -151,6 +159,7 @@ export async function POST(req: Request) {
   const phone = normalizePhone(body.phone ?? "");
   const source = (body.source ?? "/").slice(0, 200);
   const variation = (body.variation ?? "0").toString().slice(0, 32);
+  const smsConsent = body.smsConsent === true;
 
   if (!isValidEmail(email)) {
     return NextResponse.json({ error: "Invalid email" }, { status: 400 });
@@ -165,7 +174,7 @@ export async function POST(req: Request) {
     req.headers.get("x-real-ip") ??
     "";
 
-  const entry = { email, phone, source, variation, ua, ip };
+  const entry = { email, phone, source, variation, smsConsent, ua, ip };
 
   const [id] = await Promise.all([
     persistToPostgres(entry),
@@ -177,12 +186,15 @@ export async function POST(req: Request) {
     phone,
     variation,
     source,
+    smsConsent,
     id,
     persisted: id !== null,
   });
 
-  // Kick off the SMS discovery interview (best-effort; never blocks the signup).
-  await startSmsConversation(phone, email);
+  // Only text people who explicitly opted in (consent is optional, never required).
+  if (smsConsent) {
+    await startSmsConversation(phone, email);
+  }
 
   return NextResponse.json({
     ok: true,

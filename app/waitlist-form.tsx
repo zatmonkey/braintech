@@ -57,6 +57,7 @@ export function WaitlistForm({
     const payload = {
       email: String(data.get("email") ?? "").trim(),
       phone: String(data.get("phone") ?? "").trim(),
+      smsConsent: Boolean(data.get("sms_consent")),
       variation: variationId,
       source:
         typeof window !== "undefined"
@@ -220,16 +221,15 @@ export function WaitlistForm({
           <input
             type="checkbox"
             name="sms_consent"
-            required
             className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]"
           />
           <span>
-            <strong>Yes, text me.</strong> I agree to receive recurring
-            automated text messages from Braintech (Mutant Ventures LLC) at the
-            mobile number I provide — a welcome message and a few setup
-            questions. Consent isn&apos;t a condition of purchase. Message
-            frequency varies; message and data rates may apply. Reply STOP to
-            unsubscribe, HELP for help. See our{" "}
+            <strong>Yes, text me (optional).</strong> I agree to receive
+            recurring automated text messages from Braintech (Mutant Ventures
+            LLC) at the mobile number I provide — a welcome message and a few
+            setup questions. Consent is not a condition of purchase or joining
+            the waitlist. Message frequency varies; message and data rates may
+            apply. Reply STOP to unsubscribe, HELP for help. See our{" "}
             <a href="/terms" className="underline">
               SMS Terms
             </a>{" "}
