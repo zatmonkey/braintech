@@ -1,4 +1,5 @@
 import { WaitlistForm } from "./waitlist-form";
+import { ChatWidget } from "./chat-widget";
 import { getVariation, type Variation } from "./variations";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -21,6 +22,7 @@ export default async function Home({
       <Pricing variation={variation} />
       <FAQ />
       <Footer />
+      <ChatWidget />
     </main>
   );
 }

@@ -59,3 +59,36 @@ export async function ensureSmsSchema(
   await sql`CREATE INDEX IF NOT EXISTS sms_messages_phone_idx ON sms_messages (phone, created_at);`;
   schemaReady = true;
 }
+
+let chatSchemaReady = false;
+
+/**
+ * Browser demo-chat tables:
+ *  - chat_sessions: one row per browser session (memory blob + captured email)
+ *  - chat_messages: full transcript
+ */
+export async function ensureChatSchema(
+  sql: NeonQueryFunction<false, false>,
+): Promise<void> {
+  if (chatSchemaReady) return;
+  await sql`
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      session_id  TEXT PRIMARY KEY,
+      email       TEXT,
+      memory      TEXT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id          SERIAL PRIMARY KEY,
+      session_id  TEXT NOT NULL,
+      role        TEXT NOT NULL,
+      content     TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS chat_messages_session_idx ON chat_messages (session_id, created_at);`;
+  chatSchemaReady = true;
+}
