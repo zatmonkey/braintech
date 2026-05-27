@@ -12,6 +12,13 @@ export const metadata: Metadata = {
 };
 
 type Op = { type?: string; config?: string; section_type?: string; values?: Record<string, string> };
+type Client = { hostname?: string; ip?: string; mac?: string; connected?: boolean };
+type Telemetry = {
+  firmware?: string;
+  uptime_sec?: number;
+  wan_up?: boolean;
+  clients?: Client[];
+};
 type DeviceRow = {
   device_id: string;
   label: string | null;
@@ -21,11 +28,23 @@ type DeviceRow = {
   reported_version: number;
   last_status: string | null;
   last_seen: string | null;
+  telemetry: Telemetry | null;
 };
 
 function online(lastSeen: string | null): boolean {
   if (!lastSeen) return false;
   return Date.now() - new Date(lastSeen).getTime() < 120_000; // 2 min
+}
+
+function fmtUptime(s?: number): string {
+  if (!s) return "—";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function realClients(t: Telemetry | null): Client[] {
+  return (t?.clients ?? []).filter((c) => c.ip && !c.ip.startsWith("fe80"));
 }
 
 function ruleNames(desired: Op[] | null): string[] {
@@ -46,7 +65,7 @@ export default async function Dashboard() {
   if (sql) {
     await ensureDeviceSchema(sql);
     devices = (await sql`
-      SELECT device_id, label, mac, desired, desired_version, reported_version, last_status, last_seen
+      SELECT device_id, label, mac, desired, desired_version, reported_version, last_status, last_seen, telemetry
       FROM devices WHERE owner_email = ${email} ORDER BY created_at;
     `) as DeviceRow[];
     const leadRows = (await sql`SELECT memory FROM leads WHERE email = ${email};`) as {
@@ -96,9 +115,11 @@ export default async function Dashboard() {
                   </div>
                   <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
                     <Stat label="Config" value={inSync ? "In sync ✓" : "Updating…"} />
-                    <Stat label="Last applied" value={d.last_status ?? "—"} />
+                    <Stat label="WAN" value={d.telemetry?.wan_up ? "Up" : "Down"} />
+                    <Stat label="Firmware" value={d.telemetry?.firmware ?? "—"} />
+                    <Stat label="Uptime" value={fmtUptime(d.telemetry?.uptime_sec)} />
+                    <Stat label="Connected" value={`${realClients(d.telemetry).length} devices`} />
                     <Stat label="Rules active" value={String(ruleNames(d.desired).length)} />
-                    <Stat label="Last seen" value={d.last_seen ? new Date(d.last_seen).toLocaleString() : "never"} />
                   </dl>
                 </div>
               );
@@ -106,6 +127,33 @@ export default async function Dashboard() {
           </div>
         )}
       </section>
+
+      {/* Connected devices */}
+      {devices.length > 0 && (
+        <section>
+          <h2 className="serif text-2xl tracking-[-0.01em]">Connected devices</h2>
+          <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
+            {(() => {
+              const clients = devices.flatMap((d) => realClients(d.telemetry));
+              if (clients.length === 0)
+                return <p className="text-[var(--color-ink-soft)]">No devices reported yet — your Braintech device updates this every minute.</p>;
+              return (
+                <ul className="divide-y divide-[var(--color-rule)]">
+                  {clients.map((c, i) => (
+                    <li key={i} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className={`size-2 shrink-0 rounded-full ${c.connected ? "bg-emerald-500" : "bg-zinc-300"}`} />
+                        <span className="truncate font-medium">{c.hostname || "Unnamed device"}</span>
+                      </div>
+                      <span className="shrink-0 font-mono text-xs text-[var(--color-ink-soft)]">{c.ip}</span>
+                    </li>
+                  ))}
+                </ul>
+              );
+            })()}
+          </div>
+        </section>
+      )}
 
       {/* Rules summary */}
       <section>
@@ -166,7 +214,7 @@ export default async function Dashboard() {
       <section className="pb-4">
         <h2 className="serif text-2xl tracking-[-0.01em]">Chat with Bri</h2>
         <div className="mt-3">
-          <AccountChat sessionId={`acct:${email}`} />
+          <AccountChat />
         </div>
       </section>
     </main>

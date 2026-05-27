@@ -27,7 +27,7 @@ export function LogoutButton() {
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-export function AccountChat({ sessionId }: { sessionId: string }) {
+export function AccountChat() {
   const [messages, setMessages] = useState<Msg[]>([
     {
       role: "assistant",
@@ -50,10 +50,10 @@ export function AccountChat({ sessionId }: { sessionId: string }) {
     setMessages((m) => [...m, { role: "user", content: text }]);
     setSending(true);
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch("/api/account/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, message: text }),
+        body: JSON.stringify({ message: text }),
       });
       const data = await res.json().catch(() => ({}));
       setMessages((m) => [
