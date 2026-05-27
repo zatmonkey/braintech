@@ -164,9 +164,7 @@ export async function POST(req: Request) {
   if (!isValidEmail(email)) {
     return NextResponse.json({ error: "Invalid email" }, { status: 400 });
   }
-  if (phone.replace(/\D/g, "").length < 7) {
-    return NextResponse.json({ error: "Invalid phone" }, { status: 400 });
-  }
+  // Phone is optional now (email-only signup to reduce friction).
 
   const ua = req.headers.get("user-agent")?.slice(0, 300) ?? "";
   const ip =

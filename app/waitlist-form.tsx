@@ -11,7 +11,7 @@ function fbqTrack(event: string, params?: Record<string, unknown>) {
 type State =
   | { kind: "idle" }
   | { kind: "submitting" }
-  | { kind: "success"; position?: number; email: string; phone: string }
+  | { kind: "success"; position?: number; email: string }
   | { kind: "error"; message: string };
 
 export function WaitlistForm({
@@ -24,7 +24,7 @@ export function WaitlistForm({
   const [state, setState] = useState<State>({ kind: "idle" });
   const [reserving, setReserving] = useState(false);
 
-  async function startCheckout(email: string, phone: string) {
+  async function startCheckout(email: string) {
     setReserving(true);
     sendGAEvent("event", "reserve_click", { variation: variationId });
     fbqTrack("InitiateCheckout", {
@@ -36,7 +36,7 @@ export function WaitlistForm({
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, phone }),
+        body: JSON.stringify({ email }),
       });
       const data = await res.json().catch(() => ({}));
       if (data?.url) {
@@ -56,8 +56,6 @@ export function WaitlistForm({
     const data = new FormData(form);
     const payload = {
       email: String(data.get("email") ?? "").trim(),
-      phone: String(data.get("phone") ?? "").trim(),
-      smsConsent: Boolean(data.get("sms_consent")),
       variation: variationId,
       source:
         typeof window !== "undefined"
@@ -67,10 +65,6 @@ export function WaitlistForm({
 
     if (!payload.email || !payload.email.includes("@")) {
       setState({ kind: "error", message: "Enter a valid email." });
-      return;
-    }
-    if (!payload.phone || payload.phone.replace(/\D/g, "").length < 7) {
-      setState({ kind: "error", message: "Enter a valid phone number." });
       return;
     }
 
@@ -105,7 +99,6 @@ export function WaitlistForm({
         kind: "success",
         position: body?.position,
         email: payload.email,
-        phone: payload.phone,
       });
       form.reset();
     } catch {
@@ -141,7 +134,7 @@ export function WaitlistForm({
         </p>
         <button
           type="button"
-          onClick={() => startCheckout(state.email, state.phone)}
+          onClick={() => startCheckout(state.email)}
           disabled={reserving}
           data-cta="reserve-deposit"
           data-variation={variationId}
@@ -154,7 +147,7 @@ export function WaitlistForm({
           first batch — refundable anytime before your device ships.
         </p>
         <p className="mt-4 border-t border-[var(--color-rule)] pt-4 text-sm text-[var(--color-ink-soft)]">
-          Not ready? You&apos;re still on the list — we&apos;ll text you before
+          Not ready? You&apos;re still on the list — we&apos;ll email you before
           the batch ships.
         </p>
       </div>
@@ -183,22 +176,6 @@ export function WaitlistForm({
             className="mt-1.5 w-full rounded-lg border border-[var(--color-rule)] bg-[var(--color-cream)] px-4 py-3 text-base outline-none transition focus:border-[var(--color-ink)] focus:bg-white"
           />
         </label>
-        <label className="block">
-          <span className="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
-            Mobile number{" "}
-            <span className="font-normal normal-case text-[var(--color-ink-soft)]/70">
-              (we&apos;ll text you a demo)
-            </span>
-          </span>
-          <input
-            name="phone"
-            type="tel"
-            required
-            autoComplete="tel"
-            placeholder="+1 (555) 123-4567"
-            className="mt-1.5 w-full rounded-lg border border-[var(--color-rule)] bg-[var(--color-cream)] px-4 py-3 text-base outline-none transition focus:border-[var(--color-ink)] focus:bg-white"
-          />
-        </label>
         <button
           type="submit"
           disabled={state.kind === "submitting"}
@@ -217,29 +194,6 @@ export function WaitlistForm({
           No charge today. Founding members lock in $249/year for life. We&apos;ll
           confirm before your card is ever touched.
         </p>
-        <label className="flex items-start gap-2 text-[11px] leading-relaxed text-[var(--color-ink-soft)]/80">
-          <input
-            type="checkbox"
-            name="sms_consent"
-            className="mt-0.5 size-4 shrink-0 accent-[var(--color-accent)]"
-          />
-          <span>
-            <strong>Yes, text me (optional).</strong> I agree to receive
-            recurring automated text messages from Braintech (Mutant Ventures
-            LLC) at the mobile number I provide — a welcome message and a few
-            setup questions. Consent is not a condition of purchase or joining
-            the waitlist. Message frequency varies; message and data rates may
-            apply. Reply STOP to unsubscribe, HELP for help. See our{" "}
-            <a href="/terms" className="underline">
-              SMS Terms
-            </a>{" "}
-            &amp;{" "}
-            <a href="/privacy" className="underline">
-              Privacy Policy
-            </a>
-            .
-          </span>
-        </label>
       </div>
     </form>
   );
