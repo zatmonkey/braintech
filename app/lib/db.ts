@@ -121,6 +121,8 @@ export async function ensureDeviceSchema(
     );
   `;
   await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS owner_email TEXT;`;
+  await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS telemetry JSONB;`;
+  await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS telemetry_at TIMESTAMPTZ;`;
   deviceSchemaReady = true;
 }
 

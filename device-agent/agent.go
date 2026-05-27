@@ -30,6 +30,7 @@ func NewAgent(cfg Config) *Agent {
 // Run reconciles forever: long-poll → verify → apply → report, with capped
 // exponential backoff on transport errors. It returns when ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) {
+	go a.telemetryLoop(ctx) // report network/system state every minute
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {
@@ -145,6 +146,36 @@ func (a *Agent) report(ctx context.Context, rep Report) error {
 		return fmt.Errorf("report HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (a *Agent) telemetryLoop(ctx context.Context) {
+	for {
+		a.reportTelemetry(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(60 * time.Second):
+		}
+	}
+}
+
+func (a *Agent) reportTelemetry(ctx context.Context) {
+	payload, err := json.Marshal(collectTelemetry(a.cfg.DeviceID))
+	if err != nil {
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.ServerURL+"/api/device/telemetry", bytes.NewReader(payload))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	a.auth(req)
+	resp, err := a.http.Do(req)
+	if err != nil {
+		return
+	}
+	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	resp.Body.Close()
 }
 
 func (a *Agent) auth(req *http.Request) {
