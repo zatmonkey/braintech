@@ -1,0 +1,13 @@
+# Braintech agent config — install to /etc/braintech/agent.conf
+# Provisioned per device. The PSK is this device's pre-shared key: it is used
+# both to authenticate to the server (bearer) and to verify the HMAC signature
+# on every instruction. Keep it secret (chmod 600).
+
+BT_SERVER_URL=https://getbraintech.com
+BT_DEVICE_ID=dev_REPLACE_ME
+BT_PSK=REPLACE_WITH_32_BYTE_HEX_SECRET
+
+# Allow the raw "exec" op (run arbitrary commands from signed instructions).
+# Leave 0 unless you really need it — UCI/service/file/package ops cover almost
+# everything and are far safer.
+BT_ALLOW_EXEC=0
