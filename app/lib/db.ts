@@ -115,9 +115,30 @@ export async function ensureDeviceSchema(
       reported_version INTEGER NOT NULL DEFAULT 0,
       last_status      TEXT,
       last_seen        TIMESTAMPTZ,
+      owner_email      TEXT,
       created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
+  await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS owner_email TEXT;`;
   deviceSchemaReady = true;
+}
+
+let authSchemaReady = false;
+
+/** One-time passcodes for parent email login. */
+export async function ensureAuthSchema(
+  sql: NeonQueryFunction<false, false>,
+): Promise<void> {
+  if (authSchemaReady) return;
+  await sql`
+    CREATE TABLE IF NOT EXISTS otps (
+      email       TEXT PRIMARY KEY,
+      code_hash   TEXT NOT NULL,
+      expires_at  TIMESTAMPTZ NOT NULL,
+      attempts    INTEGER NOT NULL DEFAULT 0,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  authSchemaReady = true;
 }

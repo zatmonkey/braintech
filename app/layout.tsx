@@ -43,6 +43,11 @@ export const metadata: Metadata = {
       "Text-message parental control that turns screen time into earned learning time.",
   },
   robots: { index: true, follow: true },
+  appleWebApp: {
+    capable: true,
+    title: "Braintech",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export const viewport: Viewport = {
