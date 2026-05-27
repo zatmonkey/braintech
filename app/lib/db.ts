@@ -92,3 +92,32 @@ export async function ensureChatSchema(
   await sql`CREATE INDEX IF NOT EXISTS chat_messages_session_idx ON chat_messages (session_id, created_at);`;
   chatSchemaReady = true;
 }
+
+let deviceSchemaReady = false;
+
+/**
+ * Device registry / desired-state store for the OpenWrt agent fleet.
+ * `desired` holds the ops array; `desired_version` is bumped each change.
+ * `psk` is the per-device pre-shared key (bearer auth + HMAC signing).
+ */
+export async function ensureDeviceSchema(
+  sql: NeonQueryFunction<false, false>,
+): Promise<void> {
+  if (deviceSchemaReady) return;
+  await sql`
+    CREATE TABLE IF NOT EXISTS devices (
+      device_id        TEXT PRIMARY KEY,
+      psk              TEXT NOT NULL,
+      label            TEXT,
+      mac              TEXT,
+      desired          JSONB,
+      desired_version  INTEGER NOT NULL DEFAULT 0,
+      reported_version INTEGER NOT NULL DEFAULT 0,
+      last_status      TEXT,
+      last_seen        TIMESTAMPTZ,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  deviceSchemaReady = true;
+}
