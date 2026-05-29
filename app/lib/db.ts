@@ -144,3 +144,40 @@ export async function ensureAuthSchema(
   `;
   authSchemaReady = true;
 }
+
+let accountSchemaReady = false;
+
+/** Per-account tables for renamed clients and applied rules. */
+export async function ensureAccountSchema(
+  sql: NeonQueryFunction<false, false>,
+): Promise<void> {
+  if (accountSchemaReady) return;
+  await sql`
+    CREATE TABLE IF NOT EXISTS client_labels (
+      owner_email TEXT NOT NULL,
+      mac         TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (owner_email, mac)
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS account_rules (
+      rule_id     TEXT PRIMARY KEY,
+      owner_email TEXT NOT NULL,
+      device_id   TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      rule_type   TEXT NOT NULL,
+      summary     TEXT,
+      params      JSONB,
+      ops         JSONB,
+      active      BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS account_rules_owner_idx ON account_rules(owner_email, active);`;
+  await sql`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS pending_proposal JSONB;`;
+  accountSchemaReady = true;
+}

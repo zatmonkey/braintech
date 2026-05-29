@@ -37,6 +37,13 @@ export async function POST(req: Request) {
   const { delivered } = await sendOtpEmail(email, code);
 
   // In dev (no email provider), surface the code so login is testable.
+  // Never echo the code back in production — even if delivery fails, fail closed.
+  if (!delivered && process.env.NODE_ENV === "production") {
+    return NextResponse.json(
+      { error: "Couldn't send code right now — try again in a moment." },
+      { status: 502 },
+    );
+  }
   return NextResponse.json({
     ok: true,
     delivered,

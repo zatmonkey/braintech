@@ -325,28 +325,106 @@ The CONTEXT block below has their device status, the devices currently connected
 These take effect through the on-device agent (applied as router firewall/DNS config).
 
 # Acting on requests
-When the parent asks to change something: pick the relevant device from the connected list, then describe the EXACT rule you'd set in plain language (which device, what's blocked/allowed, any schedule or earn-it condition). Then say it's queued for their confirmation. Do NOT claim a change is already live — applying to the device is being finalized.
+When the parent asks for a change, always do this in two steps:
+
+1. Pick the right device from the Connected list (use MAC) or domains. Call **propose_rule** with concrete params (rule_type, target_mac or domains, a short hyphenated name like 'pause-maya-ipad', and a one-sentence summary). Then in WORDS tell the parent exactly what you'll do and ask them to confirm with a "yes" (or to tell you what to tweak). Do NOT claim it's done.
+2. When they confirm, call **apply_pending_rule** — that's what actually pushes the rule to their router. If they back out, call **cancel_pending_rule**.
+
+Rule types you can use right now:
+- **pause_device**: blocks ALL traffic from one device by MAC. Use for "pause Maya's iPad", "no internet for Theo right now", kill switches.
+- **block_domains_network**: blocks specific domains for the whole network via DNS. Use for "block TikTok" (domains: tiktok.com, tiktokcdn.com, musical.ly), "block YouTube" (youtube.com, youtu.be, ytimg.com, googlevideo.com), etc. Be thorough — list every domain that matters for the app.
+
+When the parent identifies an unnamed device ("the one at 192.168.4.99 is Maya's iPad"), call **set_client_name** with its MAC + the friendly name so it's labeled everywhere.
+
+The CONTEXT below shows any **pending proposal** waiting for confirmation. If one is pending and the parent says yes, call apply_pending_rule; if they say no/change, call cancel_pending_rule before proposing a new one.
 
 # Style & guardrails
 Warm, concise, concrete. Only discuss their network, kids, screens, and Braintech. One question or suggestion at a time.`;
 
+export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: "set_client_name",
+    description:
+      "Save a friendly name for a device on the parent's network. Match by MAC from the Connected devices list.",
+    input_schema: {
+      type: "object",
+      properties: { mac: { type: "string" }, name: { type: "string" } },
+      required: ["mac", "name"],
+    },
+  },
+  {
+    name: "propose_rule",
+    description:
+      "Propose a rule to the parent for confirmation. Use rule_type 'pause_device' with target_mac to block ALL traffic from one device by MAC (kill switch). Use 'block_domains_network' with domains[] to block apps/sites for the whole network via DNS (e.g., TikTok → ['tiktok.com','tiktokcdn.com']). Pick a short hyphenated name (e.g., 'pause-maya-ipad') and a one-sentence summary. After calling this, tell the parent what you'll do and ask them to confirm — do NOT apply yet.",
+    input_schema: {
+      type: "object",
+      properties: {
+        rule_type: { type: "string", enum: ["pause_device", "block_domains_network"] },
+        name: { type: "string" },
+        summary: { type: "string" },
+        target_mac: { type: "string" },
+        domains: { type: "array", items: { type: "string" } },
+      },
+      required: ["rule_type", "name", "summary"],
+    },
+  },
+  {
+    name: "apply_pending_rule",
+    description:
+      "Apply the previously proposed rule. Call this ONLY after the parent has confirmed (yes/apply/do it).",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "cancel_pending_rule",
+    description: "Discard the pending proposal (the parent declined or wants something different).",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+];
+
 export async function runAccountChatTurn(opts: {
   history: Anthropic.MessageParam[];
   context: string;
+  tools?: Anthropic.Tool[];
+  onTool?: (name: string, input: unknown) => Promise<string>;
 }): Promise<{ reply: string }> {
-  const resp = await getClient().messages.create({
-    model: MODEL,
-    max_tokens: 500,
-    system: [
-      { type: "text", text: ACCOUNT_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
-      { type: "text", text: `CONTEXT (live, this parent's setup):\n${opts.context}` },
-    ],
-    messages: opts.history,
-  });
-  const reply = resp.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join(" ")
-    .trim();
+  const messages: Anthropic.MessageParam[] = [...opts.history];
+  let reply = "";
+
+  for (let i = 0; i < 5; i++) {
+    const resp = await getClient().messages.create({
+      model: MODEL,
+      max_tokens: 700,
+      system: [
+        { type: "text", text: ACCOUNT_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        { type: "text", text: `CONTEXT (live, this parent's setup):\n${opts.context}` },
+      ],
+      ...(opts.tools && opts.tools.length
+        ? { tools: opts.tools, tool_choice: { type: "auto" as const } }
+        : {}),
+      messages,
+    });
+    messages.push({ role: "assistant", content: resp.content });
+
+    const text = resp.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join(" ")
+      .trim();
+    if (text) reply = text;
+
+    const toolUses = resp.content.filter(
+      (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+    );
+    if (resp.stop_reason === "tool_use" && toolUses.length > 0 && opts.onTool) {
+      const results: Anthropic.ToolResultBlockParam[] = [];
+      for (const tu of toolUses) {
+        const out = await opts.onTool(tu.name, tu.input);
+        results.push({ type: "tool_result", tool_use_id: tu.id, content: out });
+      }
+      messages.push({ role: "user", content: results });
+      continue;
+    }
+    break;
+  }
   return { reply: reply || "Got it — what would you like to set up?" };
 }

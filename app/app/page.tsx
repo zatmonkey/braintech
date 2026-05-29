@@ -2,8 +2,14 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { verifySession, sessionCookie } from "@/app/lib/auth";
-import { getSql, ensureDeviceSchema } from "@/app/lib/db";
-import { SWRegister, LogoutButton, AccountChat } from "./dashboard-client";
+import { getSql, ensureDeviceSchema, ensureAccountSchema } from "@/app/lib/db";
+import {
+  SWRegister,
+  LogoutButton,
+  AccountChat,
+  ClientRow,
+  RuleRow,
+} from "./dashboard-client";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -30,6 +36,13 @@ type DeviceRow = {
   last_seen: string | null;
   telemetry: Telemetry | null;
 };
+type LabelRow = { mac: string; name: string };
+type ActiveRule = {
+  rule_id: string;
+  name: string;
+  rule_type: string;
+  summary: string | null;
+};
 
 function online(lastSeen: string | null): boolean {
   if (!lastSeen) return false;
@@ -47,13 +60,6 @@ function realClients(t: Telemetry | null): Client[] {
   return (t?.clients ?? []).filter((c) => c.ip && !c.ip.startsWith("fe80"));
 }
 
-function ruleNames(desired: Op[] | null): string[] {
-  if (!desired) return [];
-  return desired
-    .filter((o) => o.config === "firewall" && o.section_type === "rule" && o.values?.name)
-    .map((o) => o.values!.name);
-}
-
 export default async function Dashboard() {
   const store = await cookies();
   const email = verifySession(store.get(sessionCookie.name)?.value);
@@ -61,13 +67,24 @@ export default async function Dashboard() {
 
   const sql = getSql();
   let devices: DeviceRow[] = [];
+  let labels = new Map<string, string>();
+  let activeRules: ActiveRule[] = [];
   let memory = "";
   if (sql) {
     await ensureDeviceSchema(sql);
+    await ensureAccountSchema(sql);
     devices = (await sql`
       SELECT device_id, label, mac, desired, desired_version, reported_version, last_status, last_seen, telemetry
       FROM devices WHERE owner_email = ${email} ORDER BY created_at;
     `) as DeviceRow[];
+    const labelRows = (await sql`
+      SELECT mac, name FROM client_labels WHERE owner_email = ${email};
+    `) as LabelRow[];
+    labels = new Map(labelRows.map((l) => [l.mac.toLowerCase(), l.name]));
+    activeRules = (await sql`
+      SELECT rule_id, name, rule_type, summary FROM account_rules
+      WHERE owner_email = ${email} AND active = TRUE ORDER BY created_at;
+    `) as ActiveRule[];
     const leadRows = (await sql`SELECT memory FROM leads WHERE email = ${email};`) as {
       memory: string | null;
     }[];
@@ -119,7 +136,7 @@ export default async function Dashboard() {
                     <Stat label="Firmware" value={d.telemetry?.firmware ?? "—"} />
                     <Stat label="Uptime" value={fmtUptime(d.telemetry?.uptime_sec)} />
                     <Stat label="Connected" value={`${realClients(d.telemetry).length} devices`} />
-                    <Stat label="Rules active" value={String(ruleNames(d.desired).length)} />
+                    <Stat label="Rules active" value={String(activeRules.length)} />
                   </dl>
                 </div>
               );
@@ -139,15 +156,19 @@ export default async function Dashboard() {
                 return <p className="text-[var(--color-ink-soft)]">No devices reported yet — your Braintech device updates this every minute.</p>;
               return (
                 <ul className="divide-y divide-[var(--color-rule)]">
-                  {clients.map((c, i) => (
-                    <li key={i} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className={`size-2 shrink-0 rounded-full ${c.connected ? "bg-emerald-500" : "bg-zinc-300"}`} />
-                        <span className="truncate font-medium">{c.hostname || "Unnamed device"}</span>
-                      </div>
-                      <span className="shrink-0 font-mono text-xs text-[var(--color-ink-soft)]">{c.ip}</span>
-                    </li>
-                  ))}
+                  {clients.map((c, i) => {
+                    const mac = (c.mac ?? "").toLowerCase();
+                    return (
+                      <ClientRow
+                        key={mac || i}
+                        ip={c.ip ?? ""}
+                        mac={mac}
+                        hostname={c.hostname}
+                        connected={c.connected}
+                        label={mac ? labels.get(mac) : undefined}
+                      />
+                    );
+                  })}
                 </ul>
               );
             })()}
@@ -159,27 +180,24 @@ export default async function Dashboard() {
       <section>
         <h2 className="serif text-2xl tracking-[-0.01em]">Rules</h2>
         <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
-          {(() => {
-            const names = devices.flatMap((d) => ruleNames(d.desired));
-            if (names.length === 0) {
-              return (
-                <p className="text-[var(--color-ink-soft)]">
-                  No rules yet. Tell Bri below what you&apos;d like — e.g. “block TikTok for Maya
-                  until she reads 20 minutes” — and it&apos;ll set it up on your device.
-                </p>
-              );
-            }
-            return (
-              <ul className="space-y-2">
-                {names.map((n, i) => (
-                  <li key={i} className="flex items-center gap-2">
-                    <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
-                    <span className="text-[var(--color-ink)]">{n.replace(/[-_]/g, " ")}</span>
-                  </li>
-                ))}
-              </ul>
-            );
-          })()}
+          {activeRules.length === 0 ? (
+            <p className="text-[var(--color-ink-soft)]">
+              No rules yet. Tell Bri below what you&apos;d like — e.g. “block TikTok for Maya
+              until she reads 20 minutes” — and it&apos;ll set it up on your device.
+            </p>
+          ) : (
+            <ul className="divide-y divide-[var(--color-rule)]">
+              {activeRules.map((r) => (
+                <RuleRow
+                  key={r.rule_id}
+                  ruleId={r.rule_id}
+                  name={r.name}
+                  ruleType={r.rule_type}
+                  summary={r.summary}
+                />
+              ))}
+            </ul>
+          )}
           {memory && (
             <p className="mt-4 border-t border-[var(--color-rule)] pt-3 text-sm text-[var(--color-ink-soft)]">
               <span className="font-medium text-[var(--color-ink)]">What Bri knows: </span>

@@ -119,3 +119,121 @@ export function AccountChat() {
     </div>
   );
 }
+
+export function ClientRow({
+  ip,
+  mac,
+  hostname,
+  connected,
+  label,
+}: {
+  ip: string;
+  mac: string;
+  hostname?: string;
+  connected?: boolean;
+  label?: string;
+}) {
+  const [name, setName] = useState(label ?? hostname ?? "");
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function save(next: string) {
+    const v = next.trim();
+    if (!v || v === (label ?? hostname ?? "")) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await fetch("/api/account/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mac, name: v }),
+      });
+      setName(v);
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  }
+
+  const display = label || hostname || "Unnamed device";
+  return (
+    <li className="flex items-center justify-between gap-3 py-2.5 text-sm">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className={`size-2 shrink-0 rounded-full ${connected ? "bg-emerald-500" : "bg-zinc-300"}`} />
+        {editing ? (
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => save(name)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save(name);
+              if (e.key === "Escape") {
+                setName(label ?? hostname ?? "");
+                setEditing(false);
+              }
+            }}
+            disabled={saving}
+            maxLength={32}
+            className="min-w-0 max-w-[180px] rounded border border-[var(--color-rule)] bg-white px-2 py-0.5 text-sm focus:border-[var(--color-ink)] focus:outline-none"
+          />
+        ) : (
+          <button
+            onClick={() => setEditing(true)}
+            className="truncate text-left font-medium hover:underline"
+            title="Click to rename"
+          >
+            {display}
+          </button>
+        )}
+      </div>
+      <span className="shrink-0 font-mono text-xs text-[var(--color-ink-soft)]">{ip}</span>
+    </li>
+  );
+}
+
+export function RuleRow({
+  ruleId,
+  name,
+  ruleType,
+  summary,
+}: {
+  ruleId: string;
+  name: string;
+  ruleType: string;
+  summary: string | null;
+}) {
+  const [removing, setRemoving] = useState(false);
+  return (
+    <li className="flex items-start justify-between gap-3 py-2.5">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
+          <span className="font-medium">{name}</span>
+          <span className="text-xs text-[var(--color-ink-soft)]">{ruleType.replace(/_/g, " ")}</span>
+        </div>
+        {summary && (
+          <p className="ml-3.5 mt-1 text-xs text-[var(--color-ink-soft)]">{summary}</p>
+        )}
+      </div>
+      <button
+        onClick={async () => {
+          if (!confirm(`Remove rule "${name}"?`)) return;
+          setRemoving(true);
+          try {
+            await fetch(`/api/account/rules/${ruleId}`, { method: "DELETE" });
+            window.location.reload();
+          } catch {
+            setRemoving(false);
+          }
+        }}
+        disabled={removing}
+        className="shrink-0 text-xs text-[var(--color-ink-soft)] underline hover:text-[var(--color-accent)] disabled:opacity-50"
+      >
+        {removing ? "removing…" : "remove"}
+      </button>
+    </li>
+  );
+}

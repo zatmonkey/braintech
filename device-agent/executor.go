@@ -60,6 +60,10 @@ func Apply(inst *Instruction, cfg Config) Report {
 func execOp(op Op, cfg Config) (string, error) {
 	switch op.Type {
 	case "uci.set":
+		// Section declaration: `uci set config.section=section_type`
+		if op.Option == "" && op.Section != "" && op.Value != "" && len(op.Values) == 0 {
+			return run("uci", "set", fmt.Sprintf("%s.%s=%s", op.Config, op.Section, op.Value))
+		}
 		if len(op.Values) > 0 {
 			var out []string
 			for k, v := range op.Values {
@@ -98,7 +102,12 @@ func execOp(op Op, cfg Config) (string, error) {
 		if op.Option != "" {
 			key += "." + op.Option
 		}
-		return run("uci", "delete", key)
+		out, err := run("uci", "delete", key)
+		if err != nil && strings.Contains(out, "Entry not found") {
+			// idempotent: deleting something that's already gone is fine
+			return out, nil
+		}
+		return out, err
 
 	case "uci.commit":
 		if op.Config != "" {
