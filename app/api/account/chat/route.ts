@@ -13,12 +13,17 @@ import {
   newRuleId,
   buildRuleOps,
   assembleDesired,
+  materializeOps,
+  fetchManagedListDomains,
+  MANAGED_LIST_SOURCES,
   type AccountRule,
   type Op,
   type RuleType,
   type RuleParams,
   type PauseDeviceParams,
   type BlockDomainsParams,
+  type BlockManagedListParams,
+  type ManagedListSource,
 } from "@/app/lib/rules";
 
 export const runtime = "nodejs";
@@ -234,7 +239,7 @@ export async function POST(req: Request) {
         const friendlyName = String(i.name ?? "").slice(0, 64) || "unnamed";
         const summary = String(i.summary ?? "").slice(0, 200);
         let params: RuleParams;
-        let prefix: "pause" | "domains" | "dnsforce";
+        let prefix: "pause" | "domains" | "dnsforce" | "mlist";
         if (rt === "pause_device") {
           const mac = String(i.target_mac ?? "").toLowerCase();
           if (!mac) return "error: target_mac required for pause_device";
@@ -248,6 +253,24 @@ export async function POST(req: Request) {
         } else if (rt === "force_router_dns") {
           params = {} as RuleParams;
           prefix = "dnsforce";
+        } else if (rt === "block_managed_list") {
+          const src = String(i.source ?? "hagezi-anti-bypass") as ManagedListSource;
+          if (!(src in MANAGED_LIST_SOURCES)) return `error: unknown managed list source "${src}"`;
+          // Do a fetch now so the propose-time count is accurate and any 4xx
+          // surfaces here, not later when the parent is waiting on the apply.
+          let count = 0;
+          try {
+            const domains = await fetchManagedListDomains(src);
+            count = domains.length;
+          } catch (e) {
+            return `error: fetching ${src} failed — ${(e as Error).message}`;
+          }
+          params = {
+            source: src,
+            snapshot_at: new Date().toISOString(),
+            domain_count: count,
+          } as BlockManagedListParams;
+          prefix = "mlist";
         } else {
           return `error: unknown rule_type "${rt}"`;
         }
@@ -274,19 +297,27 @@ export async function POST(req: Request) {
         `;
         // Rebuild desired from every rule we've ever issued (active or not).
         // Inactive ones contribute cleanup ops; active ones contribute apply too.
+        // Active rule ops are MATERIALIZED fresh (block_managed_list pulls a
+        // fresh upstream snapshot here so the latest list lands on the device).
         const allRows = (await sql`
           SELECT rule_id, rule_type, name, summary, params, ops, active
           FROM account_rules WHERE owner_email = ${email} AND device_id = ${primary.device_id};
         `) as RuleRow[];
-        const allRules: AccountRule[] = allRows.map((r) => ({
-          rule_id: r.rule_id,
-          rule_type: r.rule_type,
-          params: r.params,
-          ops: r.ops,
-          name: r.name,
-          summary: r.summary ?? undefined,
-          active: r.active,
-        }));
+        const allRules: AccountRule[] = await Promise.all(
+          allRows.map(async (r) => {
+            const base: AccountRule = {
+              rule_id: r.rule_id,
+              rule_type: r.rule_type,
+              params: r.params,
+              ops: r.ops,
+              name: r.name,
+              summary: r.summary ?? undefined,
+              active: r.active,
+            };
+            if (r.active) base.ops = await materializeOps(base);
+            return base;
+          }),
+        );
         const desired = assembleDesired(allRules);
         const newVersion = primary.desired_version + 1;
         await sql`

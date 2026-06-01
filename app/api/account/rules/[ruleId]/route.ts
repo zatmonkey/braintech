@@ -6,7 +6,7 @@ import {
   ensureDeviceSchema,
   ensureAccountSchema,
 } from "@/app/lib/db";
-import { assembleDesired, type AccountRule, type Op, type RuleType, type RuleParams } from "@/app/lib/rules";
+import { assembleDesired, materializeOps, type AccountRule, type Op, type RuleType, type RuleParams } from "@/app/lib/rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,15 +51,21 @@ export async function DELETE(
     SELECT rule_id, device_id, rule_type, params, ops, active, name, summary
     FROM account_rules WHERE owner_email = ${email} AND device_id = ${r.device_id};
   `) as RuleRow[];
-  const allRules: AccountRule[] = all.map((x) => ({
-    rule_id: x.rule_id,
-    rule_type: x.rule_type,
-    params: x.params,
-    ops: x.ops,
-    name: x.name,
-    summary: x.summary ?? undefined,
-    active: x.active,
-  }));
+  const allRules: AccountRule[] = await Promise.all(
+    all.map(async (x) => {
+      const base: AccountRule = {
+        rule_id: x.rule_id,
+        rule_type: x.rule_type,
+        params: x.params,
+        ops: x.ops,
+        name: x.name,
+        summary: x.summary ?? undefined,
+        active: x.active,
+      };
+      if (x.active) base.ops = await materializeOps(base);
+      return base;
+    }),
+  );
   const desired = assembleDesired(allRules);
 
   const dev = (await sql`

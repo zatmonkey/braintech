@@ -14,6 +14,7 @@ import {
 import {
   assembleDesired,
   buildRuleOps,
+  materializeOps,
   type AccountRule,
   type Op,
   type RuleType,
@@ -69,20 +70,33 @@ export async function POST(req: Request) {
   // a simple `btnet reset` — no need to remove and re-add each rule.
   // Inactive rules keep their stored ops (they're never applied anyway —
   // only their cleanup ops run via ownedSections in assembleDesired).
-  const allRules: AccountRule[] = all.map((r) => ({
-    rule_id: r.rule_id,
-    rule_type: r.rule_type,
-    params: r.params,
-    ops: r.active ? buildRuleOps(r.rule_id, r.rule_type, r.params) : r.ops,
-    name: r.name,
-    summary: r.summary ?? undefined,
-    active: r.active,
-  }));
-  // Persist regenerated ops for active rules so account_rules.ops matches
-  // what the device is actually running.
+  const allRules: AccountRule[] = await Promise.all(
+    all.map(async (r) => {
+      const base: AccountRule = {
+        rule_id: r.rule_id,
+        rule_type: r.rule_type,
+        params: r.params,
+        // Active rules get structural ops re-derived from params via
+        // buildRuleOps; inactive ones keep whatever's stored (they only
+        // contribute cleanup ops anyway).
+        ops: r.active ? buildRuleOps(r.rule_id, r.rule_type, r.params) : r.ops,
+        name: r.name,
+        summary: r.summary ?? undefined,
+        active: r.active,
+      };
+      if (r.active) base.ops = await materializeOps(base);
+      return base;
+    }),
+  );
+  // Persist structural ops for active rules so account_rules.ops stays in
+  // sync with the latest buildRuleOps shape. For block_managed_list we
+  // store the structural form (empty content) — materialization is fetched
+  // fresh on every assembly anyway.
   for (const r of allRules) {
     if (!r.active) continue;
-    await sql`UPDATE account_rules SET ops = ${JSON.stringify(r.ops)}::jsonb, updated_at = NOW()
+    const structural =
+      r.rule_type === "block_managed_list" ? buildRuleOps(r.rule_id, r.rule_type, r.params) : r.ops;
+    await sql`UPDATE account_rules SET ops = ${JSON.stringify(structural)}::jsonb, updated_at = NOW()
       WHERE rule_id = ${r.rule_id};`;
   }
   const desired = assembleDesired(allRules);

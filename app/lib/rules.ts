@@ -12,20 +12,37 @@ export type Op = {
   list?: string[];
   name?: string;
   action?: string;
+  // file.write / file.delete
+  path?: string;
+  content?: string;
+  mode?: string;
 };
 
 export type RuleType =
   | "pause_device"
   | "block_domains_network"
-  | "force_router_dns";
+  | "force_router_dns"
+  | "block_managed_list";
 
 export type PauseDeviceParams = { mac: string; client_name?: string };
 export type BlockDomainsParams = { domains: string[] };
 export type ForceRouterDnsParams = Record<string, never>;
+/**
+ * A snapshot of a curated upstream blocklist. We don't store the whole list
+ * in params (it's ~17k entries / ~600KB) — just the source identifier and a
+ * timestamp. The current snapshot is fetched at apply time and dropped into
+ * a single dnsmasq conf file on the router via a `file.write` op.
+ */
+export type BlockManagedListParams = {
+  source: "hagezi-anti-bypass";
+  snapshot_at: string; // ISO timestamp of when the source was last fetched
+  domain_count: number;
+};
 export type RuleParams =
   | PauseDeviceParams
   | BlockDomainsParams
-  | ForceRouterDnsParams;
+  | ForceRouterDnsParams
+  | BlockManagedListParams;
 
 export interface AccountRule {
   rule_id: string;
@@ -37,41 +54,58 @@ export interface AccountRule {
   active: boolean;
 }
 
-export function newRuleId(prefix: "pause" | "domains" | "dnsforce"): string {
+export function newRuleId(
+  prefix: "pause" | "domains" | "dnsforce" | "mlist",
+): string {
   return `${prefix}_${randomBytes(4).toString("hex")}`;
 }
 
+/** Path on the router for a managed-list rule's dnsmasq conf snippet. */
+export function managedListConfPath(ruleId: string): string {
+  return `/etc/dnsmasq.d/bt-${ruleId}.conf`;
+}
+
 /**
- * Named UCI sections a rule owns. Cleanup deletes these regardless of whether
- * the rule is active right now — that's how transitioning from active→inactive
- * actually removes the rule from the running config. Section naming follows
- * `bt_<ruleId>` or `bt_<ruleId>_<suffix>` so they're easy to spot in `uci show`.
+ * What a rule "owns" on the device. Cleanup removes every owned target
+ * regardless of whether the rule is active right now — that's how a
+ * transition from active→inactive actually drops state on the router.
+ *
+ *   - kind:"uci"  → a named UCI section (`bt_<ruleId>[_suffix]`)
+ *   - kind:"file" → a file on the router (managed-list rules use one
+ *                   dnsmasq conf snippet per rule under /etc/dnsmasq.d/)
  */
-export function ownedSections(
+export type CleanupTarget =
+  | { kind: "uci"; config: string; section: string }
+  | { kind: "file"; path: string };
+
+export function ownedTargets(
   ruleId: string,
   type: RuleType,
-): { config: string; section: string }[] {
+): CleanupTarget[] {
   switch (type) {
     case "pause_device":
-      return [{ config: "firewall", section: `bt_${ruleId}` }];
+      return [{ kind: "uci", config: "firewall", section: `bt_${ruleId}` }];
     case "block_domains_network":
       return []; // owns dnsmasq address list entries, wiped by assembleDesired
     case "force_router_dns":
       return [
-        { config: "firewall", section: `bt_${ruleId}_t` },
-        { config: "firewall", section: `bt_${ruleId}_u` },
-        { config: "firewall", section: `bt_${ruleId}_dot` },
+        { kind: "uci", config: "firewall", section: `bt_${ruleId}_t` },
+        { kind: "uci", config: "firewall", section: `bt_${ruleId}_u` },
+        { kind: "uci", config: "firewall", section: `bt_${ruleId}_dot` },
       ];
+    case "block_managed_list":
+      return [{ kind: "file", path: managedListConfPath(ruleId) }];
   }
 }
 
-/** Cleanup ops for a single rule's owned sections. */
+/** Cleanup ops for a single rule's owned targets. */
 export function buildCleanupOps(ruleId: string, type: RuleType): Op[] {
-  return ownedSections(ruleId, type).map((s) => ({
-    type: "uci.delete",
-    config: s.config,
-    section: s.section,
-  }));
+  return ownedTargets(ruleId, type).map((t) => {
+    if (t.kind === "uci") {
+      return { type: "uci.delete", config: t.config, section: t.section };
+    }
+    return { type: "file.delete", path: t.path };
+  });
 }
 
 /**
@@ -124,6 +158,20 @@ export function buildRuleOps(
           option: "address",
           list: entries,
         },
+      ];
+    }
+    case "block_managed_list": {
+      // Structural placeholder. The dnsmasq conf content is filled in at
+      // assembly time by materializeOps() — we don't want a 1MB blob sitting
+      // in account_rules.ops or chat_sessions.pending_proposal forever.
+      return [
+        {
+          type: "file.write",
+          path: managedListConfPath(ruleId),
+          content: "",
+          mode: "644",
+        },
+        { type: "service", name: "dnsmasq", action: "reload" },
       ];
     }
     case "force_router_dns": {
@@ -208,6 +256,86 @@ export function buildRuleOps(
  *  2. Apply each active rule's ops in order.
  *  3. Append commits for the touched UCI configs + service reloads.
  */
+// ---------------------------------------------------------------------------
+// Managed-list sources — curated upstream blocklists Bri can apply by name.
+// Each source has a canonical URL and a parser; we fetch on demand at apply /
+// reset time and embed the resulting dnsmasq conf into a file.write op.
+// ---------------------------------------------------------------------------
+
+export const MANAGED_LIST_SOURCES = {
+  "hagezi-anti-bypass": {
+    label: "HaGeZi anti-bypass (VPN + DoH/DoT + Tor bootstrap + proxies)",
+    // jsDelivr CDN-fronted — avoids the raw.githubusercontent rate limit.
+    url:
+      "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/doh-vpn-proxy-bypass-onlydomains.txt",
+  },
+} as const;
+
+export type ManagedListSource = keyof typeof MANAGED_LIST_SOURCES;
+
+/**
+ * Fetch + parse a managed list to a clean domain array. Lines starting with
+ * `#` or whitespace-only are dropped. We trust jsDelivr's CDN to handle
+ * caching; we don't carry our own in-process cache because Vercel functions
+ * are short-lived and per-invocation state doesn't persist anyway.
+ */
+export async function fetchManagedListDomains(
+  source: ManagedListSource,
+): Promise<string[]> {
+  const cfg = MANAGED_LIST_SOURCES[source];
+  if (!cfg) throw new Error(`unknown managed-list source: ${source}`);
+  const res = await fetch(cfg.url, {
+    headers: { "User-Agent": "braintech-bot/1.0 (+https://getbraintech.com)" },
+  });
+  if (!res.ok) throw new Error(`fetch ${source} failed: ${res.status}`);
+  const text = await res.text();
+  const domains: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    // dnsmasq accepts only the bare domain; reject anything fishy
+    if (!/^[A-Za-z0-9._-]+$/.test(line)) continue;
+    domains.push(line.toLowerCase());
+  }
+  return domains;
+}
+
+/** Build the dnsmasq conf-file contents (A + AAAA block per domain). */
+export function dnsmasqBlockConf(domains: string[]): string {
+  const lines: string[] = [
+    "# Braintech — managed blocklist (auto-generated, do not edit)",
+    `# ${domains.length} domains, A + AAAA each`,
+    "",
+  ];
+  for (const d of domains) {
+    lines.push(`address=/${d}/0.0.0.0`);
+    lines.push(`address=/${d}/::`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Materialize a rule into the actual ops the agent will run. For most rule
+ * types this is just the structural ops from buildRuleOps (or whatever was
+ * stored). For block_managed_list, this fetches the latest source list and
+ * inlines it into the file.write op's content field.
+ */
+export async function materializeOps(rule: AccountRule): Promise<Op[]> {
+  if (rule.rule_type !== "block_managed_list") return rule.ops;
+  const p = rule.params as BlockManagedListParams;
+  const domains = await fetchManagedListDomains(p.source);
+  const conf = dnsmasqBlockConf(domains);
+  return [
+    {
+      type: "file.write",
+      path: managedListConfPath(rule.rule_id),
+      content: conf,
+      mode: "644",
+    },
+    { type: "service", name: "dnsmasq", action: "reload" },
+  ];
+}
+
 /**
  * Build the device's full desired ops from every rule ever issued (active
  * or not). The pattern is "wipe-then-rebuild":

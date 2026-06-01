@@ -128,6 +128,9 @@ func execOp(op Op, cfg Config) (string, error) {
 	case "file.write":
 		return fileWrite(op, cfg)
 
+	case "file.delete":
+		return fileDelete(op, cfg)
+
 	case "package.install":
 		if err := validName(op.Name); err != nil {
 			return "", err
@@ -154,15 +157,17 @@ func execOp(op Op, cfg Config) (string, error) {
 	}
 }
 
-func fileWrite(op Op, cfg Config) (string, error) {
-	allowed := false
+func pathAllowed(path string, cfg Config) bool {
 	for _, p := range cfg.AllowedFilePrefixes {
-		if strings.HasPrefix(op.Path, p) {
-			allowed = true
-			break
+		if strings.HasPrefix(path, p) {
+			return true
 		}
 	}
-	if !allowed {
+	return false
+}
+
+func fileWrite(op Op, cfg Config) (string, error) {
+	if !pathAllowed(op.Path, cfg) {
 		return "", fmt.Errorf("file.write path %q not in allow-list %v", op.Path, cfg.AllowedFilePrefixes)
 	}
 	mode := os.FileMode(0o644)
@@ -171,10 +176,32 @@ func fileWrite(op Op, cfg Config) (string, error) {
 			mode = os.FileMode(m)
 		}
 	}
-	if err := os.WriteFile(op.Path, []byte(op.Content), mode); err != nil {
+	// atomic write: tmp file + rename, so dnsmasq never reads a half-written conf
+	tmp := op.Path + ".bt.tmp"
+	if err := os.WriteFile(tmp, []byte(op.Content), mode); err != nil {
 		return "", err
 	}
-	return "wrote " + op.Path, nil
+	if err := os.Rename(tmp, op.Path); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	return fmt.Sprintf("wrote %s (%d bytes)", op.Path, len(op.Content)), nil
+}
+
+// fileDelete removes a file if present. Missing files are not an error —
+// keeps the cleanup-then-rebuild pattern idempotent.
+func fileDelete(op Op, cfg Config) (string, error) {
+	if !pathAllowed(op.Path, cfg) {
+		return "", fmt.Errorf("file.delete path %q not in allow-list %v", op.Path, cfg.AllowedFilePrefixes)
+	}
+	err := os.Remove(op.Path)
+	if err != nil && os.IsNotExist(err) {
+		return "absent", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return "deleted " + op.Path, nil
 }
 
 // --- rollback helpers ---

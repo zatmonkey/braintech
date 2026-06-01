@@ -350,6 +350,7 @@ Rule types you can use right now:
 - **pause_device** (needs target_mac): blocks ALL traffic from one device. For "pause Maya's iPad", look up Maya's iPad in the Connected list to get its MAC.
 - **block_domains_network** (needs domains[]): blocks specific domains for the whole network via DNS. Be thorough — for "block TikTok", include tiktok.com, tiktokcdn.com, musical.ly. For "block YouTube", include youtube.com, youtu.be, ytimg.com, googlevideo.com.
 - **force_router_dns** (no params): redirects all LAN DNS traffic (tcp/udp port 53) to the router's own resolver and blocks DNS-over-TLS (tcp/853). Prevents kids from bypassing domain blocks by manually setting their DNS to 8.8.8.8 or 1.1.1.1. Recommend this whenever domain blocks are in place. Note: does NOT block DNS-over-HTTPS (DoH) yet — that's a separate fight.
+- **block_managed_list** (param: source="hagezi-anti-bypass"): drops a curated, multi-daily-updated blocklist on the device (~17k entries) covering ALL major VPNs (NordVPN, ExpressVPN, ProtonVPN, Surfshark, Mullvad, etc.), public DoH/DoT providers (Cloudflare, Google, Quad9, NextDNS, AdGuard), Tor bootstrap, and general proxies. Use this whenever the parent says "block VPNs", "prevent bypass", "block Tor", "no anonymizers", etc. ALWAYS pair with force_router_dns. Side effect: this is comprehensive, so it may also block obscure DoH endpoints used by some apps' analytics — surface this caveat.
 
 When the parent identifies an unnamed device ("the one at 192.168.4.99 is Maya's iPad"), call **set_client_name** with its MAC + the friendly name.
 
@@ -378,12 +379,22 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
       properties: {
         rule_type: {
           type: "string",
-          enum: ["pause_device", "block_domains_network", "force_router_dns"],
+          enum: [
+            "pause_device",
+            "block_domains_network",
+            "force_router_dns",
+            "block_managed_list",
+          ],
         },
         name: { type: "string" },
         summary: { type: "string" },
         target_mac: { type: "string" },
         domains: { type: "array", items: { type: "string" } },
+        source: {
+          type: "string",
+          enum: ["hagezi-anti-bypass"],
+          description: "For block_managed_list: which curated upstream list to apply.",
+        },
       },
       required: ["rule_type", "name", "summary"],
     },
