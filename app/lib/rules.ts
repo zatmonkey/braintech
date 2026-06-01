@@ -99,16 +99,14 @@ export function assembleDesired(
   const configs = new Set<string>();
   const services = new Set<string>();
 
-  // (1) cleanup of prior state
+  // (1) cleanup of prior state — ALWAYS run all cleanups every time. The
+  //     agent's uci.delete is tolerant of "Entry not found", so deleting
+  //     things that don't exist is a no-op. This keeps the desired state
+  //     a pure function of activeRules with no path-dependence.
   for (const id of allKnownPauseRuleIds) {
     ops.push({ type: "uci.delete", config: "firewall", section: `bt_${id}` });
   }
-  const hasDomainRule = activeRules.some((r) => r.rule_type === "block_domains_network");
-  // Always clear the dnsmasq address list before we rebuild it. We only need
-  // to bother if there *are* (or were) domain rules — but it's cheap.
-  if (hasDomainRule || activeRules.length === 0) {
-    ops.push({ type: "uci.delete", config: "dhcp", section: "@dnsmasq[0]", option: "address" });
-  }
+  ops.push({ type: "uci.delete", config: "dhcp", section: "@dnsmasq[0]", option: "address" });
 
   // (2) apply each active rule's ops
   for (const r of activeRules) {
@@ -116,15 +114,20 @@ export function assembleDesired(
       ops.push(o);
       if (o.config) configs.add(o.config);
     }
-    if (r.rule_type === "pause_device") services.add("firewall");
-    if (r.rule_type === "block_domains_network") services.add("dnsmasq");
   }
-  // include configs touched by the cleanup itself
+  // cleanup itself always touches firewall + dhcp, so those configs must
+  // be committed and their owning services reloaded every time — otherwise
+  // a transition from "has rule" → "no rules" would leave the running
+  // service holding stale state from disk.
   configs.add("firewall");
-  if (hasDomainRule || activeRules.length === 0) configs.add("dhcp");
+  configs.add("dhcp");
 
-  // (3) commit + reload
+  // (3) commit + reload — always reload the services whose configs we
+  //     touched (firewall, dnsmasq), so removed rules actually disappear
+  //     from the kernel/daemon ruleset, not just from the on-disk config.
   for (const c of configs) ops.push({ type: "uci.commit", config: c });
+  if (configs.has("firewall")) services.add("firewall");
+  if (configs.has("dhcp")) services.add("dnsmasq");
   for (const s of services) ops.push({ type: "service", name: s, action: "reload" });
 
   return ops;
