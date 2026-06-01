@@ -270,6 +270,18 @@ cmd_test() {
   cmd_login
 
   echo
+  echo "=== 1b. clean slate: cancel any stale pending proposal + remove existing rules ==="
+  if api_get /api/account/state | jq -e '.pending_proposal' >/dev/null 2>&1; then
+    echo "  found stale pending, cancelling…"
+    cmd_chat "cancel that pending proposal please" >/dev/null
+  fi
+  for rid in $(api_get /api/account/state | jq -r '.rules[] | select(.active) | .rule_id'); do
+    echo "  removing pre-existing rule $rid"
+    api_delete "/api/account/rules/$rid" >/dev/null
+  done
+  cmd_wait_sync 60 || true
+
+  echo
   echo "=== 2. dashboard state ==="
   api_get /api/account/state | jq '{devices: [.devices[] | {device_id,label,online,in_sync,desired_version,reported_version}], n_clients: ([.devices[].clients[]] | length), n_rules: ([.rules[] | select(.active)] | length)}'
 
