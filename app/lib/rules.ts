@@ -67,13 +67,22 @@ export function buildRuleOps(
     }
     case "block_domains_network": {
       const p = params as BlockDomainsParams;
+      // Emit both A (0.0.0.0) and AAAA (::) blocks. Without the AAAA entry,
+      // dnsmasq returns NXDOMAIN/0.0.0.0 for A but FORWARDS AAAA upstream —
+      // so any client with IPv6 connectivity (modern phones especially)
+      // still reaches the host.
+      const entries: string[] = [];
+      for (const d of p.domains) {
+        entries.push(`/${d}/0.0.0.0`);
+        entries.push(`/${d}/::`);
+      }
       return [
         {
           type: "uci.add_list",
           config: "dhcp",
           section: "@dnsmasq[0]",
           option: "address",
-          list: p.domains.map((d) => `/${d}/0.0.0.0`),
+          list: entries,
         },
       ];
     }
