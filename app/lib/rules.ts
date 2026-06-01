@@ -334,15 +334,14 @@ export async function materializeOps(rule: AccountRule): Promise<Op[]> {
   const p = rule.params as BlockManagedListParams;
   const domains = await fetchManagedListDomains(p.source);
   const conf = dnsmasqBlockConf(domains);
-  return [
-    {
-      type: "file.write",
-      path: managedListConfPath(rule.rule_id),
-      content: conf,
-      mode: "644",
-    },
-    { type: "service", name: "dnsmasq", action: "reload" },
-  ];
+  // Keep the structural ops (uci.set confdir, etc.) and only patch the
+  // file.write to carry the fetched content. That way changes to
+  // buildRuleOps automatically flow through materializeOps without
+  // having to redeclare every op here.
+  const path = managedListConfPath(rule.rule_id);
+  return rule.ops.map((o) =>
+    o.type === "file.write" && o.path === path ? { ...o, content: conf } : o,
+  );
 }
 
 /**
