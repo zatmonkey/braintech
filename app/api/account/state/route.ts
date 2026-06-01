@@ -61,6 +61,10 @@ export async function GET() {
     SELECT pending_proposal FROM chat_sessions WHERE session_id = ${sessionId};
   `) as { pending_proposal: unknown }[];
 
+  const mem = (await sql`
+    SELECT humans, notes, updated_at FROM account_memory WHERE owner_email = ${email};
+  `) as { humans: unknown; notes: string; updated_at: string }[];
+
   return NextResponse.json({
     email,
     devices: devices.map((d) => ({
@@ -77,6 +81,7 @@ export async function GET() {
     })),
     labels,
     rules,
+    memory: mem[0] ?? { humans: [], notes: "", updated_at: null },
     pending_proposal: pending[0]?.pending_proposal ?? null,
   });
 }

@@ -179,5 +179,18 @@ export async function ensureAccountSchema(
   `;
   await sql`CREATE INDEX IF NOT EXISTS account_rules_owner_idx ON account_rules(owner_email, active);`;
   await sql`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS pending_proposal JSONB;`;
+
+  // Household memory: who lives here, what devices they own, free-form notes.
+  // This is the canonical long-term state Bri reads from EVERY turn. The
+  // chat transcript is just conversational flow — never a state store.
+  await sql`
+    CREATE TABLE IF NOT EXISTS account_memory (
+      owner_email  TEXT PRIMARY KEY,
+      humans       JSONB NOT NULL DEFAULT '[]'::jsonb,
+      notes        TEXT NOT NULL DEFAULT '',
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
   accountSchemaReady = true;
 }

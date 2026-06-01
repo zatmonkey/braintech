@@ -30,6 +30,8 @@
 #   btnet uci-dhcp                    # uci show dhcp | grep address
 #   btnet logread [N]                 # last N agent log lines (default 20)
 #   btnet wait-sync [timeout_s]       # poll /state until reported==desired version
+#   btnet memory                      # show household memory (humans, notes)
+#   btnet reset                       # re-derive desired from active rules + push
 #   btnet test                        # full propose→confirm→verify→remove cycle
 
 set -euo pipefail
@@ -255,6 +257,14 @@ cmd_wait_sync() {
   return 1
 }
 
+cmd_memory() {
+  api_get /api/account/state | jq '.memory'
+}
+
+cmd_reset() {
+  api_post /api/device/reset '{}' | jq
+}
+
 cmd_test() {
   echo "=== 1. login ==="
   cmd_login
@@ -318,6 +328,8 @@ main() {
     uci-dhcp)       cmd_uci_dhcp ;;
     logread)        cmd_logread "$@" ;;
     wait-sync)      cmd_wait_sync "$@" ;;
+    memory)         cmd_memory ;;
+    reset)          cmd_reset ;;
     test)           cmd_test ;;
     *) echo "unknown command: $cmd (try: btnet help)" >&2; exit 2 ;;
   esac

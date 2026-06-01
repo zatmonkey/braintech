@@ -313,8 +313,15 @@ export async function runDemoChatTurn(opts: {
 
 const ACCOUNT_SYSTEM_PROMPT = `You are "Bri", the parent's personal Braintech assistant, helping them run their home network by chat. Unlike the public demo, you CAN see their live setup (provided each turn under CONTEXT) and you know what their Braintech device can do.
 
-# What you can see — CONTEXT is the only source of truth
-The CONTEXT block below is freshly fetched from the database every turn. It shows the device status, currently connected devices, active rules, and any pending proposal. **Trust CONTEXT over your own chat history.** Earlier messages may have claimed a rule was applied — if that rule isn't listed under "Active rules" in CONTEXT, it isn't on the router. Re-propose it. Only state network facts that appear in CONTEXT.
+# CONTEXT is the only source of truth — chat history is just conversation flow
+The CONTEXT block below is freshly fetched from the database every turn. It has three parts:
+  1) **LIVE STATE** — the router right now: device status, connected clients, ACTIVE RULES, pending proposal.
+  2) **HOUSEHOLD MEMORY** — who lives here (parents and kids), which devices belong to whom, and any notes you've saved.
+  3) **DEVICE LABELS** — the friendly names assigned to MACs.
+
+**Trust CONTEXT over your own chat history.** Earlier messages in the transcript may say a rule was applied — if that rule is not in LIVE STATE → ACTIVE RULES, it does not exist. Re-propose it. The transcript is for the flow of the conversation, not for remembering state.
+
+Keep HOUSEHOLD MEMORY current. Whenever the parent tells you something durable about the family ("Maya is 11, her iPad is the one at 192.168.1.4", "Theo has homework hours 4–6pm"), call **remember_household** to save it. Whenever they identify a device's owner ("this is Theo's laptop"), call **set_client_name** with the friendly name AND mention it in remember_household so we know whose device it is.
 
 # What Braintech can do (router capabilities)
 - Block or allow specific apps/services or domains (TikTok, YouTube, Roblox, etc.) — whole-network or per device.
@@ -383,6 +390,39 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
     name: "cancel_pending_rule",
     description: "Discard the pending proposal (the parent declined or wants something different).",
     input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "remember_household",
+    description:
+      "Save durable facts about the household so they persist across sessions. `humans` is the canonical list of people who live here (parents + kids) — pass the FULL list every call (this REPLACES the stored list). `notes` is free-form context (schedules, preferences, household rules in plain English). Either or both fields may be provided; whatever you pass replaces what was there.",
+    input_schema: {
+      type: "object",
+      properties: {
+        humans: {
+          type: "array",
+          description: "Full canonical list of household members. Replaces what's stored.",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              role: { type: "string", enum: ["parent", "child"] },
+              age: { type: "number" },
+              devices: {
+                type: "array",
+                description: "MACs of devices belonging to this person.",
+                items: { type: "string" },
+              },
+              notes: { type: "string" },
+            },
+            required: ["name", "role"],
+          },
+        },
+        notes: {
+          type: "string",
+          description: "Free-form household notes (schedules, preferences, agreements). Replaces what's stored.",
+        },
+      },
+    },
   },
 ];
 

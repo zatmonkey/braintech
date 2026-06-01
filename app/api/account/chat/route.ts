@@ -49,6 +49,14 @@ type RuleRow = {
   active: boolean;
 };
 type LabelRow = { mac: string; name: string };
+type Human = {
+  name: string;
+  role: "parent" | "child";
+  age?: number;
+  devices?: string[];
+  notes?: string;
+};
+type Memory = { humans: Human[]; notes: string };
 type PendingProposal = {
   rule_id: string;
   rule_type: RuleType;
@@ -65,13 +73,34 @@ function fmtUptime(s?: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+function fmtHouseholdMemory(memory: Memory): string {
+  const lines: string[] = ["HOUSEHOLD MEMORY (canonical — persists across sessions):"];
+  if (memory.humans.length === 0) {
+    lines.push("  Humans: (none recorded yet — ask the parent who lives here)");
+  } else {
+    lines.push("  Humans:");
+    for (const h of memory.humans) {
+      const meta = [h.role, h.age ? `${h.age}y` : null].filter(Boolean).join(", ");
+      const devs = h.devices?.length ? ` — devices: ${h.devices.join(", ")}` : "";
+      const note = h.notes ? ` (${h.notes})` : "";
+      lines.push(`  - ${h.name} [${meta}]${devs}${note}`);
+    }
+  }
+  if (memory.notes) lines.push(`  Notes: ${memory.notes}`);
+  return lines.join("\n");
+}
+
 function buildContext(
   devices: DeviceRow[],
   labels: Map<string, string>,
   activeRules: RuleRow[],
   pending: PendingProposal | null,
+  memory: Memory,
 ): string {
-  if (devices.length === 0) return "No Braintech device is linked to this account yet.";
+  const memSection = fmtHouseholdMemory(memory);
+  if (devices.length === 0) {
+    return `${memSection}\n\nLIVE STATE: No Braintech device is linked to this account yet.`;
+  }
   const sections: string[] = devices.map((d) => {
     const online = d.last_seen && Date.now() - new Date(d.last_seen).getTime() < 120_000;
     const t = d.telemetry ?? {};
@@ -95,19 +124,20 @@ function buildContext(
             )
             .join("\n");
     return [
-      `Device: ${d.label ?? "Braintech device"} — ${online ? "ONLINE" : "OFFLINE"}`,
+      `LIVE STATE — ${d.label ?? "Braintech device"} (${online ? "ONLINE" : "OFFLINE"})`,
       `Firmware: ${t.firmware ?? "?"} | WAN: ${t.wan_up ? "up" : "down"} | Uptime: ${fmtUptime(t.uptime_sec)} | Config ${d.reported_version === d.desired_version ? "in sync" : "updating"}`,
       `Connected devices (${clients.length}):`,
       clientLines,
-      `Active rules:\n${rules}`,
+      `ACTIVE RULES (${activeRules.length}) — the ONLY rules currently on the router:`,
+      rules,
     ].join("\n");
   });
   if (pending) {
     sections.push(
-      `\nPENDING PROPOSAL waiting for confirmation:\n- ${pending.name} [${pending.rule_type}] — ${pending.summary}`,
+      `PENDING PROPOSAL waiting for confirmation:\n- ${pending.name} [${pending.rule_type}] — ${pending.summary}`,
     );
   }
-  return sections.join("\n\n");
+  return [memSection, ...sections].join("\n\n");
 }
 
 export async function POST(req: Request) {
@@ -158,17 +188,29 @@ export async function POST(req: Request) {
   `) as { pending_proposal: PendingProposal | null }[];
   const pendingInitial = sessRows[0]?.pending_proposal ?? null;
 
+  // Household memory — the canonical long-term state Bri reads & writes.
+  // Chat history is conversational flow, NOT a state store; the memory blob is.
+  const memRows = (await sql`
+    SELECT humans, notes FROM account_memory WHERE owner_email = ${email};
+  `) as { humans: Human[]; notes: string }[];
+  const memory: Memory = {
+    humans: memRows[0]?.humans ?? [],
+    notes: memRows[0]?.notes ?? "",
+  };
+
   await sql`INSERT INTO chat_messages (session_id, role, content) VALUES (${sessionId}, 'user', ${message});`;
 
+  // Keep history short (last 3 exchanges = 6 messages). The transcript is for
+  // conversational flow only — durable state lives in CONTEXT/memory.
   const histRows = (await sql`
     SELECT role, content FROM chat_messages WHERE session_id = ${sessionId}
-    ORDER BY created_at DESC, id DESC LIMIT 20;
+    ORDER BY created_at DESC, id DESC LIMIT 6;
   `) as { role: string; content: string }[];
   const history: Anthropic.MessageParam[] = histRows
     .reverse()
     .map((r) => ({ role: r.role === "user" ? "user" : "assistant", content: r.content }));
 
-  const context = buildContext(devices, labels, activeRules, pendingInitial);
+  const context = buildContext(devices, labels, activeRules, pendingInitial, memory);
 
   const onTool = async (name: string, input: unknown): Promise<string> => {
     try {
@@ -254,6 +296,33 @@ export async function POST(req: Request) {
       if (name === "cancel_pending_rule") {
         await sql`UPDATE chat_sessions SET pending_proposal = NULL WHERE session_id = ${sessionId};`;
         return "Pending proposal cancelled.";
+      }
+      if (name === "remember_household") {
+        const next: Memory = { humans: memory.humans, notes: memory.notes };
+        if (Array.isArray(i.humans)) {
+          next.humans = (i.humans as Human[])
+            .filter((h) => h && typeof h.name === "string" && (h.role === "parent" || h.role === "child"))
+            .slice(0, 20)
+            .map((h) => ({
+              name: String(h.name).slice(0, 64),
+              role: h.role,
+              ...(typeof h.age === "number" ? { age: h.age } : {}),
+              ...(Array.isArray(h.devices) ? { devices: h.devices.map((d) => String(d).toLowerCase()).slice(0, 10) } : {}),
+              ...(h.notes ? { notes: String(h.notes).slice(0, 200) } : {}),
+            }));
+        }
+        if (typeof i.notes === "string") next.notes = i.notes.slice(0, 800);
+        await sql`
+          INSERT INTO account_memory (owner_email, humans, notes)
+          VALUES (${email}, ${JSON.stringify(next.humans)}::jsonb, ${next.notes})
+          ON CONFLICT (owner_email) DO UPDATE SET
+            humans = EXCLUDED.humans,
+            notes = EXCLUDED.notes,
+            updated_at = NOW();
+        `;
+        memory.humans = next.humans;
+        memory.notes = next.notes;
+        return `Household memory updated (${next.humans.length} humans, ${next.notes.length} notes chars).`;
       }
       return `error: unknown tool "${name}"`;
     } catch (err) {
