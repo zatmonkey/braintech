@@ -351,6 +351,7 @@ Rule types you can use right now:
 - **block_domains_network** (needs domains[]): blocks specific domains for the whole network via DNS. Be thorough — for "block TikTok", include tiktok.com, tiktokcdn.com, musical.ly. For "block YouTube", include youtube.com, youtu.be, ytimg.com, googlevideo.com.
 - **force_router_dns** (no params): redirects all LAN DNS traffic (tcp/udp port 53) to the router's own resolver and blocks DNS-over-TLS (tcp/853). Prevents kids from bypassing domain blocks by manually setting their DNS to 8.8.8.8 or 1.1.1.1. Recommend this whenever domain blocks are in place. Note: does NOT block DNS-over-HTTPS (DoH) yet — that's a separate fight.
 - **block_managed_list** (param: source="hagezi-anti-bypass"): drops a curated, multi-daily-updated blocklist on the device (~17k entries) covering ALL major VPNs (NordVPN, ExpressVPN, ProtonVPN, Surfshark, Mullvad, etc.), public DoH/DoT providers (Cloudflare, Google, Quad9, NextDNS, AdGuard), Tor bootstrap, and general proxies. Use this whenever the parent says "block VPNs", "prevent bypass", "block Tor", "no anonymizers", etc. ALWAYS pair with force_router_dns. Side effect: this is comprehensive, so it may also block obscure DoH endpoints used by some apps' analytics — surface this caveat.
+- **block_ip_set** (params: source, optional dest_port): firewall-level block of an upstream IP list. Three sources currently: "dibdot-doh-ipv4" (~1900 DoH-endpoint IPv4s on port 443, closes the Firefox "Secure DNS" hole where a client connects to 1.1.1.1 directly by IP), "dibdot-doh-ipv6" (same in v6), and "tor-exit-ipv4" (the Tor Project's live exit-node list, blocks Tor at the IP layer). Use this as the belt-and-suspenders pair with block_managed_list when the parent wants the strongest anti-bypass posture.
 
 When the parent identifies an unnamed device ("the one at 192.168.4.99 is Maya's iPad"), call **set_client_name** with its MAC + the friendly name.
 
@@ -384,6 +385,7 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
             "block_domains_network",
             "force_router_dns",
             "block_managed_list",
+            "block_ip_set",
           ],
         },
         name: { type: "string" },
@@ -392,8 +394,18 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
         domains: { type: "array", items: { type: "string" } },
         source: {
           type: "string",
-          enum: ["hagezi-anti-bypass"],
-          description: "For block_managed_list: which curated upstream list to apply.",
+          enum: [
+            "hagezi-anti-bypass",
+            "dibdot-doh-ipv4",
+            "dibdot-doh-ipv6",
+            "tor-exit-ipv4",
+          ],
+          description:
+            "For block_managed_list use 'hagezi-anti-bypass'. For block_ip_set pick one of 'dibdot-doh-ipv4', 'dibdot-doh-ipv6', or 'tor-exit-ipv4'.",
+        },
+        dest_port: {
+          type: "number",
+          description: "For block_ip_set: optional port to limit the block to (e.g. 443 for DoH). Omit to block any port.",
         },
       },
       required: ["rule_type", "name", "summary"],

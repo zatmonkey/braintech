@@ -15,7 +15,9 @@ import {
   assembleDesired,
   materializeOps,
   fetchManagedListDomains,
+  fetchIpSetEntries,
   MANAGED_LIST_SOURCES,
+  IP_SET_SOURCES,
   type AccountRule,
   type Op,
   type RuleType,
@@ -23,7 +25,9 @@ import {
   type PauseDeviceParams,
   type BlockDomainsParams,
   type BlockManagedListParams,
+  type BlockIpSetParams,
   type ManagedListSource,
+  type IpSetSource,
 } from "@/app/lib/rules";
 
 export const runtime = "nodejs";
@@ -239,7 +243,7 @@ export async function POST(req: Request) {
         const friendlyName = String(i.name ?? "").slice(0, 64) || "unnamed";
         const summary = String(i.summary ?? "").slice(0, 200);
         let params: RuleParams;
-        let prefix: "pause" | "domains" | "dnsforce" | "mlist";
+        let prefix: "pause" | "domains" | "dnsforce" | "mlist" | "ipset";
         if (rt === "pause_device") {
           const mac = String(i.target_mac ?? "").toLowerCase();
           if (!mac) return "error: target_mac required for pause_device";
@@ -271,6 +275,24 @@ export async function POST(req: Request) {
             domain_count: count,
           } as BlockManagedListParams;
           prefix = "mlist";
+        } else if (rt === "block_ip_set") {
+          const src = String(i.source ?? "") as IpSetSource;
+          if (!(src in IP_SET_SOURCES)) return `error: unknown ip-set source "${src}"`;
+          let count = 0;
+          try {
+            const ips = await fetchIpSetEntries(src);
+            count = ips.length;
+          } catch (e) {
+            return `error: fetching ${src} failed — ${(e as Error).message}`;
+          }
+          const port = typeof i.dest_port === "number" ? (i.dest_port as number) : undefined;
+          params = {
+            source: src,
+            snapshot_at: new Date().toISOString(),
+            ip_count: count,
+            ...(port != null ? { dest_port: port } : {}),
+          } as BlockIpSetParams;
+          prefix = "ipset";
         } else {
           return `error: unknown rule_type "${rt}"`;
         }

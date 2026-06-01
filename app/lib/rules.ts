@@ -22,7 +22,8 @@ export type RuleType =
   | "pause_device"
   | "block_domains_network"
   | "force_router_dns"
-  | "block_managed_list";
+  | "block_managed_list"
+  | "block_ip_set";
 
 export type PauseDeviceParams = { mac: string; client_name?: string };
 export type BlockDomainsParams = { domains: string[] };
@@ -38,11 +39,26 @@ export type BlockManagedListParams = {
   snapshot_at: string; // ISO timestamp of when the source was last fetched
   domain_count: number;
 };
+/**
+ * Firewall-layer block of an upstream IP list. Generates a tiny nftables
+ * include (`/etc/nftables.d/bt-<id>.nft`) with a `set` of addresses + a
+ * forward-hook chain at priority -10 (fires before fw4's main filter chain
+ * at priority 0) that REJECTs matching outbound traffic.
+ */
+export type BlockIpSetParams = {
+  source: "dibdot-doh-ipv4" | "dibdot-doh-ipv6" | "tor-exit-ipv4";
+  // If set, only block traffic to this port; otherwise block any port.
+  // DoH typically only matters on 443. Tor uses many ports → omit.
+  dest_port?: number;
+  snapshot_at: string;
+  ip_count: number;
+};
 export type RuleParams =
   | PauseDeviceParams
   | BlockDomainsParams
   | ForceRouterDnsParams
-  | BlockManagedListParams;
+  | BlockManagedListParams
+  | BlockIpSetParams;
 
 export interface AccountRule {
   rule_id: string;
@@ -55,7 +71,7 @@ export interface AccountRule {
 }
 
 export function newRuleId(
-  prefix: "pause" | "domains" | "dnsforce" | "mlist",
+  prefix: "pause" | "domains" | "dnsforce" | "mlist" | "ipset",
 ): string {
   return `${prefix}_${randomBytes(4).toString("hex")}`;
 }
@@ -63,6 +79,11 @@ export function newRuleId(
 /** Path on the router for a managed-list rule's dnsmasq conf snippet. */
 export function managedListConfPath(ruleId: string): string {
   return `/etc/dnsmasq.d/bt-${ruleId}.conf`;
+}
+
+/** Path on the router for a block_ip_set rule's nftables include. */
+export function ipSetNftPath(ruleId: string): string {
+  return `/etc/nftables.d/bt-${ruleId}.nft`;
 }
 
 /**
@@ -95,6 +116,8 @@ export function ownedTargets(
       ];
     case "block_managed_list":
       return [{ kind: "file", path: managedListConfPath(ruleId) }];
+    case "block_ip_set":
+      return [{ kind: "file", path: ipSetNftPath(ruleId) }];
   }
 }
 
@@ -181,6 +204,19 @@ export function buildRuleOps(
           content: "",
           mode: "644",
         },
+      ];
+    }
+    case "block_ip_set": {
+      // Structural placeholder — content is filled in at assembly time
+      // by materializeOps() (fresh fetch of the IP list).
+      return [
+        {
+          type: "file.write",
+          path: ipSetNftPath(ruleId),
+          content: "",
+          mode: "644",
+        },
+        { type: "service", name: "firewall", action: "reload" },
       ];
     }
     case "force_router_dns": {
@@ -323,25 +359,143 @@ export function dnsmasqBlockConf(domains: string[]): string {
   return lines.join("\n") + "\n";
 }
 
+// ---------------------------------------------------------------------------
+// IP-set sources — upstream feeds of IP addresses to firewall-block. Used by
+// block_ip_set rules. Each source produces one set + one forward-hook chain
+// in /etc/nftables.d/bt-<ruleId>.nft (auto-included by fw4 reload).
+// ---------------------------------------------------------------------------
+
+export const IP_SET_SOURCES = {
+  "dibdot-doh-ipv4": {
+    label: "DoH endpoint IPv4 addresses (dibdot)",
+    url: "https://raw.githubusercontent.com/dibdot/DoH-IP-blocklists/master/doh-ipv4.txt",
+    family: "ipv4" as const,
+    default_dest_port: 443,
+  },
+  "dibdot-doh-ipv6": {
+    label: "DoH endpoint IPv6 addresses (dibdot)",
+    url: "https://raw.githubusercontent.com/dibdot/DoH-IP-blocklists/master/doh-ipv6.txt",
+    family: "ipv6" as const,
+    default_dest_port: 443,
+  },
+  "tor-exit-ipv4": {
+    label: "Tor exit-node IPv4 addresses (torproject.org bulk list)",
+    url: "https://check.torproject.org/torbulkexitlist",
+    family: "ipv4" as const,
+    default_dest_port: undefined, // Tor uses many ports → block any
+  },
+} as const;
+
+export type IpSetSource = keyof typeof IP_SET_SOURCES;
+
+const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+const IPV6_RE = /^[0-9a-fA-F:]+$/;
+
+/**
+ * Fetch + parse an IP-set source. Strips `#` comments and blank lines.
+ * Validates each entry against a coarse regex appropriate for its family;
+ * the kernel rejects truly malformed entries on `nft -f` so we don't need
+ * to be strict here.
+ */
+export async function fetchIpSetEntries(
+  source: IpSetSource,
+): Promise<string[]> {
+  const cfg = IP_SET_SOURCES[source];
+  if (!cfg) throw new Error(`unknown ip-set source: ${source}`);
+  const res = await fetch(cfg.url, {
+    headers: { "User-Agent": "braintech-bot/1.0 (+https://getbraintech.com)" },
+  });
+  if (!res.ok) throw new Error(`fetch ${source} failed: ${res.status}`);
+  const text = await res.text();
+  const re = cfg.family === "ipv4" ? IPV4_RE : IPV6_RE;
+  const out: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    // strip inline comments (`1.0.0.1  # cloudflare` → `1.0.0.1`)
+    const line = raw.split("#")[0].trim();
+    if (!line) continue;
+    if (!re.test(line)) continue;
+    out.push(line);
+  }
+  return out;
+}
+
+/**
+ * Build the nftables include file: one set + one forward-hook chain that
+ * rejects packets whose destination matches. We hook at priority -10 so we
+ * fire BEFORE fw4's main forward chain (priority 0) — kernel runs both
+ * chains, ours rejects first if it matches.
+ */
+export function nftBlockIpSetFile(
+  ruleId: string,
+  family: "ipv4" | "ipv6",
+  entries: string[],
+  destPort?: number,
+): string {
+  const setName = `bt_${ruleId}_set`;
+  const chainName = `bt_${ruleId}`;
+  const addrType = family === "ipv4" ? "ipv4_addr" : "ipv6_addr";
+  const ipMatch = family === "ipv4" ? "ip daddr" : "ip6 daddr";
+  const portClause = destPort != null ? ` tcp dport ${destPort}` : "";
+  const lines: string[] = [];
+  lines.push(`# Braintech — managed IP blocklist (auto-generated, do not edit)`);
+  lines.push(`# ${entries.length} entries, family=${family}, dest_port=${destPort ?? "any"}`);
+  lines.push(``);
+  lines.push(`set ${setName} {`);
+  lines.push(`    type ${addrType}`);
+  lines.push(`    flags interval`);
+  if (entries.length > 0) {
+    // nft accepts a comma-separated braced literal; long lists wrap fine.
+    lines.push(`    elements = {`);
+    // chunk 8 per line so the file is readable in logread/cat
+    for (let i = 0; i < entries.length; i += 8) {
+      const chunk = entries.slice(i, i + 8).join(", ");
+      const isLast = i + 8 >= entries.length;
+      lines.push(`        ${chunk}${isLast ? "" : ","}`);
+    }
+    lines.push(`    }`);
+  }
+  lines.push(`}`);
+  lines.push(``);
+  lines.push(`chain ${chainName} {`);
+  lines.push(`    type filter hook forward priority -10; policy accept;`);
+  lines.push(`    ${ipMatch} @${setName}${portClause} reject comment "bt:${ruleId}"`);
+  lines.push(`}`);
+  return lines.join("\n") + "\n";
+}
+
 /**
  * Materialize a rule into the actual ops the agent will run. For most rule
- * types this is just the structural ops from buildRuleOps (or whatever was
- * stored). For block_managed_list, this fetches the latest source list and
- * inlines it into the file.write op's content field.
+ * types this is just the structural ops from buildRuleOps. For rules that
+ * carry an upstream-fetched blob (block_managed_list, block_ip_set), this
+ * fetches the source and inlines its content into the relevant file.write
+ * op — everything else (uci.set, service reload) flows through unchanged.
  */
 export async function materializeOps(rule: AccountRule): Promise<Op[]> {
-  if (rule.rule_type !== "block_managed_list") return rule.ops;
-  const p = rule.params as BlockManagedListParams;
-  const domains = await fetchManagedListDomains(p.source);
-  const conf = dnsmasqBlockConf(domains);
-  // Keep the structural ops (uci.set confdir, etc.) and only patch the
-  // file.write to carry the fetched content. That way changes to
-  // buildRuleOps automatically flow through materializeOps without
-  // having to redeclare every op here.
-  const path = managedListConfPath(rule.rule_id);
-  return rule.ops.map((o) =>
-    o.type === "file.write" && o.path === path ? { ...o, content: conf } : o,
-  );
+  if (rule.rule_type === "block_managed_list") {
+    const p = rule.params as BlockManagedListParams;
+    const domains = await fetchManagedListDomains(p.source);
+    const conf = dnsmasqBlockConf(domains);
+    const path = managedListConfPath(rule.rule_id);
+    return rule.ops.map((o) =>
+      o.type === "file.write" && o.path === path ? { ...o, content: conf } : o,
+    );
+  }
+  if (rule.rule_type === "block_ip_set") {
+    const p = rule.params as BlockIpSetParams;
+    const cfg = IP_SET_SOURCES[p.source];
+    const entries = await fetchIpSetEntries(p.source);
+    const content = nftBlockIpSetFile(
+      rule.rule_id,
+      cfg.family,
+      entries,
+      p.dest_port ?? cfg.default_dest_port,
+    );
+    const path = ipSetNftPath(rule.rule_id);
+    return rule.ops.map((o) =>
+      o.type === "file.write" && o.path === path ? { ...o, content } : o,
+    );
+  }
+  return rule.ops;
 }
 
 /**
