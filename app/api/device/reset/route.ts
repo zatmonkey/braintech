@@ -63,29 +63,29 @@ export async function POST(req: Request) {
     SELECT rule_id, device_id, rule_type, params, ops, active, name, summary
     FROM account_rules WHERE owner_email = ${email} AND device_id = ${dev.device_id};
   `) as RuleRow[];
-  const allPauseIds = all.filter((r) => r.rule_type === "pause_device").map((r) => r.rule_id);
-  // Reset always REGENERATES the ops from params via buildRuleOps. params is
-  // the canonical data; ops is derived. This way `reset` is also the natural
-  // "re-bake stored rules with the current rule templates" knob — if we ship
-  // a buildRuleOps fix (e.g. adding AAAA blocks), reset picks it up.
-  const active: AccountRule[] = all
-    .filter((r) => r.active)
-    .map((r) => ({
-      rule_id: r.rule_id,
-      rule_type: r.rule_type,
-      params: r.params,
-      ops: buildRuleOps(r.rule_id, r.rule_type, r.params),
-      name: r.name,
-      summary: r.summary ?? undefined,
-      active: true,
-    }));
-  // Persist the regenerated ops so account_rules.ops matches what the device
-  // is actually running (otherwise the dashboard / next apply would diverge).
-  for (const r of active) {
+  // Reset always REGENERATES the ops from params via buildRuleOps for ACTIVE
+  // rules. params is canonical; ops is derived. So a buildRuleOps fix (e.g.
+  // adding AAAA blocks, or any future rule-template change) is picked up by
+  // a simple `btnet reset` — no need to remove and re-add each rule.
+  // Inactive rules keep their stored ops (they're never applied anyway —
+  // only their cleanup ops run via ownedSections in assembleDesired).
+  const allRules: AccountRule[] = all.map((r) => ({
+    rule_id: r.rule_id,
+    rule_type: r.rule_type,
+    params: r.params,
+    ops: r.active ? buildRuleOps(r.rule_id, r.rule_type, r.params) : r.ops,
+    name: r.name,
+    summary: r.summary ?? undefined,
+    active: r.active,
+  }));
+  // Persist regenerated ops for active rules so account_rules.ops matches
+  // what the device is actually running.
+  for (const r of allRules) {
+    if (!r.active) continue;
     await sql`UPDATE account_rules SET ops = ${JSON.stringify(r.ops)}::jsonb, updated_at = NOW()
       WHERE rule_id = ${r.rule_id};`;
   }
-  const desired = assembleDesired(allPauseIds, active);
+  const desired = assembleDesired(allRules);
   const next = dev.desired_version + 1;
   await sql`
     UPDATE devices SET desired = ${JSON.stringify(desired)}::jsonb, desired_version = ${next}, updated_at = NOW()
@@ -95,8 +95,8 @@ export async function POST(req: Request) {
     ok: true,
     device_id: dev.device_id,
     desired_version: next,
-    active_rules: active.length,
-    pause_rule_ids_cleaned: allPauseIds.length,
+    active_rules: allRules.filter((r) => r.active).length,
+    total_rules_ever: allRules.length,
     ops_regenerated: true,
   });
 }

@@ -349,6 +349,7 @@ If a tool returns an error string starting with "error:", do NOT claim success �
 Rule types you can use right now:
 - **pause_device** (needs target_mac): blocks ALL traffic from one device. For "pause Maya's iPad", look up Maya's iPad in the Connected list to get its MAC.
 - **block_domains_network** (needs domains[]): blocks specific domains for the whole network via DNS. Be thorough — for "block TikTok", include tiktok.com, tiktokcdn.com, musical.ly. For "block YouTube", include youtube.com, youtu.be, ytimg.com, googlevideo.com.
+- **force_router_dns** (no params): redirects all LAN DNS traffic (tcp/udp port 53) to the router's own resolver and blocks DNS-over-TLS (tcp/853). Prevents kids from bypassing domain blocks by manually setting their DNS to 8.8.8.8 or 1.1.1.1. Recommend this whenever domain blocks are in place. Note: does NOT block DNS-over-HTTPS (DoH) yet — that's a separate fight.
 
 When the parent identifies an unnamed device ("the one at 192.168.4.99 is Maya's iPad"), call **set_client_name** with its MAC + the friendly name.
 
@@ -371,11 +372,14 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
   {
     name: "propose_rule",
     description:
-      "Propose a rule to the parent for confirmation. Use rule_type 'pause_device' with target_mac to block ALL traffic from one device by MAC (kill switch). Use 'block_domains_network' with domains[] to block apps/sites for the whole network via DNS (e.g., TikTok → ['tiktok.com','tiktokcdn.com']). Pick a short hyphenated name (e.g., 'pause-maya-ipad') and a one-sentence summary. After calling this, tell the parent what you'll do and ask them to confirm — do NOT apply yet.",
+      "Propose a rule to the parent for confirmation. Use rule_type 'pause_device' with target_mac to block ALL traffic from one device by MAC (kill switch). Use 'block_domains_network' with domains[] to block apps/sites for the whole network via DNS (e.g., TikTok → ['tiktok.com','tiktokcdn.com']). Use 'force_router_dns' (no extra params) to redirect all client DNS to the router so kids can't bypass domain blocks by manually setting 8.8.8.8. Pick a short hyphenated name (e.g., 'pause-maya-ipad', 'force-router-dns') and a one-sentence summary. After calling this, tell the parent what you'll do and ask them to confirm — do NOT apply yet.",
     input_schema: {
       type: "object",
       properties: {
-        rule_type: { type: "string", enum: ["pause_device", "block_domains_network"] },
+        rule_type: {
+          type: "string",
+          enum: ["pause_device", "block_domains_network", "force_router_dns"],
+        },
         name: { type: "string" },
         summary: { type: "string" },
         target_mac: { type: "string" },

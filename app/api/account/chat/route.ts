@@ -234,7 +234,7 @@ export async function POST(req: Request) {
         const friendlyName = String(i.name ?? "").slice(0, 64) || "unnamed";
         const summary = String(i.summary ?? "").slice(0, 200);
         let params: RuleParams;
-        let prefix: "pause" | "domains";
+        let prefix: "pause" | "domains" | "dnsforce";
         if (rt === "pause_device") {
           const mac = String(i.target_mac ?? "").toLowerCase();
           if (!mac) return "error: target_mac required for pause_device";
@@ -245,6 +245,9 @@ export async function POST(req: Request) {
           if (ds.length === 0) return "error: domains[] required for block_domains_network";
           params = { domains: ds } as BlockDomainsParams;
           prefix = "domains";
+        } else if (rt === "force_router_dns") {
+          params = {} as RuleParams;
+          prefix = "dnsforce";
         } else {
           return `error: unknown rule_type "${rt}"`;
         }
@@ -269,24 +272,22 @@ export async function POST(req: Request) {
           INSERT INTO account_rules (rule_id, owner_email, device_id, name, rule_type, summary, params, ops, active)
           VALUES (${p.rule_id}, ${email}, ${primary.device_id}, ${p.name}, ${p.rule_type}, ${p.summary}, ${JSON.stringify(p.params)}::jsonb, ${JSON.stringify(p.ops)}::jsonb, TRUE);
         `;
-        // rebuild desired from all active rules + cleanup of all known pause rule ids
-        const allRules = (await sql`
+        // Rebuild desired from every rule we've ever issued (active or not).
+        // Inactive ones contribute cleanup ops; active ones contribute apply too.
+        const allRows = (await sql`
           SELECT rule_id, rule_type, name, summary, params, ops, active
           FROM account_rules WHERE owner_email = ${email} AND device_id = ${primary.device_id};
         `) as RuleRow[];
-        const allPauseIds = allRules.filter((r) => r.rule_type === "pause_device").map((r) => r.rule_id);
-        const active: AccountRule[] = allRules
-          .filter((r) => r.active)
-          .map((r) => ({
-            rule_id: r.rule_id,
-            rule_type: r.rule_type,
-            params: r.params,
-            ops: r.ops,
-            name: r.name,
-            summary: r.summary ?? undefined,
-            active: true,
-          }));
-        const desired = assembleDesired(allPauseIds, active);
+        const allRules: AccountRule[] = allRows.map((r) => ({
+          rule_id: r.rule_id,
+          rule_type: r.rule_type,
+          params: r.params,
+          ops: r.ops,
+          name: r.name,
+          summary: r.summary ?? undefined,
+          active: r.active,
+        }));
+        const desired = assembleDesired(allRules);
         const newVersion = primary.desired_version + 1;
         await sql`
           UPDATE devices SET desired = ${JSON.stringify(desired)}::jsonb, desired_version = ${newVersion}, updated_at = NOW()

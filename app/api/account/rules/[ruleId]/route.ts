@@ -45,24 +45,22 @@ export async function DELETE(
 
   await sql`UPDATE account_rules SET active = FALSE, updated_at = NOW() WHERE rule_id = ${ruleId};`;
 
-  // rebuild desired from the remaining active rules
+  // Rebuild desired from every rule we've ever issued (active or not).
+  // Inactive ones contribute cleanup ops; active ones contribute cleanup + apply.
   const all = (await sql`
     SELECT rule_id, device_id, rule_type, params, ops, active, name, summary
     FROM account_rules WHERE owner_email = ${email} AND device_id = ${r.device_id};
   `) as RuleRow[];
-  const allPauseIds = all.filter((x) => x.rule_type === "pause_device").map((x) => x.rule_id);
-  const active: AccountRule[] = all
-    .filter((x) => x.active)
-    .map((x) => ({
-      rule_id: x.rule_id,
-      rule_type: x.rule_type,
-      params: x.params,
-      ops: x.ops,
-      name: x.name,
-      summary: x.summary ?? undefined,
-      active: true,
-    }));
-  const desired = assembleDesired(allPauseIds, active);
+  const allRules: AccountRule[] = all.map((x) => ({
+    rule_id: x.rule_id,
+    rule_type: x.rule_type,
+    params: x.params,
+    ops: x.ops,
+    name: x.name,
+    summary: x.summary ?? undefined,
+    active: x.active,
+  }));
+  const desired = assembleDesired(allRules);
 
   const dev = (await sql`
     SELECT desired_version FROM devices WHERE device_id = ${r.device_id} AND owner_email = ${email};

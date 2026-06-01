@@ -14,11 +14,18 @@ export type Op = {
   action?: string;
 };
 
-export type RuleType = "pause_device" | "block_domains_network";
+export type RuleType =
+  | "pause_device"
+  | "block_domains_network"
+  | "force_router_dns";
 
 export type PauseDeviceParams = { mac: string; client_name?: string };
 export type BlockDomainsParams = { domains: string[] };
-export type RuleParams = PauseDeviceParams | BlockDomainsParams;
+export type ForceRouterDnsParams = Record<string, never>;
+export type RuleParams =
+  | PauseDeviceParams
+  | BlockDomainsParams
+  | ForceRouterDnsParams;
 
 export interface AccountRule {
   rule_id: string;
@@ -30,8 +37,41 @@ export interface AccountRule {
   active: boolean;
 }
 
-export function newRuleId(prefix: "pause" | "domains"): string {
+export function newRuleId(prefix: "pause" | "domains" | "dnsforce"): string {
   return `${prefix}_${randomBytes(4).toString("hex")}`;
+}
+
+/**
+ * Named UCI sections a rule owns. Cleanup deletes these regardless of whether
+ * the rule is active right now — that's how transitioning from active→inactive
+ * actually removes the rule from the running config. Section naming follows
+ * `bt_<ruleId>` or `bt_<ruleId>_<suffix>` so they're easy to spot in `uci show`.
+ */
+export function ownedSections(
+  ruleId: string,
+  type: RuleType,
+): { config: string; section: string }[] {
+  switch (type) {
+    case "pause_device":
+      return [{ config: "firewall", section: `bt_${ruleId}` }];
+    case "block_domains_network":
+      return []; // owns dnsmasq address list entries, wiped by assembleDesired
+    case "force_router_dns":
+      return [
+        { config: "firewall", section: `bt_${ruleId}_t` },
+        { config: "firewall", section: `bt_${ruleId}_u` },
+        { config: "firewall", section: `bt_${ruleId}_dot` },
+      ];
+  }
+}
+
+/** Cleanup ops for a single rule's owned sections. */
+export function buildCleanupOps(ruleId: string, type: RuleType): Op[] {
+  return ownedSections(ruleId, type).map((s) => ({
+    type: "uci.delete",
+    config: s.config,
+    section: s.section,
+  }));
 }
 
 /**
@@ -86,6 +126,74 @@ export function buildRuleOps(
         },
       ];
     }
+    case "force_router_dns": {
+      // Three firewall sections:
+      //   bt_<id>_t  — DNAT redirect for LAN tcp/53  → the router's own dnsmasq
+      //   bt_<id>_u  — DNAT redirect for LAN udp/53  → same
+      //   bt_<id>_dot — REJECT LAN → wan tcp/853 (DNS over TLS)
+      //
+      // Without dest_ip the redirect target is the router itself (fw4
+      // resolves it to the lan-side address). The src='lan' scope means
+      // router-originated DNS queries (dnsmasq forwarding upstream) are
+      // never matched — only client traffic.
+      //
+      // DoH (HTTPS on 443) isn't blocked here — that needs a separate
+      // policy (block known DoH endpoint IPs + DoH bootstrap domains).
+      // Plain DNS coverage is the 90% win; DoH bypass is a follow-up.
+      const tcp = `bt_${ruleId}_t`;
+      const udp = `bt_${ruleId}_u`;
+      const dot = `bt_${ruleId}_dot`;
+      return [
+        // tcp/53 redirect
+        { type: "uci.set", config: "firewall", section: tcp, value: "redirect" },
+        {
+          type: "uci.set",
+          config: "firewall",
+          section: tcp,
+          values: {
+            name: `bt-dns-tcp-${ruleId}`,
+            src: "lan",
+            proto: "tcp",
+            src_dport: "53",
+            dest_port: "53",
+            target: "DNAT",
+            enabled: "1",
+          },
+        },
+        // udp/53 redirect
+        { type: "uci.set", config: "firewall", section: udp, value: "redirect" },
+        {
+          type: "uci.set",
+          config: "firewall",
+          section: udp,
+          values: {
+            name: `bt-dns-udp-${ruleId}`,
+            src: "lan",
+            proto: "udp",
+            src_dport: "53",
+            dest_port: "53",
+            target: "DNAT",
+            enabled: "1",
+          },
+        },
+        // DoT block
+        { type: "uci.set", config: "firewall", section: dot, value: "rule" },
+        {
+          type: "uci.set",
+          config: "firewall",
+          section: dot,
+          values: {
+            name: `bt-dot-${ruleId}`,
+            src: "lan",
+            dest: "wan",
+            proto: "tcp",
+            dest_port: "853",
+            target: "REJECT",
+            enabled: "1",
+          },
+        },
+      ];
+    }
   }
 }
 
@@ -100,44 +208,45 @@ export function buildRuleOps(
  *  2. Apply each active rule's ops in order.
  *  3. Append commits for the touched UCI configs + service reloads.
  */
-export function assembleDesired(
-  allKnownPauseRuleIds: string[],
-  activeRules: AccountRule[],
-): Op[] {
+/**
+ * Build the device's full desired ops from every rule ever issued (active
+ * or not). The pattern is "wipe-then-rebuild":
+ *
+ *   1. Cleanup every named UCI section any rule has ever owned + always
+ *      wipe the dnsmasq address list. The agent's uci.delete is tolerant
+ *      of missing entries, so it's safe to delete things that don't exist.
+ *   2. Re-emit ops for ACTIVE rules only.
+ *   3. Commit firewall + dhcp and reload firewall + dnsmasq. We always
+ *      touch both configs above (the cleanup writes to both), so we must
+ *      always commit AND reload both — otherwise the running daemon holds
+ *      stale state from before the cleanup.
+ *
+ * Pass ALL rules (active and inactive). Inactive rules contribute cleanup
+ * ops only; active rules contribute cleanup + apply. This makes the desired
+ * state a pure function of (allRules) with no path-dependence.
+ */
+export function assembleDesired(allRules: AccountRule[]): Op[] {
   const ops: Op[] = [];
-  const configs = new Set<string>();
-  const services = new Set<string>();
 
-  // (1) cleanup of prior state — ALWAYS run all cleanups every time. The
-  //     agent's uci.delete is tolerant of "Entry not found", so deleting
-  //     things that don't exist is a no-op. This keeps the desired state
-  //     a pure function of activeRules with no path-dependence.
-  for (const id of allKnownPauseRuleIds) {
-    ops.push({ type: "uci.delete", config: "firewall", section: `bt_${id}` });
+  // (1) cleanup — every owned section across every rule we know about.
+  for (const r of allRules) {
+    for (const o of buildCleanupOps(r.rule_id, r.rule_type)) ops.push(o);
   }
+  // Always wipe the dnsmasq address list — domain rules own it as a shared
+  // resource and we rebuild it from scratch each time.
   ops.push({ type: "uci.delete", config: "dhcp", section: "@dnsmasq[0]", option: "address" });
 
   // (2) apply each active rule's ops
-  for (const r of activeRules) {
-    for (const o of r.ops) {
-      ops.push(o);
-      if (o.config) configs.add(o.config);
-    }
+  for (const r of allRules) {
+    if (!r.active) continue;
+    for (const o of r.ops) ops.push(o);
   }
-  // cleanup itself always touches firewall + dhcp, so those configs must
-  // be committed and their owning services reloaded every time — otherwise
-  // a transition from "has rule" → "no rules" would leave the running
-  // service holding stale state from disk.
-  configs.add("firewall");
-  configs.add("dhcp");
 
-  // (3) commit + reload — always reload the services whose configs we
-  //     touched (firewall, dnsmasq), so removed rules actually disappear
-  //     from the kernel/daemon ruleset, not just from the on-disk config.
-  for (const c of configs) ops.push({ type: "uci.commit", config: c });
-  if (configs.has("firewall")) services.add("firewall");
-  if (configs.has("dhcp")) services.add("dnsmasq");
-  for (const s of services) ops.push({ type: "service", name: s, action: "reload" });
+  // (3) commit + reload firewall + dhcp/dnsmasq unconditionally
+  ops.push({ type: "uci.commit", config: "firewall" });
+  ops.push({ type: "uci.commit", config: "dhcp" });
+  ops.push({ type: "service", name: "firewall", action: "reload" });
+  ops.push({ type: "service", name: "dnsmasq", action: "reload" });
 
   return ops;
 }
