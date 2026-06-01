@@ -13,6 +13,7 @@ import {
 } from "@/app/lib/db";
 import {
   assembleDesired,
+  buildRuleOps,
   type AccountRule,
   type Op,
   type RuleType,
@@ -63,17 +64,27 @@ export async function POST(req: Request) {
     FROM account_rules WHERE owner_email = ${email} AND device_id = ${dev.device_id};
   `) as RuleRow[];
   const allPauseIds = all.filter((r) => r.rule_type === "pause_device").map((r) => r.rule_id);
+  // Reset always REGENERATES the ops from params via buildRuleOps. params is
+  // the canonical data; ops is derived. This way `reset` is also the natural
+  // "re-bake stored rules with the current rule templates" knob — if we ship
+  // a buildRuleOps fix (e.g. adding AAAA blocks), reset picks it up.
   const active: AccountRule[] = all
     .filter((r) => r.active)
     .map((r) => ({
       rule_id: r.rule_id,
       rule_type: r.rule_type,
       params: r.params,
-      ops: r.ops,
+      ops: buildRuleOps(r.rule_id, r.rule_type, r.params),
       name: r.name,
       summary: r.summary ?? undefined,
       active: true,
     }));
+  // Persist the regenerated ops so account_rules.ops matches what the device
+  // is actually running (otherwise the dashboard / next apply would diverge).
+  for (const r of active) {
+    await sql`UPDATE account_rules SET ops = ${JSON.stringify(r.ops)}::jsonb, updated_at = NOW()
+      WHERE rule_id = ${r.rule_id};`;
+  }
   const desired = assembleDesired(allPauseIds, active);
   const next = dev.desired_version + 1;
   await sql`
@@ -86,5 +97,6 @@ export async function POST(req: Request) {
     desired_version: next,
     active_rules: active.length,
     pause_rule_ids_cleaned: allPauseIds.length,
+    ops_regenerated: true,
   });
 }
