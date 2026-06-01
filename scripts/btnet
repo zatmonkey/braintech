@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # btnet — Braintech network test CLI.
 #
-# Drives the production stack end-to-end: mint a session via the admin
-# endpoint (no Gmail required), inspect dashboard state as JSON, rename
-# connected clients, talk to Bri, watch the OpenWrt One for the rule
-# landing, and clean up after the test run.
+# Drives the production stack end-to-end: log in with a real OTP (the
+# 30-day session cookie is cached at ~/.cache/btnet.cookies, so this is
+# usually a one-time step), inspect dashboard state, rename connected
+# clients, talk to Bri, watch the OpenWrt One for the rule landing, and
+# clean up after the test run.
 #
 # Env (read from scripts/btnet.env if that file exists):
 #   BRAINTECH_ROUTER_PASS  root password for the OpenWrt One (default: password123)
@@ -68,6 +69,35 @@ router_ssh() {
       "root@$ROUTER" "$@"
 }
 
+# --- dev helper: brute-force the OTP from the Neon DB ---
+# Requires DATABASE_URL + SESSION_SECRET in .env.local (the same secret the
+# server uses to HMAC the code). Iterates 0..999999, ~1s. Returns the code
+# on stdout or exits non-zero. Strictly a developer convenience; the prod
+# auth surface is unaffected.
+fetch_otp_from_db() {
+  local email="$1"
+  local env_file="$HERE/../.env.local"
+  [[ -f "$env_file" ]] || return 1
+  local db_url secret
+  db_url=$(grep -E '^DATABASE_URL=' "$env_file" | head -1 | sed -E 's/^DATABASE_URL=//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/')
+  secret=$(grep -E '^SESSION_SECRET=' "$env_file" | head -1 | sed -E 's/^SESSION_SECRET=//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/')
+  [[ -n "$db_url" && -n "$secret" ]] || return 1
+  command -v psql >/dev/null && command -v node >/dev/null || return 1
+  local hash
+  hash=$(psql "$db_url" -At -c "SELECT code_hash FROM otps WHERE email='$email' AND expires_at > NOW();" 2>/dev/null)
+  [[ -n "$hash" ]] || return 1
+  SESSION_SECRET="$secret" HASH="$hash" EMAIL="$email" node -e '
+    const { createHmac } = require("node:crypto");
+    const email = process.env.EMAIL;
+    for (let i = 0; i < 1_000_000; i++) {
+      const code = String(i).padStart(6, "0");
+      const h = createHmac("sha256", process.env.SESSION_SECRET).update(`${email}:${code}`).digest("hex");
+      if (h === process.env.HASH) { console.log(code); process.exit(0); }
+    }
+    process.exit(1);
+  '
+}
+
 # --- API helpers ---
 api_get() {
   curl -sS --cookie-jar "$COOKIE_JAR" --cookie "$COOKIE_JAR" \
@@ -116,6 +146,8 @@ cmd_login() {
   if echo "$req" | jq -e '.devCode' >/dev/null 2>&1; then
     code=$(echo "$req" | jq -r '.devCode')
     echo "(dev mode) using returned code: $code"
+  elif code=$(fetch_otp_from_db "$EMAIL" 2>/dev/null); then
+    echo "(dev) read OTP from DB: $code"
   else
     read -r -p "code from email: " code
   fi
