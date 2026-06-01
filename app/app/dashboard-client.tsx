@@ -133,31 +133,41 @@ export function ClientRow({
   connected?: boolean;
   label?: string;
 }) {
-  const [name, setName] = useState(label ?? hostname ?? "");
+  // Local display state: starts from the server-side `label` prop and gets
+  // optimistically updated on save so the parent server component (which
+  // only re-renders on full reload) doesn't need to be told. Falls back to
+  // hostname / "Unnamed device" when both are empty.
+  const initial = label ?? hostname ?? "";
+  const [name, setName] = useState(initial);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
 
   async function save(next: string) {
     const v = next.trim();
-    if (!v || v === (label ?? hostname ?? "")) {
+    if (!v || v === name) {
       setEditing(false);
       return;
     }
+    // Optimistic update — flip the displayed name immediately, roll back on error.
+    const prev = name;
+    setName(v);
     setSaving(true);
+    setEditing(false);
     try {
-      await fetch("/api/account/clients", {
+      const res = await fetch("/api/account/clients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mac, name: v }),
       });
-      setName(v);
+      if (!res.ok) throw new Error(`save failed: ${res.status}`);
+    } catch {
+      setName(prev);
     } finally {
       setSaving(false);
-      setEditing(false);
     }
   }
 
-  const display = label || hostname || "Unnamed device";
+  const display = name || hostname || "Unnamed device";
   return (
     <li className="flex items-center justify-between gap-3 py-2.5 text-sm">
       <div className="flex min-w-0 items-center gap-2">
