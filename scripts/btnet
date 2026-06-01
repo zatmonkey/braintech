@@ -1,0 +1,294 @@
+#!/usr/bin/env bash
+# btnet — Braintech network test CLI.
+#
+# Drives the production stack end-to-end: mint a session via the admin
+# endpoint (no Gmail required), inspect dashboard state as JSON, rename
+# connected clients, talk to Bri, watch the OpenWrt One for the rule
+# landing, and clean up after the test run.
+#
+# Env (read from scripts/btnet.env if that file exists):
+#   BRAINTECH_ROUTER_PASS  root password for the OpenWrt One (default: password123)
+#   BRAINTECH_BASE         default https://getbraintech.com
+#   BRAINTECH_EMAIL        default alex@ksso.net
+#   BRAINTECH_ROUTER       default 192.168.1.1
+#
+# Usage:
+#   btnet help
+#   btnet login                       # real OTP — paste the 6-digit code from email (lasts 30 days)
+#   btnet state                       # dump dashboard JSON
+#   btnet clients                     # list connected clients (table)
+#   btnet rename <mac> <name>         # rename a client via the dashboard API
+#   btnet chat "<message>"            # send one turn to Bri
+#   btnet propose-block <domains…>    # ask Bri to block domains (no confirm)
+#   btnet confirm                     # confirm the pending proposal
+#   btnet cancel                      # cancel the pending proposal
+#   btnet rules                       # list active rules
+#   btnet rm-rule <rule_id>           # remove a rule via the dashboard API
+#   btnet router <args…>              # run a shell command on the OpenWrt One
+#   btnet uci-firewall                # uci show firewall | grep braintech-relevant
+#   btnet uci-dhcp                    # uci show dhcp | grep address
+#   btnet logread [N]                 # last N agent log lines (default 20)
+#   btnet wait-sync [timeout_s]       # poll /state until reported==desired version
+#   btnet test                        # full propose→confirm→verify→remove cycle
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$HERE/btnet.env" ]]; then
+  # shellcheck disable=SC1091
+  source "$HERE/btnet.env"
+fi
+
+BASE="${BRAINTECH_BASE:-https://getbraintech.com}"
+EMAIL="${BRAINTECH_EMAIL:-alex@ksso.net}"
+ROUTER="${BRAINTECH_ROUTER:-192.168.1.1}"
+ROUTER_PASS="${BRAINTECH_ROUTER_PASS:-password123}"
+COOKIE_JAR="${BRAINTECH_COOKIE:-$HOME/.cache/btnet.cookies}"
+ASKPASS="${BRAINTECH_ASKPASS:-/tmp/btnet-askpass.sh}"
+mkdir -p "$(dirname "$COOKIE_JAR")"
+
+# --- ssh helper (uses SSH_ASKPASS so we don't need sshpass) ---
+prepare_askpass() {
+  cat > "$ASKPASS" <<EOF
+#!/bin/sh
+echo '$ROUTER_PASS'
+EOF
+  chmod +x "$ASKPASS"
+}
+
+router_ssh() {
+  prepare_askpass
+  SSH_ASKPASS="$ASKPASS" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 \
+    setsid -w ssh \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o PreferredAuthentications=password \
+      -o PubkeyAuthentication=no \
+      -o LogLevel=ERROR \
+      "root@$ROUTER" "$@"
+}
+
+# --- API helpers ---
+api_get() {
+  curl -sS --cookie-jar "$COOKIE_JAR" --cookie "$COOKIE_JAR" \
+    -H 'Accept: application/json' \
+    "$BASE$1"
+}
+
+api_post() {
+  local path="$1"; shift
+  curl -sS --cookie-jar "$COOKIE_JAR" --cookie "$COOKIE_JAR" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json' \
+    -X POST "$BASE$path" -d "${1:-}"
+}
+
+api_delete() {
+  curl -sS --cookie-jar "$COOKIE_JAR" --cookie "$COOKIE_JAR" \
+    -H 'Accept: application/json' \
+    -X DELETE "$BASE$1"
+}
+
+# --- commands ---
+cmd_help() {
+  sed -n '2,/^set -euo/p' "$0" | sed -n '/^# /p' | sed 's/^# \{0,1\}//'
+}
+
+cmd_login() {
+  # If we already have a working session, skip.
+  if curl -sS -o /dev/null -w '%{http_code}' --cookie "$COOKIE_JAR" \
+       "$BASE/api/account/state" 2>/dev/null | grep -q '^200$'; then
+    echo "session in $COOKIE_JAR is still valid"
+    return 0
+  fi
+
+  echo "requesting OTP for $EMAIL …"
+  local req
+  req=$(curl -sS -H 'Content-Type: application/json' \
+    -X POST "$BASE/api/auth/request" \
+    -d "$(jq -nc --arg e "$EMAIL" '{email:$e}')")
+  if ! echo "$req" | jq -e '.ok == true' >/dev/null 2>&1; then
+    echo "request failed: $req" >&2
+    exit 1
+  fi
+
+  local code
+  if echo "$req" | jq -e '.devCode' >/dev/null 2>&1; then
+    code=$(echo "$req" | jq -r '.devCode')
+    echo "(dev mode) using returned code: $code"
+  else
+    read -r -p "code from email: " code
+  fi
+
+  local resp
+  resp=$(curl -sS --cookie-jar "$COOKIE_JAR" \
+    -H 'Content-Type: application/json' \
+    -X POST "$BASE/api/auth/verify" \
+    -d "$(jq -nc --arg e "$EMAIL" --arg c "$code" '{email:$e,code:$c}')")
+  if ! echo "$resp" | jq -e '.ok == true' >/dev/null 2>&1; then
+    echo "verify failed: $resp" >&2
+    exit 1
+  fi
+  echo "logged in as $EMAIL (cookie saved to $COOKIE_JAR, valid 30 days)"
+}
+
+cmd_state() {
+  api_get /api/account/state | jq
+}
+
+cmd_clients() {
+  api_get /api/account/state | jq -r '
+    .labels as $labels |
+    .devices[].clients[] |
+    [
+      (.mac // "—"),
+      (.ip // "—"),
+      (if .connected then "ONLINE" else "idle" end),
+      ((($labels[] | select(.mac == .mac)).name // .hostname) // "(unnamed)"),
+      (.hostname // "")
+    ] | @tsv
+  ' | column -t -s $'\t' -N MAC,IP,STATUS,LABEL,HOSTNAME
+}
+
+cmd_rename() {
+  local mac="$1" name="$2"
+  api_post /api/account/clients "$(jq -nc --arg m "$mac" --arg n "$name" '{mac:$m,name:$n}')" | jq
+}
+
+cmd_chat() {
+  local msg="$1"
+  api_post /api/account/chat "$(jq -nc --arg m "$msg" '{message:$m}')" \
+    | jq -r '"BRI> \(.reply // .error // .)"'
+}
+
+cmd_propose_block() {
+  local list="$*"
+  cmd_chat "Block these domains for the whole network: $list."
+}
+
+cmd_confirm() {
+  cmd_chat "yes, apply it."
+}
+
+cmd_cancel() {
+  cmd_chat "actually, cancel that."
+}
+
+cmd_rules() {
+  api_get /api/account/state | jq -r '
+    .rules[] | select(.active==true) |
+    "\(.rule_id)\t\(.rule_type)\t\(.name)\t\(.summary // "")"
+  ' | column -t -s $'\t' -N RULE_ID,TYPE,NAME,SUMMARY
+}
+
+cmd_rm_rule() {
+  local id="$1"
+  api_delete "/api/account/rules/$id" | jq
+}
+
+cmd_router() {
+  router_ssh "$@"
+}
+
+cmd_uci_firewall() {
+  router_ssh 'uci show firewall | grep -E "bt_|braintech" || echo "(no braintech firewall rules)"'
+}
+
+cmd_uci_dhcp() {
+  router_ssh 'uci show dhcp | grep -E "address|braintech" || echo "(no braintech dnsmasq entries)"'
+}
+
+cmd_logread() {
+  local n="${1:-20}"
+  router_ssh "logread | grep braintech-agent | tail -$n"
+}
+
+cmd_wait_sync() {
+  local timeout="${1:-60}" elapsed=0
+  while (( elapsed < timeout )); do
+    local s
+    s=$(api_get /api/account/state)
+    local desired reported
+    desired=$(echo "$s" | jq -r '.devices[0].desired_version // 0')
+    reported=$(echo "$s" | jq -r '.devices[0].reported_version // 0')
+    if [[ "$desired" == "$reported" ]] && (( desired > 0 )); then
+      echo "in sync at v$desired"
+      return 0
+    fi
+    echo "  desired=$desired reported=$reported (waiting…)"
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
+  echo "timeout waiting for sync" >&2
+  return 1
+}
+
+cmd_test() {
+  echo "=== 1. login ==="
+  cmd_login
+
+  echo
+  echo "=== 2. dashboard state ==="
+  api_get /api/account/state | jq '{devices: [.devices[] | {device_id,label,online,in_sync,desired_version,reported_version}], n_clients: ([.devices[].clients[]] | length), n_rules: ([.rules[] | select(.active)] | length)}'
+
+  echo
+  echo "=== 3. ask Bri to block tiktok.com ==="
+  cmd_chat "Please block tiktok.com for the whole network."
+
+  echo
+  echo "=== 4. confirm ==="
+  cmd_chat "yes"
+
+  echo
+  echo "=== 5. wait for router to sync (up to 60s) ==="
+  cmd_wait_sync 60 || true
+
+  echo
+  echo "=== 6. verify on router ==="
+  cmd_uci_dhcp
+
+  echo
+  echo "=== 7. list active rules ==="
+  cmd_rules
+
+  echo
+  echo "=== 8. cleanup: remove the rule we just added ==="
+  local last
+  last=$(api_get /api/account/state | jq -r '[.rules[] | select(.active and .rule_type=="block_domains_network")] | last.rule_id // empty')
+  if [[ -n "$last" ]]; then
+    echo "removing $last"
+    cmd_rm_rule "$last"
+    cmd_wait_sync 60 || true
+    echo
+    echo "=== 9. verify cleanup on router ==="
+    cmd_uci_dhcp
+  else
+    echo "no domain-block rule found to clean up"
+  fi
+}
+
+main() {
+  local cmd="${1:-help}"; shift || true
+  case "$cmd" in
+    help|-h|--help) cmd_help ;;
+    login)          cmd_login "$@" ;;
+    state)          cmd_state ;;
+    clients)        cmd_clients ;;
+    rename)         cmd_rename "$@" ;;
+    chat)           cmd_chat "$*" ;;
+    propose-block)  cmd_propose_block "$@" ;;
+    confirm)        cmd_confirm ;;
+    cancel)         cmd_cancel ;;
+    rules)          cmd_rules ;;
+    rm-rule)        cmd_rm_rule "$@" ;;
+    router)         cmd_router "$@" ;;
+    uci-firewall)   cmd_uci_firewall ;;
+    uci-dhcp)       cmd_uci_dhcp ;;
+    logread)        cmd_logread "$@" ;;
+    wait-sync)      cmd_wait_sync "$@" ;;
+    test)           cmd_test ;;
+    *) echo "unknown command: $cmd (try: btnet help)" >&2; exit 2 ;;
+  esac
+}
+
+main "$@"
