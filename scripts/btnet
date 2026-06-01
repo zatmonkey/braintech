@@ -270,10 +270,17 @@ cmd_test() {
   cmd_login
 
   echo
-  echo "=== 1b. clean slate: cancel any stale pending proposal + remove existing rules ==="
-  if api_get /api/account/state | jq -e '.pending_proposal' >/dev/null 2>&1; then
-    echo "  found stale pending, cancelling…"
-    cmd_chat "cancel that pending proposal please" >/dev/null
+  echo "=== 1b. clean slate: wipe chat history + cancel pending + remove existing rules ==="
+  # Wipe Bri's chat history for this account so her past "Done" replies
+  # can't contaminate this run. Dev-only — requires DATABASE_URL.
+  local env_file="$HERE/../.env.local"
+  if [[ -f "$env_file" ]]; then
+    local db_url
+    db_url=$(grep -E '^DATABASE_URL=' "$env_file" | head -1 | sed -E 's/^DATABASE_URL=//; s/^"(.*)"$/\1/')
+    if [[ -n "$db_url" ]] && command -v psql >/dev/null; then
+      psql "$db_url" -At -c "DELETE FROM chat_messages WHERE session_id='acct:$EMAIL'; UPDATE chat_sessions SET pending_proposal=NULL WHERE session_id='acct:$EMAIL';" >/dev/null
+      echo "  wiped chat history"
+    fi
   fi
   for rid in $(api_get /api/account/state | jq -r '.rules[] | select(.active) | .rule_id'); do
     echo "  removing pre-existing rule $rid"

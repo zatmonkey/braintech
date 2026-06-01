@@ -200,11 +200,13 @@ export async function POST(req: Request) {
 
   await sql`INSERT INTO chat_messages (session_id, role, content) VALUES (${sessionId}, 'user', ${message});`;
 
-  // Keep history short (last 3 exchanges = 6 messages). The transcript is for
-  // conversational flow only — durable state lives in CONTEXT/memory.
+  // Keep history short (last 2 exchanges = 4 messages). The transcript is
+  // for conversational flow only — durable state lives in CONTEXT. The
+  // shorter the history, the less room there is for Bri to anchor on her
+  // own past "Done" claims and contradict the freshly-fetched CONTEXT.
   const histRows = (await sql`
     SELECT role, content FROM chat_messages WHERE session_id = ${sessionId}
-    ORDER BY created_at DESC, id DESC LIMIT 6;
+    ORDER BY created_at DESC, id DESC LIMIT 4;
   `) as { role: string; content: string }[];
   const history: Anthropic.MessageParam[] = histRows
     .reverse()
