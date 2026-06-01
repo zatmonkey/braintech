@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -176,7 +177,15 @@ func fileWrite(op Op, cfg Config) (string, error) {
 			mode = os.FileMode(m)
 		}
 	}
-	// atomic write: tmp file + rename, so dnsmasq never reads a half-written conf
+	// Ensure parent dir exists — drop-in conf dirs like /etc/dnsmasq.d/ aren't
+	// guaranteed to be present on every OpenWrt build.
+	if dir := filepath.Dir(op.Path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", fmt.Errorf("mkdir %s: %w", dir, err)
+		}
+	}
+	// Atomic write: tmp file in the same dir + rename, so dnsmasq never reads
+	// a half-written conf.
 	tmp := op.Path + ".bt.tmp"
 	if err := os.WriteFile(tmp, []byte(op.Content), mode); err != nil {
 		return "", err

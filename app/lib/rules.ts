@@ -161,17 +161,26 @@ export function buildRuleOps(
       ];
     }
     case "block_managed_list": {
-      // Structural placeholder. The dnsmasq conf content is filled in at
-      // assembly time by materializeOps() — we don't want a 1MB blob sitting
-      // in account_rules.ops or chat_sessions.pending_proposal forever.
+      // OpenWrt's dnsmasq init reads /tmp/dnsmasq.cfg*.d/ but NOT
+      // /etc/dnsmasq.d/ unless we add `confdir` to /etc/config/dhcp first.
+      // We set it idempotently as part of every managed-list rule.
+      // Structural placeholder for the file content — filled in at assembly
+      // time by materializeOps() (we don't store a 1MB blob in account_rules
+      // or chat_sessions.pending_proposal).
       return [
+        {
+          type: "uci.set",
+          config: "dhcp",
+          section: "@dnsmasq[0]",
+          option: "confdir",
+          value: "/etc/dnsmasq.d",
+        },
         {
           type: "file.write",
           path: managedListConfPath(ruleId),
           content: "",
           mode: "644",
         },
-        { type: "service", name: "dnsmasq", action: "reload" },
       ];
     }
     case "force_router_dns": {
