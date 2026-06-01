@@ -48,8 +48,13 @@ export async function GET() {
   `) as DeviceRow[];
 
   const labels = (await sql`
-    SELECT mac, name FROM client_labels WHERE owner_email = ${email};
-  `) as { mac: string; name: string }[];
+    SELECT mac, name, group_id FROM client_labels WHERE owner_email = ${email};
+  `) as { mac: string; name: string; group_id: string | null }[];
+
+  const groups = (await sql`
+    SELECT group_id, name, description, created_at
+    FROM account_groups WHERE owner_email = ${email} ORDER BY created_at;
+  `) as { group_id: string; name: string; description: string | null; created_at: string }[];
 
   const rules = (await sql`
     SELECT rule_id, device_id, name, rule_type, summary, params, ops, active, created_at, updated_at
@@ -80,6 +85,10 @@ export async function GET() {
       clients: (d.telemetry?.clients ?? []).filter((c) => c.ip && !c.ip.startsWith("fe80")),
     })),
     labels,
+    groups: groups.map((g) => ({
+      ...g,
+      members: labels.filter((l) => l.group_id === g.group_id).map((l) => ({ mac: l.mac, name: l.name })),
+    })),
     rules,
     memory: mem[0] ?? { humans: [], notes: "", updated_at: null },
     pending_proposal: pending[0]?.pending_proposal ?? null,

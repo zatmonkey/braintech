@@ -11,6 +11,7 @@ import {
 import { runAccountChatTurn, ACCOUNT_TOOLS } from "@/app/lib/conversation";
 import {
   newRuleId,
+  newGroupId,
   buildRuleOps,
   assembleDesired,
   materializeOps,
@@ -23,12 +24,14 @@ import {
   type RuleType,
   type RuleParams,
   type PauseDeviceParams,
+  type PauseGroupParams,
   type BlockDomainsParams,
   type BlockManagedListParams,
   type BlockIpSetParams,
   type ManagedListSource,
   type IpSetSource,
 } from "@/app/lib/rules";
+import { loadGroupMacs } from "@/app/lib/groups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,7 +60,8 @@ type RuleRow = {
   ops: Op[];
   active: boolean;
 };
-type LabelRow = { mac: string; name: string };
+type LabelRow = { mac: string; name: string; group_id: string | null };
+type GroupRow = { group_id: string; name: string; description: string | null };
 type Human = {
   name: string;
   role: "parent" | "child";
@@ -99,14 +103,32 @@ function fmtHouseholdMemory(memory: Memory): string {
   return lines.join("\n");
 }
 
+function fmtGroups(
+  groups: GroupRow[],
+  membership: Map<string, { mac: string; name: string }[]>,
+): string {
+  if (groups.length === 0) return "GROUPS: (none defined — Bri can create one with create_group)";
+  const lines = ["GROUPS (named buckets of MACs that pause_group can target):"];
+  for (const g of groups) {
+    const members = membership.get(g.group_id) ?? [];
+    const desc = g.description ? ` — ${g.description}` : "";
+    lines.push(`  - ${g.group_id} "${g.name}"${desc} (${members.length} devices)`);
+    for (const m of members) lines.push(`      • ${m.name} (${m.mac})`);
+  }
+  return lines.join("\n");
+}
+
 function buildContext(
   devices: DeviceRow[],
   labels: Map<string, string>,
+  groups: GroupRow[],
+  membership: Map<string, { mac: string; name: string }[]>,
   activeRules: RuleRow[],
   pending: PendingProposal | null,
   memory: Memory,
 ): string {
   const memSection = fmtHouseholdMemory(memory);
+  const groupSection = fmtGroups(groups, membership);
   if (devices.length === 0) {
     return `${memSection}\n\nLIVE STATE: No Braintech device is linked to this account yet.`;
   }
@@ -146,7 +168,7 @@ function buildContext(
       `PENDING PROPOSAL waiting for confirmation:\n- ${pending.name} [${pending.rule_type}] — ${pending.summary}`,
     );
   }
-  return [memSection, ...sections].join("\n\n");
+  return [memSection, groupSection, ...sections].join("\n\n");
 }
 
 export async function POST(req: Request) {
@@ -177,9 +199,21 @@ export async function POST(req: Request) {
   const primary = devices[0]; // v1: act on the first device
 
   const labelRows = (await sql`
-    SELECT mac, name FROM client_labels WHERE owner_email = ${email};
+    SELECT mac, name, group_id FROM client_labels WHERE owner_email = ${email};
   `) as LabelRow[];
   const labels = new Map(labelRows.map((l) => [l.mac.toLowerCase(), l.name]));
+
+  const groupRows = (await sql`
+    SELECT group_id, name, description
+    FROM account_groups WHERE owner_email = ${email} ORDER BY created_at;
+  `) as GroupRow[];
+  const membership = new Map<string, { mac: string; name: string }[]>();
+  for (const l of labelRows) {
+    if (!l.group_id) continue;
+    const list = membership.get(l.group_id) ?? [];
+    list.push({ mac: l.mac, name: l.name });
+    membership.set(l.group_id, list);
+  }
 
   const ruleRows = (await sql`
     SELECT rule_id, rule_type, name, summary, params, ops, active
@@ -221,7 +255,7 @@ export async function POST(req: Request) {
     .reverse()
     .map((r) => ({ role: r.role === "user" ? "user" : "assistant", content: r.content }));
 
-  const context = buildContext(devices, labels, activeRules, pendingInitial, memory);
+  const context = buildContext(devices, labels, groupRows, membership, activeRules, pendingInitial, memory);
 
   const onTool = async (name: string, input: unknown): Promise<string> => {
     try {
@@ -243,12 +277,19 @@ export async function POST(req: Request) {
         const friendlyName = String(i.name ?? "").slice(0, 64) || "unnamed";
         const summary = String(i.summary ?? "").slice(0, 200);
         let params: RuleParams;
-        let prefix: "pause" | "domains" | "dnsforce" | "mlist" | "ipset";
+        let prefix: "pause" | "pausegrp" | "domains" | "dnsforce" | "mlist" | "ipset";
         if (rt === "pause_device") {
           const mac = String(i.target_mac ?? "").toLowerCase();
           if (!mac) return "error: target_mac required for pause_device";
           params = { mac, client_name: labels.get(mac) } as PauseDeviceParams;
           prefix = "pause";
+        } else if (rt === "pause_group") {
+          const gid = String(i.group_id ?? "");
+          if (!gid) return "error: group_id required for pause_group";
+          const g = (await sql`SELECT name FROM account_groups WHERE group_id = ${gid} AND owner_email = ${email};`) as { name: string }[];
+          if (g.length === 0) return `error: group "${gid}" not found`;
+          params = { group_id: gid, group_name: g[0].name } as PauseGroupParams;
+          prefix = "pausegrp";
         } else if (rt === "block_domains_network") {
           const ds = Array.isArray(i.domains) ? (i.domains as string[]).map((d) => String(d).toLowerCase()).filter(Boolean) : [];
           if (ds.length === 0) return "error: domains[] required for block_domains_network";
@@ -325,6 +366,7 @@ export async function POST(req: Request) {
           SELECT rule_id, rule_type, name, summary, params, ops, active
           FROM account_rules WHERE owner_email = ${email} AND device_id = ${primary.device_id};
         `) as RuleRow[];
+        const groupMacs = await loadGroupMacs(sql, email);
         const allRules: AccountRule[] = await Promise.all(
           allRows.map(async (r) => {
             const base: AccountRule = {
@@ -336,7 +378,7 @@ export async function POST(req: Request) {
               summary: r.summary ?? undefined,
               active: r.active,
             };
-            if (r.active) base.ops = await materializeOps(base);
+            if (r.active) base.ops = await materializeOps(base, { groupMacs });
             return base;
           }),
         );
@@ -352,6 +394,34 @@ export async function POST(req: Request) {
       if (name === "cancel_pending_rule") {
         await sql`UPDATE chat_sessions SET pending_proposal = NULL WHERE session_id = ${sessionId};`;
         return "Pending proposal cancelled.";
+      }
+      if (name === "create_group") {
+        const groupName = String(i.name ?? "").trim().slice(0, 64);
+        if (!groupName) return "error: name required";
+        const description = i.description ? String(i.description).slice(0, 200) : null;
+        const gid = newGroupId();
+        await sql`
+          INSERT INTO account_groups (group_id, owner_email, name, description)
+          VALUES (${gid}, ${email}, ${groupName}, ${description});
+        `;
+        return `Created group "${groupName}" (${gid}). Use set_device_group to add devices.`;
+      }
+      if (name === "set_device_group") {
+        const mac = String(i.mac ?? "").toLowerCase();
+        const gid = i.group_id == null ? null : String(i.group_id);
+        if (!mac) return "error: mac required";
+        if (gid) {
+          const g = (await sql`SELECT name FROM account_groups WHERE group_id = ${gid} AND owner_email = ${email};`) as { name: string }[];
+          if (g.length === 0) return `error: group "${gid}" not found`;
+        }
+        // Upsert: the row may not exist yet if the MAC has never been renamed.
+        const friendly = labels.get(mac) ?? mac;
+        await sql`
+          INSERT INTO client_labels (owner_email, mac, name, group_id)
+          VALUES (${email}, ${mac}, ${friendly}, ${gid})
+          ON CONFLICT (owner_email, mac) DO UPDATE SET group_id = EXCLUDED.group_id, updated_at = NOW();
+        `;
+        return gid ? `Added ${mac} to group ${gid}.` : `Removed ${mac} from its group.`;
       }
       if (name === "remember_household") {
         const next: Memory = { humans: memory.humans, notes: memory.notes };

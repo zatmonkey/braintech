@@ -20,6 +20,7 @@ import {
   type RuleType,
   type RuleParams,
 } from "@/app/lib/rules";
+import { loadGroupMacs } from "@/app/lib/groups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,6 +71,7 @@ export async function POST(req: Request) {
   // a simple `btnet reset` — no need to remove and re-add each rule.
   // Inactive rules keep their stored ops (they're never applied anyway —
   // only their cleanup ops run via ownedSections in assembleDesired).
+  const groupMacs = await loadGroupMacs(sql, email);
   const allRules: AccountRule[] = await Promise.all(
     all.map(async (r) => {
       const base: AccountRule = {
@@ -84,7 +86,7 @@ export async function POST(req: Request) {
         summary: r.summary ?? undefined,
         active: r.active,
       };
-      if (r.active) base.ops = await materializeOps(base);
+      if (r.active) base.ops = await materializeOps(base, { groupMacs });
       return base;
     }),
   );

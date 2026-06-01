@@ -21,6 +21,7 @@ import {
   type RuleType,
   type RuleParams,
 } from "@/app/lib/rules";
+import { loadGroupMacs } from "@/app/lib/groups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,12 +58,12 @@ export async function GET(req: Request) {
   // Find every device with at least one active rule whose ops are
   // upstream-fetched. Anything else doesn't need a refresh.
   const devices = (await sql`
-    SELECT DISTINCT d.device_id, d.desired_version
+    SELECT DISTINCT d.device_id, d.desired_version, d.owner_email
     FROM devices d
     JOIN account_rules r ON r.device_id = d.device_id
     WHERE r.active = TRUE
       AND r.rule_type IN ('block_managed_list','block_ip_set');
-  `) as { device_id: string; desired_version: number }[];
+  `) as { device_id: string; desired_version: number; owner_email: string }[];
 
   const refreshed: { device_id: string; version: number; rules: number }[] = [];
   const failures: { device_id: string; error: string }[] = [];
@@ -73,6 +74,7 @@ export async function GET(req: Request) {
         SELECT rule_id, device_id, rule_type, params, ops, active, name, summary
         FROM account_rules WHERE device_id = ${dev.device_id};
       `) as RuleRow[];
+      const groupMacs = await loadGroupMacs(sql, dev.owner_email);
       const allRules: AccountRule[] = await Promise.all(
         all.map(async (r) => {
           const base: AccountRule = {
@@ -84,7 +86,7 @@ export async function GET(req: Request) {
             summary: r.summary ?? undefined,
             active: r.active,
           };
-          if (r.active) base.ops = await materializeOps(base);
+          if (r.active) base.ops = await materializeOps(base, { groupMacs });
           return base;
         }),
       );

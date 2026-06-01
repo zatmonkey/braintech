@@ -20,12 +20,14 @@ export type Op = {
 
 export type RuleType =
   | "pause_device"
+  | "pause_group"
   | "block_domains_network"
   | "force_router_dns"
   | "block_managed_list"
   | "block_ip_set";
 
 export type PauseDeviceParams = { mac: string; client_name?: string };
+export type PauseGroupParams = { group_id: string; group_name?: string };
 export type BlockDomainsParams = { domains: string[] };
 export type ForceRouterDnsParams = Record<string, never>;
 /**
@@ -55,6 +57,7 @@ export type BlockIpSetParams = {
 };
 export type RuleParams =
   | PauseDeviceParams
+  | PauseGroupParams
   | BlockDomainsParams
   | ForceRouterDnsParams
   | BlockManagedListParams
@@ -71,9 +74,18 @@ export interface AccountRule {
 }
 
 export function newRuleId(
-  prefix: "pause" | "domains" | "dnsforce" | "mlist" | "ipset",
+  prefix: "pause" | "pausegrp" | "domains" | "dnsforce" | "mlist" | "ipset",
 ): string {
   return `${prefix}_${randomBytes(4).toString("hex")}`;
+}
+
+export function newGroupId(): string {
+  return `grp_${randomBytes(4).toString("hex")}`;
+}
+
+/** Path on the router for a pause_group rule's nftables include. */
+export function pauseGroupNftPath(ruleId: string): string {
+  return `/etc/nftables.d/bt-${ruleId}.nft`;
 }
 
 /** Path on the router for a managed-list rule's dnsmasq conf snippet. */
@@ -118,6 +130,8 @@ export function ownedTargets(
       return [{ kind: "file", path: managedListConfPath(ruleId) }];
     case "block_ip_set":
       return [{ kind: "file", path: ipSetNftPath(ruleId) }];
+    case "pause_group":
+      return [{ kind: "file", path: pauseGroupNftPath(ruleId) }];
   }
 }
 
@@ -213,6 +227,19 @@ export function buildRuleOps(
         {
           type: "file.write",
           path: ipSetNftPath(ruleId),
+          content: "",
+          mode: "644",
+        },
+        { type: "service", name: "firewall", action: "reload" },
+      ];
+    }
+    case "pause_group": {
+      // Structural placeholder — MAC set is populated at assembly time
+      // from current group membership.
+      return [
+        {
+          type: "file.write",
+          path: pauseGroupNftPath(ruleId),
           content: "",
           mode: "644",
         },
@@ -464,13 +491,59 @@ export function nftBlockIpSetFile(
 }
 
 /**
+ * Build the nftables include for a pause_group rule: a set of MAC addresses
+ * + a forward-hook chain at priority -10 that REJECTs anything sourced from
+ * any MAC in the set. Identical pattern to nftBlockIpSetFile but matches on
+ * ether saddr instead of ip daddr.
+ */
+export function nftPauseGroupFile(ruleId: string, macs: string[]): string {
+  const setName = `bt_${ruleId}_macs`;
+  const chainName = `bt_${ruleId}`;
+  const lines: string[] = [];
+  lines.push(`# Braintech — group pause (auto-generated, do not edit)`);
+  lines.push(`# ${macs.length} MACs`);
+  lines.push(``);
+  lines.push(`set ${setName} {`);
+  lines.push(`    type ether_addr`);
+  if (macs.length > 0) {
+    lines.push(`    elements = {`);
+    for (let i = 0; i < macs.length; i += 4) {
+      const chunk = macs.slice(i, i + 4).join(", ");
+      const isLast = i + 4 >= macs.length;
+      lines.push(`        ${chunk}${isLast ? "" : ","}`);
+    }
+    lines.push(`    }`);
+  }
+  lines.push(`}`);
+  lines.push(``);
+  lines.push(`chain ${chainName} {`);
+  lines.push(`    type filter hook forward priority -10; policy accept;`);
+  lines.push(`    ether saddr @${setName} reject comment "bt:${ruleId}"`);
+  lines.push(`}`);
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Optional context passed to materializeOps. Currently the only context
+ * any rule type needs is the group→MACs map for pause_group. Callers
+ * resolve membership once from the DB before iterating rules.
+ */
+export type MaterializeContext = {
+  groupMacs?: Map<string, string[]>;
+};
+
+/**
  * Materialize a rule into the actual ops the agent will run. For most rule
  * types this is just the structural ops from buildRuleOps. For rules that
  * carry an upstream-fetched blob (block_managed_list, block_ip_set), this
  * fetches the source and inlines its content into the relevant file.write
  * op — everything else (uci.set, service reload) flows through unchanged.
+ * For pause_group, the current group membership is pulled from ctx.
  */
-export async function materializeOps(rule: AccountRule): Promise<Op[]> {
+export async function materializeOps(
+  rule: AccountRule,
+  ctx: MaterializeContext = {},
+): Promise<Op[]> {
   if (rule.rule_type === "block_managed_list") {
     const p = rule.params as BlockManagedListParams;
     const domains = await fetchManagedListDomains(p.source);
@@ -491,6 +564,15 @@ export async function materializeOps(rule: AccountRule): Promise<Op[]> {
       p.dest_port ?? cfg.default_dest_port,
     );
     const path = ipSetNftPath(rule.rule_id);
+    return rule.ops.map((o) =>
+      o.type === "file.write" && o.path === path ? { ...o, content } : o,
+    );
+  }
+  if (rule.rule_type === "pause_group") {
+    const p = rule.params as PauseGroupParams;
+    const macs = ctx.groupMacs?.get(p.group_id) ?? [];
+    const content = nftPauseGroupFile(rule.rule_id, macs);
+    const path = pauseGroupNftPath(rule.rule_id);
     return rule.ops.map((o) =>
       o.type === "file.write" && o.path === path ? { ...o, content } : o,
     );

@@ -7,6 +7,7 @@ import {
   ensureAccountSchema,
 } from "@/app/lib/db";
 import { assembleDesired, materializeOps, type AccountRule, type Op, type RuleType, type RuleParams } from "@/app/lib/rules";
+import { loadGroupMacs } from "@/app/lib/groups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +52,7 @@ export async function DELETE(
     SELECT rule_id, device_id, rule_type, params, ops, active, name, summary
     FROM account_rules WHERE owner_email = ${email} AND device_id = ${r.device_id};
   `) as RuleRow[];
+  const groupMacs = await loadGroupMacs(sql, email);
   const allRules: AccountRule[] = await Promise.all(
     all.map(async (x) => {
       const base: AccountRule = {
@@ -62,7 +64,7 @@ export async function DELETE(
         summary: x.summary ?? undefined,
         active: x.active,
       };
-      if (x.active) base.ops = await materializeOps(base);
+      if (x.active) base.ops = await materializeOps(base, { groupMacs });
       return base;
     }),
   );

@@ -192,5 +192,22 @@ export async function ensureAccountSchema(
       updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
+
+  // Device groups: a named bucket of MACs that rules can target as a unit
+  // (e.g. "kids", "iot", "theo-devices"). NOT a VLAN — this is purely a
+  // logical scope; the router still sees one flat LAN. A MAC belongs to at
+  // most one group (membership lives on client_labels.group_id).
+  await sql`
+    CREATE TABLE IF NOT EXISTS account_groups (
+      group_id     TEXT PRIMARY KEY,
+      owner_email  TEXT NOT NULL,
+      name         TEXT NOT NULL,
+      description  TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS account_groups_owner_idx ON account_groups(owner_email);`;
+  await sql`ALTER TABLE client_labels ADD COLUMN IF NOT EXISTS group_id TEXT;`;
   accountSchemaReady = true;
 }

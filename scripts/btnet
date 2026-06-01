@@ -31,6 +31,10 @@
 #   btnet logread [N]                 # last N agent log lines (default 20)
 #   btnet wait-sync [timeout_s]       # poll /state until reported==desired version
 #   btnet memory                      # show household memory (humans, notes)
+#   btnet groups                      # list groups + members
+#   btnet group-create <name> [desc]  # create a group, prints group_id
+#   btnet group-delete <group_id>     # delete a group (members get unassigned)
+#   btnet assign <mac> <group_id>     # add a device to a group ('-' to unassign)
 #   btnet reset                       # re-derive desired from active rules + push
 #   btnet test                        # full propose→confirm→verify→remove cycle
 
@@ -261,6 +265,32 @@ cmd_memory() {
   api_get /api/account/state | jq '.memory'
 }
 
+cmd_groups() {
+  api_get /api/account/groups | jq
+}
+
+cmd_group_create() {
+  local name="$1"; shift || true
+  local desc="${*:-}"
+  api_post /api/account/groups "$(jq -nc --arg n "$name" --arg d "$desc" '{name:$n} + (if $d=="" then {} else {description:$d} end)')" | jq
+}
+
+cmd_group_delete() {
+  local gid="$1"
+  api_delete "/api/account/groups/$gid" | jq
+}
+
+cmd_assign() {
+  local mac="$1" gid="$2"
+  local body
+  if [[ "$gid" == "-" || -z "$gid" ]]; then
+    body=$(jq -nc --arg m "$mac" '{mac:$m, group_id:null}')
+  else
+    body=$(jq -nc --arg m "$mac" --arg g "$gid" '{mac:$m, group_id:$g}')
+  fi
+  api_post /api/account/clients "$body" | jq
+}
+
 cmd_reset() {
   api_post /api/device/reset '{}' | jq
 }
@@ -348,6 +378,10 @@ main() {
     logread)        cmd_logread "$@" ;;
     wait-sync)      cmd_wait_sync "$@" ;;
     memory)         cmd_memory ;;
+    groups)         cmd_groups ;;
+    group-create)   cmd_group_create "$@" ;;
+    group-delete)   cmd_group_delete "$@" ;;
+    assign)         cmd_assign "$@" ;;
     reset)          cmd_reset ;;
     test)           cmd_test ;;
     *) echo "unknown command: $cmd (try: btnet help)" >&2; exit 2 ;;

@@ -348,6 +348,7 @@ If a tool returns an error string starting with "error:", do NOT claim success �
 
 Rule types you can use right now:
 - **pause_device** (needs target_mac): blocks ALL traffic from one device. For "pause Maya's iPad", look up Maya's iPad in the Connected list to get its MAC.
+- **pause_group** (needs group_id): blocks ALL traffic from every device in a named GROUP. Use this when the parent says "pause the kids" or "block Theo's devices" and they have a group set up. If the group doesn't exist yet, call create_group first (and ask which devices to put in it) before proposing the pause.
 - **block_domains_network** (needs domains[]): blocks specific domains for the whole network via DNS. Be thorough — for "block TikTok", include tiktok.com, tiktokcdn.com, musical.ly. For "block YouTube", include youtube.com, youtu.be, ytimg.com, googlevideo.com.
 - **force_router_dns** (no params): redirects all LAN DNS traffic (tcp/udp port 53) to the router's own resolver and blocks DNS-over-TLS (tcp/853). Prevents kids from bypassing domain blocks by manually setting their DNS to 8.8.8.8 or 1.1.1.1. Recommend this whenever domain blocks are in place. Note: does NOT block DNS-over-HTTPS (DoH) yet — that's a separate fight.
 - **block_managed_list** (param: source="hagezi-anti-bypass"): drops a curated, multi-daily-updated blocklist on the device (~17k entries) covering ALL major VPNs (NordVPN, ExpressVPN, ProtonVPN, Surfshark, Mullvad, etc.), public DoH/DoT providers (Cloudflare, Google, Quad9, NextDNS, AdGuard), Tor bootstrap, and general proxies. Use this whenever the parent says "block VPNs", "prevent bypass", "block Tor", "no anonymizers", etc. ALWAYS pair with force_router_dns. Side effect: this is comprehensive, so it may also block obscure DoH endpoints used by some apps' analytics — surface this caveat.
@@ -382,6 +383,7 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
           type: "string",
           enum: [
             "pause_device",
+            "pause_group",
             "block_domains_network",
             "force_router_dns",
             "block_managed_list",
@@ -391,6 +393,7 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
         name: { type: "string" },
         summary: { type: "string" },
         target_mac: { type: "string" },
+        group_id: { type: "string", description: "For pause_group: which group to pause." },
         domains: { type: "array", items: { type: "string" } },
         source: {
           type: "string",
@@ -421,6 +424,32 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
     name: "cancel_pending_rule",
     description: "Discard the pending proposal (the parent declined or wants something different).",
     input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "create_group",
+    description:
+      "Create a logical device group (a named bucket of MACs). Groups are how rules can target many devices at once — e.g. a 'kids' group can be paused with pause_group. Use this when the parent first refers to a group that doesn't exist yet, or asks to make one. Returns a group_id.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Short label e.g. 'kids', 'iot', 'guests'." },
+        description: { type: "string" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "set_device_group",
+    description:
+      "Add a device (by MAC) to a group, or remove it from its current group (pass group_id=null). Look up the MAC in the Connected list. Affects future pause_group rules.",
+    input_schema: {
+      type: "object",
+      properties: {
+        mac: { type: "string" },
+        group_id: { type: ["string", "null"] },
+      },
+      required: ["mac", "group_id"],
+    },
   },
   {
     name: "remember_household",
