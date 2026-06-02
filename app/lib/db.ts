@@ -90,6 +90,11 @@ export async function ensureChatSchema(
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS chat_messages_session_idx ON chat_messages (session_id, created_at);`;
+  // pending_proposal lives on chat_sessions but is used by the account
+  // chat. Owning the ALTER here (not in ensureAccountSchema) means the
+  // account-schema bootstrap stays self-contained — running it first on
+  // a fresh DB won't fail because chat_sessions doesn't exist yet.
+  await sql`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS pending_proposal JSONB;`;
   chatSchemaReady = true;
 }
 
@@ -178,7 +183,6 @@ export async function ensureAccountSchema(
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS account_rules_owner_idx ON account_rules(owner_email, active);`;
-  await sql`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS pending_proposal JSONB;`;
 
   // Household memory: who lives here, what devices they own, free-form notes.
   // This is the canonical long-term state Bri reads from EVERY turn. The
