@@ -239,6 +239,33 @@ export async function ensureAccountSchema(
     WHERE group_id IS NOT NULL
     ON CONFLICT DO NOTHING;
   `;
+
+  // Brainrot gauge — per-group allowance for time spent on brainrot apps
+  // (YouTube / IG / TikTok / etc.). v1: parents set allowance + Bri toggles
+  // the block manually. v2: agent reports nft-counter deltas, server
+  // computes minutes_used, the gauge auto-blocks at zero.
+  await sql`
+    CREATE TABLE IF NOT EXISTS brainrot_state (
+      group_id              TEXT PRIMARY KEY,
+      owner_email           TEXT NOT NULL,
+      weekday_minutes       INTEGER NOT NULL DEFAULT 30,
+      weekend_minutes       INTEGER NOT NULL DEFAULT 120,
+      reset_hour            INTEGER NOT NULL DEFAULT 4,
+      open_until            TIMESTAMPTZ,    -- when set in the future: gauge open
+      created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS brainrot_state_owner_idx ON brainrot_state(owner_email);`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS brainrot_usage_log (
+      group_id              TEXT NOT NULL,
+      day                   DATE NOT NULL,
+      minutes_consumed      INTEGER NOT NULL DEFAULT 0,
+      updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (group_id, day)
+    );
+  `;
   accountSchemaReady = true;
 }
 

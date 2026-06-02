@@ -29,6 +29,7 @@ import {
   type BlockDomainsParams,
   type BlockManagedListParams,
   type BlockIpSetParams,
+  type BlockBrainrotGroupParams,
   type ManagedListSource,
   type IpSetSource,
 } from "@/app/lib/rules";
@@ -279,7 +280,7 @@ export async function POST(req: Request) {
         const friendlyName = String(i.name ?? "").slice(0, 64) || "unnamed";
         const summary = String(i.summary ?? "").slice(0, 200);
         let params: RuleParams;
-        let prefix: "pause" | "pausegrp" | "domains" | "dnsforce" | "mlist" | "ipset";
+        let prefix: "pause" | "pausegrp" | "domains" | "dnsforce" | "mlist" | "ipset" | "brainrot";
         if (rt === "pause_device") {
           const mac = String(i.target_mac ?? "").toLowerCase();
           if (!mac) return "error: target_mac required for pause_device";
@@ -292,6 +293,20 @@ export async function POST(req: Request) {
           if (g.length === 0) return `error: group "${gid}" not found`;
           params = { group_id: gid, group_name: g[0].name } as PauseGroupParams;
           prefix = "pausegrp";
+        } else if (rt === "block_brainrot_group") {
+          const gid = String(i.group_id ?? "");
+          if (!gid) return "error: group_id required for block_brainrot_group";
+          const g = (await sql`SELECT name FROM account_groups WHERE group_id = ${gid} AND owner_email = ${email};`) as { name: string }[];
+          if (g.length === 0) return `error: group "${gid}" not found`;
+          const customDomains = Array.isArray(i.domains)
+            ? (i.domains as string[]).map((d) => String(d).toLowerCase()).filter(Boolean)
+            : undefined;
+          params = {
+            group_id: gid,
+            group_name: g[0].name,
+            ...(customDomains?.length ? { domains: customDomains } : {}),
+          } as BlockBrainrotGroupParams;
+          prefix = "brainrot";
         } else if (rt === "block_domains_network") {
           const ds = Array.isArray(i.domains) ? (i.domains as string[]).map((d) => String(d).toLowerCase()).filter(Boolean) : [];
           if (ds.length === 0) return "error: domains[] required for block_domains_network";

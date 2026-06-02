@@ -24,7 +24,8 @@ export type RuleType =
   | "block_domains_network"
   | "force_router_dns"
   | "block_managed_list"
-  | "block_ip_set";
+  | "block_ip_set"
+  | "block_brainrot_group";
 
 export type PauseDeviceParams = { mac: string; client_name?: string };
 export type PauseGroupParams = { group_id: string; group_name?: string };
@@ -55,13 +56,58 @@ export type BlockIpSetParams = {
   snapshot_at: string;
   ip_count: number;
 };
+/**
+ * Per-kid brainrot block. Scope is a group's MACs; domains default to the
+ * curated DEFAULT_BRAINROT_DOMAINS but can be overridden. Implementation
+ * uses dnsmasq tagging: a per-rule conf file emits dhcp-host entries that
+ * attach a tag to each member MAC and then address= rules scoped to that
+ * tag. Result: only the tagged kid's lookups return 0.0.0.0/:: — everyone
+ * else on the network resolves normally.
+ */
+export type BlockBrainrotGroupParams = {
+  group_id: string;
+  group_name?: string;
+  domains?: string[]; // override; otherwise DEFAULT_BRAINROT_DOMAINS
+};
 export type RuleParams =
   | PauseDeviceParams
   | PauseGroupParams
   | BlockDomainsParams
   | ForceRouterDnsParams
   | BlockManagedListParams
-  | BlockIpSetParams;
+  | BlockIpSetParams
+  | BlockBrainrotGroupParams;
+
+/**
+ * The canonical "brainrot" — infinite-scroll algorithmic feeds Bri can
+ * block per-kid. Curated for breadth (root domains; dnsmasq matches
+ * subdomains) without false positives that break unrelated services.
+ *
+ * Notable trade-offs:
+ *  - googlevideo.com is included even though it also serves Google Drive
+ *    / Photos video previews. Worth it: it's the YouTube delivery CDN.
+ *  - threads.net (Meta) included since it's the IG sibling app.
+ *  - bytedance.com included to catch TikTok's various v.tiktok-style
+ *    redirects and the partner SDKs apps embed.
+ *  - reddit included because of its addictive feed; remove if a kid uses
+ *    it for school research.
+ */
+export const DEFAULT_BRAINROT_DOMAINS: string[] = [
+  // YouTube
+  "youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "youtube-nocookie.com", "ggpht.com", "yt.be",
+  // Instagram + Threads
+  "instagram.com", "cdninstagram.com", "ig.me", "threads.net",
+  // TikTok
+  "tiktok.com", "tiktokcdn.com", "tiktokv.com", "musical.ly", "bytedance.com", "byteoversea.com",
+  // Snapchat
+  "snapchat.com", "snap.com", "sc-cdn.net",
+  // Reddit
+  "reddit.com", "redd.it", "redditstatic.com", "redditmedia.com",
+  // Twitter / X
+  "twitter.com", "x.com", "t.co", "twimg.com",
+  // Twitch
+  "twitch.tv", "ttvnw.net", "jtvnw.net",
+];
 
 export interface AccountRule {
   rule_id: string;
@@ -74,9 +120,21 @@ export interface AccountRule {
 }
 
 export function newRuleId(
-  prefix: "pause" | "pausegrp" | "domains" | "dnsforce" | "mlist" | "ipset",
+  prefix:
+    | "pause"
+    | "pausegrp"
+    | "domains"
+    | "dnsforce"
+    | "mlist"
+    | "ipset"
+    | "brainrot",
 ): string {
   return `${prefix}_${randomBytes(4).toString("hex")}`;
+}
+
+/** Path on the router for a brainrot rule's dnsmasq conf snippet. */
+export function brainrotConfPath(ruleId: string): string {
+  return `/etc/dnsmasq.d/bt-${ruleId}.conf`;
 }
 
 export function newGroupId(): string {
@@ -132,6 +190,8 @@ export function ownedTargets(
       return [{ kind: "file", path: ipSetNftPath(ruleId) }];
     case "pause_group":
       return [{ kind: "file", path: pauseGroupNftPath(ruleId) }];
+    case "block_brainrot_group":
+      return [{ kind: "file", path: brainrotConfPath(ruleId) }];
   }
 }
 
@@ -244,6 +304,27 @@ export function buildRuleOps(
           mode: "644",
         },
         { type: "service", name: "firewall", action: "reload" },
+      ];
+    }
+    case "block_brainrot_group": {
+      // Structural placeholder — MACs + domain list are filled in at
+      // assembly time by materializeOps. Also needs the dnsmasq confdir
+      // option set on /etc/config/dhcp so /etc/dnsmasq.d/ is loaded
+      // (idempotent uci.set).
+      return [
+        {
+          type: "uci.set",
+          config: "dhcp",
+          section: "@dnsmasq[0]",
+          option: "confdir",
+          value: "/etc/dnsmasq.d",
+        },
+        {
+          type: "file.write",
+          path: brainrotConfPath(ruleId),
+          content: "",
+          mode: "644",
+        },
       ];
     }
     case "force_router_dns": {
@@ -491,6 +572,47 @@ export function nftBlockIpSetFile(
 }
 
 /**
+ * Build the dnsmasq conf for a brainrot block scoped to one kid's MACs.
+ *
+ * Mechanism: dnsmasq's tag system. We emit `dhcp-host=<mac>,set:<tag>`
+ * lines that attach a per-rule tag to each member MAC's DHCP lease. Then
+ * `tag:<tag>,address=/domain/0.0.0.0` lines null-route the brainrot
+ * domains for ONLY those tagged clients. Everyone else on the LAN keeps
+ * resolving normally.
+ *
+ * Multiple brainrot rules can target the same MAC (e.g. a kid in
+ * "youtube-blocked" and "social-blocked") — dnsmasq merges dhcp-host
+ * entries across configs, so a MAC accumulates every tag and every
+ * tagged address rule applies.
+ */
+export function dnsmasqBrainrotConf(
+  ruleId: string,
+  macs: string[],
+  domains: string[],
+): string {
+  const tag = `bt_${ruleId}`;
+  const lines: string[] = [];
+  lines.push("# Braintech — brainrot block (auto-generated, do not edit)");
+  lines.push(`# rule ${ruleId} — ${macs.length} MACs, ${domains.length} domains`);
+  lines.push("");
+  if (macs.length === 0) {
+    lines.push("# (no member MACs — rule is structurally present but inert)");
+    return lines.join("\n") + "\n";
+  }
+  lines.push("# Tag each member MAC's DHCP lease");
+  for (const mac of macs) {
+    lines.push(`dhcp-host=${mac},set:${tag}`);
+  }
+  lines.push("");
+  lines.push("# Block brainrot domains for any client tagged " + tag);
+  for (const d of domains) {
+    lines.push(`tag:${tag},address=/${d}/0.0.0.0`);
+    lines.push(`tag:${tag},address=/${d}/::`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+/**
  * Build the nftables include for a pause_group rule: a set of MAC addresses
  * + a forward-hook chain at priority -10 that REJECTs anything sourced from
  * any MAC in the set. Identical pattern to nftBlockIpSetFile but matches on
@@ -573,6 +695,16 @@ export async function materializeOps(
     const macs = ctx.groupMacs?.get(p.group_id) ?? [];
     const content = nftPauseGroupFile(rule.rule_id, macs);
     const path = pauseGroupNftPath(rule.rule_id);
+    return rule.ops.map((o) =>
+      o.type === "file.write" && o.path === path ? { ...o, content } : o,
+    );
+  }
+  if (rule.rule_type === "block_brainrot_group") {
+    const p = rule.params as BlockBrainrotGroupParams;
+    const macs = ctx.groupMacs?.get(p.group_id) ?? [];
+    const domains = p.domains?.length ? p.domains : DEFAULT_BRAINROT_DOMAINS;
+    const content = dnsmasqBrainrotConf(rule.rule_id, macs, domains);
+    const path = brainrotConfPath(rule.rule_id);
     return rule.ops.map((o) =>
       o.type === "file.write" && o.path === path ? { ...o, content } : o,
     );
