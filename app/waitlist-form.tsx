@@ -94,6 +94,7 @@ export function WaitlistForm({
       sendGAEvent("event", "conversion", {
         variation: variationId,
       });
+      fbqTrack("Contact");
       fbqTrack("Lead", { content_name: "waitlist", variation: variationId });
       setState({
         kind: "success",
