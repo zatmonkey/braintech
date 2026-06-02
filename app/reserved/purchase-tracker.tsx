@@ -23,15 +23,13 @@ export function PurchaseTracker({ value = 50 }: { value?: number }) {
     if (w.__btPurchaseFired) return;
     const fire = () => {
       if (typeof w.fbq !== "function") return false;
-      // NEXT_PUBLIC_META_TEST_EVENT_CODE routes events to Events
-      // Manager → Test Events instead of normal attribution. Set it
-      // while validating; unset it once production data should flow.
-      const testCode = process.env.NEXT_PUBLIC_META_TEST_EVENT_CODE;
+      // test_event_code is NOT honored by the browser Pixel — Events
+      // Manager's "Test browser events" tool tags by cookie/session, not
+      // by event param. Keep this payload clean.
       w.fbq("track", "Purchase", {
         value,
         currency: "USD",
         contents: [{ id: "deposit-50", quantity: 1 }],
-        ...(testCode ? { test_event_code: testCode } : {}),
       });
       w.__btPurchaseFired = true;
       return true;
