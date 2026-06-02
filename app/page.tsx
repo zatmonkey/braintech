@@ -34,14 +34,24 @@ function Nav({ variation }: { variation: Variation }) {
         <Logo />
         <span className="font-semibold tracking-tight">braintech</span>
       </div>
-      <a
-        href="#waitlist"
-        data-cta="nav"
-        data-variation={variation.id}
-        className="rounded-full border border-[var(--color-ink)] px-4 py-1.5 text-sm font-medium text-[var(--color-ink)] transition hover:bg-[var(--color-ink)] hover:text-[var(--color-cream)]"
-      >
-        Join waitlist
-      </a>
+      <div className="flex items-center gap-5 sm:gap-6">
+        {/* Subtle sign-in for existing members — kept text-only so it
+            doesn't compete with the primary Join-waitlist CTA. */}
+        <a
+          href="/login"
+          className="text-sm text-[var(--color-ink-soft)] underline-offset-4 hover:text-[var(--color-ink)] hover:underline"
+        >
+          Sign in
+        </a>
+        <a
+          href="#waitlist"
+          data-cta="nav"
+          data-variation={variation.id}
+          className="rounded-full border border-[var(--color-ink)] px-4 py-1.5 text-sm font-medium text-[var(--color-ink)] transition hover:bg-[var(--color-ink)] hover:text-[var(--color-cream)]"
+        >
+          Join waitlist
+        </a>
+      </div>
     </nav>
   );
 }
