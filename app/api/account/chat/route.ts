@@ -7,6 +7,7 @@ import {
   ensureDeviceSchema,
   ensureChatSchema,
   ensureAccountSchema,
+  ensureDefaultGroup,
 } from "@/app/lib/db";
 import { runAccountChatTurn, ACCOUNT_TOOLS } from "@/app/lib/conversation";
 import {
@@ -191,6 +192,7 @@ export async function POST(req: Request) {
   await ensureDeviceSchema(sql);
   await ensureChatSchema(sql);
   await ensureAccountSchema(sql);
+  await ensureDefaultGroup(sql, email);
 
   const devices = (await sql`
     SELECT device_id, label, desired_version, reported_version, last_seen, telemetry
@@ -406,22 +408,28 @@ export async function POST(req: Request) {
         `;
         return `Created group "${groupName}" (${gid}). Use set_device_group to add devices.`;
       }
-      if (name === "set_device_group") {
+      if (name === "add_device_to_group") {
         const mac = String(i.mac ?? "").toLowerCase();
-        const gid = i.group_id == null ? null : String(i.group_id);
-        if (!mac) return "error: mac required";
-        if (gid) {
-          const g = (await sql`SELECT name FROM account_groups WHERE group_id = ${gid} AND owner_email = ${email};`) as { name: string }[];
-          if (g.length === 0) return `error: group "${gid}" not found`;
-        }
-        // Upsert: the row may not exist yet if the MAC has never been renamed.
-        const friendly = labels.get(mac) ?? mac;
+        const gid = String(i.group_id ?? "");
+        if (!mac || !gid) return "error: mac and group_id required";
+        const g = (await sql`SELECT name FROM account_groups WHERE group_id = ${gid} AND owner_email = ${email};`) as { name: string }[];
+        if (g.length === 0) return `error: group "${gid}" not found`;
         await sql`
-          INSERT INTO client_labels (owner_email, mac, name, group_id)
-          VALUES (${email}, ${mac}, ${friendly}, ${gid})
-          ON CONFLICT (owner_email, mac) DO UPDATE SET group_id = EXCLUDED.group_id, updated_at = NOW();
+          INSERT INTO client_group_memberships (owner_email, mac, group_id)
+          VALUES (${email}, ${mac}, ${gid})
+          ON CONFLICT DO NOTHING;
         `;
-        return gid ? `Added ${mac} to group ${gid}.` : `Removed ${mac} from its group.`;
+        return `Added ${mac} to "${g[0].name}".`;
+      }
+      if (name === "remove_device_from_group") {
+        const mac = String(i.mac ?? "").toLowerCase();
+        const gid = String(i.group_id ?? "");
+        if (!mac || !gid) return "error: mac and group_id required";
+        await sql`
+          DELETE FROM client_group_memberships
+          WHERE owner_email = ${email} AND mac = ${mac} AND group_id = ${gid};
+        `;
+        return `Removed ${mac} from group ${gid}.`;
       }
       if (name === "remember_household") {
         const next: Memory = { humans: memory.humans, notes: memory.notes };

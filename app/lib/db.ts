@@ -193,21 +193,74 @@ export async function ensureAccountSchema(
     );
   `;
 
-  // Device groups: a named bucket of MACs that rules can target as a unit
+  // Device groups: named buckets of MACs that rules can target as a unit
   // (e.g. "kids", "iot", "theo-devices"). NOT a VLAN — this is purely a
-  // logical scope; the router still sees one flat LAN. A MAC belongs to at
-  // most one group (membership lives on client_labels.group_id).
+  // logical scope; the router still sees one flat LAN.
+  //
+  // Membership is many-to-many: one MAC can belong to several groups (e.g.
+  // a kid's phone is in BOTH "kids" and "school-allowed"). The junction
+  // table is client_group_memberships. The old client_labels.group_id
+  // column is kept as a one-to-one cache for backward compatibility and
+  // migrated into the junction at schema-init time.
   await sql`
     CREATE TABLE IF NOT EXISTS account_groups (
       group_id     TEXT PRIMARY KEY,
       owner_email  TEXT NOT NULL,
       name         TEXT NOT NULL,
       description  TEXT,
+      is_default   BOOLEAN NOT NULL DEFAULT FALSE,
       created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS account_groups_owner_idx ON account_groups(owner_email);`;
+  await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;`;
   await sql`ALTER TABLE client_labels ADD COLUMN IF NOT EXISTS group_id TEXT;`;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS client_group_memberships (
+      owner_email TEXT NOT NULL,
+      mac         TEXT NOT NULL,
+      group_id    TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (owner_email, mac, group_id)
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS cgm_owner_group_idx ON client_group_memberships(owner_email, group_id);`;
+  await sql`CREATE INDEX IF NOT EXISTS cgm_owner_mac_idx ON client_group_memberships(owner_email, mac);`;
+  // One-time backfill from the legacy single-column membership.
+  await sql`
+    INSERT INTO client_group_memberships (owner_email, mac, group_id)
+    SELECT owner_email, mac, group_id FROM client_labels
+    WHERE group_id IS NOT NULL
+    ON CONFLICT DO NOTHING;
+  `;
   accountSchemaReady = true;
+}
+
+/**
+ * Idempotently ensures one is_default group exists for the account. Called
+ * from /api/account/state and /api/account/groups (GET) so every parent
+ * always has a pre-made "All devices" bucket to drop things in. Returns the
+ * group_id.
+ */
+export async function ensureDefaultGroup(
+  sql: NeonQueryFunction<false, false>,
+  email: string,
+): Promise<string> {
+  const found = (await sql`
+    SELECT group_id FROM account_groups
+    WHERE owner_email = ${email} AND is_default = TRUE LIMIT 1;
+  `) as { group_id: string }[];
+  if (found[0]) return found[0].group_id;
+  // newGroupId would create a circular import; inline the same shape.
+  const buf = new Uint8Array(4);
+  crypto.getRandomValues(buf);
+  const hex = Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
+  const gid = `grp_${hex}`;
+  await sql`
+    INSERT INTO account_groups (group_id, owner_email, name, description, is_default)
+    VALUES (${gid}, ${email}, 'All devices', 'Default group — every device on the network.', TRUE);
+  `;
+  return gid;
 }

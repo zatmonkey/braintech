@@ -439,14 +439,26 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: "set_device_group",
+    name: "add_device_to_group",
     description:
-      "Add a device (by MAC) to a group, or remove it from its current group (pass group_id=null). Look up the MAC in the Connected list. Affects future pause_group rules.",
+      "Add a device (by MAC) to a group. A device can belong to MULTIPLE groups (e.g. a kid's phone in both 'kids' and 'school-allowed'). Look up the MAC in the Connected list.",
     input_schema: {
       type: "object",
       properties: {
         mac: { type: "string" },
-        group_id: { type: ["string", "null"] },
+        group_id: { type: "string" },
+      },
+      required: ["mac", "group_id"],
+    },
+  },
+  {
+    name: "remove_device_from_group",
+    description: "Remove a device from one specific group it's in. Leaves it in any other groups it belongs to.",
+    input_schema: {
+      type: "object",
+      properties: {
+        mac: { type: "string" },
+        group_id: { type: "string" },
       },
       required: ["mac", "group_id"],
     },

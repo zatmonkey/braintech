@@ -23,8 +23,13 @@ export async function DELETE(
   if (!sql) return NextResponse.json({ error: "unavailable" }, { status: 503 });
   await ensureAccountSchema(sql);
 
+  // Guard: refuse to delete the default group — there should always be one.
+  const g = (await sql`SELECT is_default FROM account_groups WHERE group_id = ${groupId} AND owner_email = ${email};`) as { is_default: boolean }[];
+  if (g.length === 0) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (g[0].is_default) return NextResponse.json({ error: "cannot delete the default group" }, { status: 400 });
+
+  await sql`DELETE FROM client_group_memberships WHERE group_id = ${groupId} AND owner_email = ${email};`;
   await sql`UPDATE client_labels SET group_id = NULL WHERE group_id = ${groupId} AND owner_email = ${email};`;
-  const r = (await sql`DELETE FROM account_groups WHERE group_id = ${groupId} AND owner_email = ${email} RETURNING group_id;`) as { group_id: string }[];
-  if (r.length === 0) return NextResponse.json({ error: "not found" }, { status: 404 });
+  await sql`DELETE FROM account_groups WHERE group_id = ${groupId} AND owner_email = ${email};`;
   return NextResponse.json({ ok: true });
 }

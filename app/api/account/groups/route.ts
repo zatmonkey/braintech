@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifySession, sessionCookie } from "@/app/lib/auth";
-import { getSql, ensureAccountSchema } from "@/app/lib/db";
+import { getSql, ensureAccountSchema, ensureDefaultGroup } from "@/app/lib/db";
 import { newGroupId } from "@/app/lib/rules";
 
 export const runtime = "nodejs";
@@ -16,14 +16,19 @@ export async function GET() {
   const sql = getSql();
   if (!sql) return NextResponse.json({ error: "unavailable" }, { status: 503 });
   await ensureAccountSchema(sql);
+  await ensureDefaultGroup(sql, email);
 
   const groups = (await sql`
-    SELECT group_id, name, description, created_at
-    FROM account_groups WHERE owner_email = ${email} ORDER BY created_at;
-  `) as { group_id: string; name: string; description: string | null; created_at: string }[];
+    SELECT group_id, name, description, is_default, created_at
+    FROM account_groups WHERE owner_email = ${email} ORDER BY is_default DESC, created_at;
+  `) as { group_id: string; name: string; description: string | null; is_default: boolean; created_at: string }[];
+  // Pull MACs from the junction; join client_labels for friendly names.
   const members = (await sql`
-    SELECT group_id, mac, name FROM client_labels
-    WHERE owner_email = ${email} AND group_id IS NOT NULL;
+    SELECT cgm.group_id, cgm.mac, COALESCE(cl.name, cgm.mac) AS name
+    FROM client_group_memberships cgm
+    LEFT JOIN client_labels cl
+      ON cl.owner_email = cgm.owner_email AND cl.mac = cgm.mac
+    WHERE cgm.owner_email = ${email};
   `) as { group_id: string; mac: string; name: string }[];
 
   const byGroup = new Map<string, { mac: string; name: string }[]>();
