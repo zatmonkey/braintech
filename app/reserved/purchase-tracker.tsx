@@ -8,8 +8,11 @@ import { useEffect } from "react";
  * issued for the founding-deposit SKU so Events Manager attributes it
  * to the right campaign and Match Quality stays high.
  *
- * Guarded against double-fires inside a strict-mode dev re-render with
- * a window-level flag — useEffect alone runs twice in dev.
+ * The base Pixel script loads with strategy="afterInteractive" in the
+ * root layout, which is AFTER React hydrates and this useEffect runs.
+ * So we may land here before window.fbq exists — poll every 200 ms for
+ * up to 10 s. Guarded against double-fires via a window-level flag so
+ * strict-mode dev re-renders and the poll-loop both can't fire it twice.
  */
 export function PurchaseTracker({ value = 50 }: { value?: number }) {
   useEffect(() => {
@@ -17,13 +20,24 @@ export function PurchaseTracker({ value = 50 }: { value?: number }) {
       fbq?: (...a: unknown[]) => void;
       __btPurchaseFired?: boolean;
     };
-    if (w.__btPurchaseFired || typeof w.fbq !== "function") return;
-    w.fbq("track", "Purchase", {
-      value,
-      currency: "USD",
-      contents: [{ id: "deposit-50", quantity: 1 }],
-    });
-    w.__btPurchaseFired = true;
+    if (w.__btPurchaseFired) return;
+    const fire = () => {
+      if (typeof w.fbq !== "function") return false;
+      w.fbq("track", "Purchase", {
+        value,
+        currency: "USD",
+        contents: [{ id: "deposit-50", quantity: 1 }],
+      });
+      w.__btPurchaseFired = true;
+      return true;
+    };
+    if (fire()) return;
+    let attempts = 0;
+    const id = setInterval(() => {
+      attempts += 1;
+      if (fire() || attempts >= 50) clearInterval(id);
+    }, 200);
+    return () => clearInterval(id);
   }, [value]);
   return null;
 }
