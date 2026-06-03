@@ -3,7 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { sendGAEvent } from "@next/third-parties/google";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type CTA = { label: string; href: string };
+type Msg = {
+  role: "user" | "assistant";
+  content: string;
+  // Optional: a conversion chip rendered under an assistant bubble. Used to
+  // give visitors a one-click path from the live demo to the waitlist form
+  // when Bri's first reply lands.
+  cta?: CTA;
+};
 
 const OPENER: Msg = {
   role: "assistant",
@@ -64,13 +72,17 @@ export function ChatWidget() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId: sessionId.current, message: text }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = (await res.json().catch(() => ({}))) as {
+        reply?: string;
+        cta?: CTA;
+      };
       setMessages((m) => [
         ...m,
         {
           role: "assistant",
           content:
             data?.reply ?? "Sorry — I glitched for a second. Mind sending that again?",
+          cta: data?.cta,
         },
       ]);
     } catch {
@@ -127,7 +139,12 @@ export function ChatWidget() {
           {/* Messages */}
           <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
             {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                key={i}
+                className={`flex flex-col gap-2 ${
+                  m.role === "user" ? "items-end" : "items-start"
+                }`}
+              >
                 <div
                   className={[
                     "max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed",
@@ -138,6 +155,22 @@ export function ChatWidget() {
                 >
                   {m.content}
                 </div>
+                {m.cta && (
+                  <a
+                    href={m.cta.href}
+                    onClick={() => {
+                      sendGAEvent("event", "chat_cta_click", {
+                        label: m.cta?.label,
+                      });
+                      fbqTrack("AddToCart");
+                      // Close the widget so the form is unobscured.
+                      setOpen(false);
+                    }}
+                    className="ml-1 inline-flex items-center gap-2 rounded-full bg-[var(--color-accent)] px-4 py-2 text-[13px] font-medium text-white shadow-[0_6px_16px_-6px_rgba(217,79,26,0.55)] transition hover:brightness-95"
+                  >
+                    {m.cta.label}
+                  </a>
+                )}
               </div>
             ))}
             {sending && (

@@ -1,4 +1,5 @@
 import { WaitlistForm } from "./waitlist-form";
+import { HeroWaitlist } from "./hero-waitlist";
 import { ChatWidget } from "./chat-widget";
 import {
   FoundingBadge,
@@ -42,14 +43,8 @@ function Nav({ variation }: { variation: Variation }) {
         <span className="font-semibold tracking-tight">braintech</span>
       </div>
       <div className="flex items-center gap-5 sm:gap-6">
-        {/* Subtle sign-in for existing members — kept text-only so it
-            doesn't compete with the primary Join-waitlist CTA. */}
-        <a
-          href="/login"
-          className="text-sm text-[var(--color-ink-soft)] underline-offset-4 hover:text-[var(--color-ink)] hover:underline"
-        >
-          Sign in
-        </a>
+        {/* Sign-in lives in the footer now (paid-traffic visitors aren't
+            members yet — fewer competing CTAs above the fold). */}
         <a
           href="#waitlist"
           data-cta="nav"
@@ -95,99 +90,43 @@ function Hero({ variation }: { variation: Variation }) {
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-[var(--color-ink-soft)] sm:text-xl">
             {variation.subhead}
           </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <a
-              href="#waitlist"
-              data-cta="hero-primary"
-              data-variation={variation.id}
-              className="inline-flex items-center justify-center rounded-lg bg-[var(--color-ink)] px-6 py-3.5 text-base font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)]"
-            >
-              {variation.cta}
-            </a>
-            <a
-              href="#how-it-works"
-              data-cta="hero-secondary"
-              data-variation={variation.id}
-              className="inline-flex items-center justify-center rounded-lg border border-[var(--color-rule)] px-6 py-3.5 text-base font-medium text-[var(--color-ink)] transition hover:border-[var(--color-ink)]"
-            >
-              See how it works
-            </a>
-          </div>
-          <p className="mt-5 text-sm text-[var(--color-ink-soft)]">
-            Founding price <strong>$249/year</strong> — locked in for life.
-            Ships when your batch is ready.
-          </p>
+          {/* Inline email capture above the fold. Cold paid traffic
+              shouldn't have to scroll to convert. The deposit upsell still
+              lives down at the Pricing section for visitors who scroll. */}
+          <HeroWaitlist variationId={variation.id} />
         </div>
 
-        <HeroPhone />
+        <HeroDevice />
       </div>
     </section>
   );
 }
 
-function HeroPhone() {
+function HeroDevice() {
   return (
     <div
       className="relative mx-auto w-full max-w-md fade-up"
       style={{ animationDelay: "120ms" }}
     >
+      {/* Same warm halo we had behind the old phone mockup — anchors the
+          product photo so it doesn't look pasted onto the cream background. */}
       <div className="absolute -inset-6 -z-10 rounded-[3rem] bg-gradient-to-br from-[var(--color-accent)]/15 via-transparent to-[var(--color-ink)]/5 blur-2xl" />
-      <div className="rounded-[2.5rem] border border-[var(--color-rule)] bg-[var(--color-night)] p-3 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.35)]">
-        <div className="rounded-[2rem] bg-[#1c1c1f] p-5">
-          <div className="flex items-center justify-between text-[10px] font-medium text-white/60">
-            <span>9:41</span>
-            <span>braintech</span>
-            <span>•••</span>
-          </div>
-          <div className="mt-4 space-y-2.5">
-            <Bubble side="out">
-              No iPad for Maya until she watches a TED talk and answers 3
-              questions about it.
-            </Bubble>
-            <Bubble side="in" muted>
-              Got it. Maya&apos;s iPad is paused. I&apos;ll DM her a 12-min talk
-              on octopus intelligence + a quiz. Unlocks on 3/3 correct.
-            </Bubble>
-            <Bubble side="in" muted delay={400}>
-              <span className="text-emerald-300">●</span> 14 min later — Maya
-              scored 3/3. iPad unlocked for 45 min.
-            </Bubble>
-          </div>
-        </div>
+      <div className="overflow-hidden rounded-[2rem] border border-[var(--color-rule)] bg-white shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/device-hero.webp"
+          alt="The Braintech device on a kitchen counter, glowing brain icon and orange button, with a Wi-Fi router behind it."
+          width={1024}
+          height={1024}
+          loading="eager"
+          fetchPriority="high"
+          className="block h-full w-full"
+        />
       </div>
-    </div>
-  );
-}
-
-function Bubble({
-  side,
-  children,
-  muted,
-  delay = 0,
-}: {
-  side: "in" | "out";
-  children: React.ReactNode;
-  muted?: boolean;
-  delay?: number;
-}) {
-  const isOut = side === "out";
-  return (
-    <div
-      className={`flex ${isOut ? "justify-end" : "justify-start"} fade-up`}
-      style={{ animationDelay: `${delay + 200}ms` }}
-    >
-      <div
-        className={[
-          "max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-snug",
-          isOut
-            ? "rounded-br-md bg-[#2b8aff] text-white"
-            : muted
-              ? "rounded-bl-md bg-white/8 text-white/90"
-              : "rounded-bl-md bg-white/12 text-white",
-        ].join(" ")}
-      >
-        {children}
-      </div>
+      {/* Tiny caption so the photo reads as the product — not stock art. */}
+      <p className="mt-3 text-center text-xs text-[var(--color-ink-soft)]">
+        The Braintech device · sits between your internet and your Wi-Fi.
+      </p>
     </div>
   );
 }
@@ -720,6 +659,9 @@ function Footer() {
               </a>
               <a href="/terms" className="hover:text-[var(--color-cream)]">
                 SMS Terms
+              </a>
+              <a href="/login" className="hover:text-[var(--color-cream)]">
+                Member sign-in
               </a>
             </div>
             <p>© {new Date().getFullYear()} Braintech · Mutant Ventures LLC</p>

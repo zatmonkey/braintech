@@ -46,12 +46,20 @@ export async function POST(req: Request) {
     const countRows = (await sql`
       SELECT COUNT(*)::int AS n FROM chat_messages WHERE session_id = ${sessionId};
     `) as { n: number }[];
-    if ((countRows[0]?.n ?? 0) > MAX_TURNS * 2) {
+    const priorMessages = countRows[0]?.n ?? 0;
+    if (priorMessages > MAX_TURNS * 2) {
       return NextResponse.json({
         reply:
           "This has been great! Drop your email and the team will pick it up with you directly — I don't want to keep you all day. 🙂",
       });
     }
+    // Bri appends a soft conversion CTA at the end of her VERY FIRST reply
+    // — i.e. when there are zero prior chat messages stored. This is the
+    // moment a paid-ad visitor has just felt the demo work; we shouldn't
+    // let them dead-end in the widget. The CTA is returned as a separate
+    // field so the client can render it as a chip/button under the bubble
+    // instead of muddying the assistant's text.
+    const isFirstTurn = priorMessages === 0;
 
     await sql`
       INSERT INTO chat_messages (session_id, role, content)
@@ -101,7 +109,15 @@ export async function POST(req: Request) {
       VALUES (${sessionId}, 'assistant', ${reply});
     `;
 
-    return NextResponse.json({ reply });
+    return NextResponse.json({
+      reply,
+      cta: isFirstTurn
+        ? {
+            label: "Lock in a founding device →",
+            href: "#waitlist",
+          }
+        : undefined,
+    });
   } catch (err) {
     console.error("[chat] error", err);
     return NextResponse.json({
