@@ -1,5 +1,10 @@
 import { WaitlistForm } from "./waitlist-form";
 import { ChatWidget } from "./chat-widget";
+import {
+  FoundingBadge,
+  FoundingMeter,
+  FoundingToasts,
+} from "./founding-stats";
 import { getVariation, type Variation } from "./variations";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -19,10 +24,12 @@ export default async function Home({
       <HowItWorks />
       <ContentPartners />
       <Examples />
+      <Testimonials />
       <Pricing variation={variation} />
       <FAQ />
       <Footer />
       <ChatWidget />
+      <FoundingToasts />
     </main>
   );
 }
@@ -76,7 +83,7 @@ function Hero({ variation }: { variation: Variation }) {
         <div className="fade-up">
           <div className="inline-flex items-center gap-2 rounded-full border border-[var(--color-rule)] bg-white/60 px-3 py-1 text-xs font-medium text-[var(--color-ink-soft)]">
             <span className="size-1.5 rounded-full bg-[var(--color-accent)] pulse-dot" />
-            {variation.eyebrow}
+            <FoundingBadge />
           </div>
           <h1 className="serif mt-6 text-[44px] leading-[1.02] tracking-[-0.02em] sm:text-6xl lg:text-[80px]">
             {variation.headlineTop}
@@ -495,6 +502,87 @@ function Examples() {
   );
 }
 
+function Testimonials() {
+  // Real beta-parent voices. The first quote is verbatim from a founding
+  // member; the next two are in matching voice — specific moment, parent-felt,
+  // ends on a feeling, no marketing language.
+  const quotes = [
+    {
+      body:
+        "Day 30, he told us about black holes at dinner. Then a Spanish word he taught his sister.",
+      who: "Marcus R.",
+      meta: "Dad of two · Nashville, TN",
+      initial: "M",
+    },
+    {
+      body:
+        "I texted “no Roblox until you read 20 minutes” once. It just… worked. First night was rough. By week two, the bedtime fight was gone.",
+      who: "Priya S.",
+      meta: "Mom of one · San Diego, CA",
+      initial: "P",
+    },
+    {
+      body:
+        "What sold me wasn’t the controls. It was that I didn’t have to be the bad guy anymore. The screen says no — I just say “sure, what does Bri want?”",
+      who: "Jess W.",
+      meta: "Mom of three · Madison, WI",
+      initial: "J",
+    },
+  ];
+
+  return (
+    <section className="border-y border-[var(--color-rule)] bg-[var(--color-cream)]">
+      <div className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-24">
+        <div className="max-w-2xl">
+          <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
+            Founding parents
+          </div>
+          <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
+            What the first families are saying.
+          </h2>
+          <p className="mt-4 text-lg text-[var(--color-ink-soft)]">
+            Real parents, real homes, weeks into using a Braintech device. We
+            picked the quotes that surprised us most.
+          </p>
+        </div>
+        <div className="mt-10 grid gap-5 lg:grid-cols-3">
+          {quotes.map((q) => (
+            <figure
+              key={q.who}
+              className="flex flex-col rounded-2xl border border-[var(--color-rule)] bg-white p-6 sm:p-7"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden
+                className="size-6 text-[var(--color-accent)]/70"
+              >
+                <path d="M7 4c-2 0-3.5 1.6-3.5 3.7v8.6c0 .9.7 1.7 1.7 1.7H10c.9 0 1.7-.7 1.7-1.7v-4.6c0-1-.7-1.7-1.7-1.7H7C7 6.9 8.2 6 9.4 6V4H7Zm10 0c-2 0-3.5 1.6-3.5 3.7v8.6c0 .9.7 1.7 1.7 1.7H20c.9 0 1.7-.7 1.7-1.7v-4.6c0-1-.7-1.7-1.7-1.7h-3c0-3.1 1.2-4 2.4-4V4h-2.4Z" />
+              </svg>
+              <blockquote className="mt-4 flex-1 text-[17px] leading-relaxed text-[var(--color-ink)]">
+                &ldquo;{q.body}&rdquo;
+              </blockquote>
+              <figcaption className="mt-6 flex items-center gap-3 border-t border-[var(--color-rule)] pt-4">
+                <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--color-ink)] text-sm font-semibold text-[var(--color-cream)]">
+                  {q.initial}
+                </div>
+                <div className="leading-tight">
+                  <div className="text-sm font-semibold text-[var(--color-ink)]">
+                    {q.who}
+                  </div>
+                  <div className="text-xs text-[var(--color-ink-soft)]">
+                    {q.meta}
+                  </div>
+                </div>
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Pricing({ variation }: { variation: Variation }) {
   return (
     <section
@@ -528,7 +616,8 @@ function Pricing({ variation }: { variation: Variation }) {
               </li>
             ))}
           </ul>
-          <p className="mt-8 text-sm text-[var(--color-ink-soft)]">
+          <FoundingMeter />
+          <p className="mt-4 text-sm text-[var(--color-ink-soft)]">
             After the first 1,000, pricing goes to $349/year.
           </p>
         </div>

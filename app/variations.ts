@@ -53,6 +53,18 @@ export const VARIATIONS: Variation[] = [
       "Text a rule. We enforce it. Your kid finishes a Khan Academy problem before YouTube. Reads 20 minutes before Roblox. You stay the good parent.",
     cta: "Reserve your spot →",
   },
+  {
+    // Mirrors the IG ad copy verbatim ("Simplify parental controls! / Manage
+    // your network effortlessly with simple text commands for peace of mind").
+    // This is the variation paid traffic should land on.
+    id: "5",
+    eyebrow: "First batch — 1,000 devices",
+    headlineTop: "Simplify parental controls.",
+    headlineAccent: "Peace of mind, by text.",
+    subhead:
+      "Manage every screen in your home with simple text commands. No apps for your kids to delete. No dashboards to babysit. Just one little box and a number you text like a friend.",
+    cta: "Reserve a founding device →",
+  },
 ];
 
 export function getVariation(raw: string | string[] | undefined): Variation {
