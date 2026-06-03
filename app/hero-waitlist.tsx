@@ -1,15 +1,25 @@
 "use client";
 
 /**
- * Tight inline email-capture for the hero. Same submit pathway as
- * <WaitlistForm> in the pricing section, but visually compact (single row on
- * desktop), no deposit pivot in success state — the upsell happens further
- * down on the pricing form. Goal: get the lowest-friction email above the
- * fold so paid-ad visitors convert before they ever scroll.
+ * Tight inline above-the-fold capture. Two flavours, selected by the
+ * variation's `mode` field:
+ *
+ *   - "waitlist" (default): email + "Join the waitlist — free" button. Same
+ *      submit pathway as the larger <WaitlistForm>. Success state offers
+ *      the $50 lock-in deposit as the upsell.
+ *
+ *   - "buyNow":  email + "Buy now — $249/yr →" button. POSTs straight to
+ *      /api/checkout with mode=purchase and redirects to Stripe. No
+ *      waitlist queue, no deposit; the visitor came here to buy.
+ *
+ * The deposit-upsell card lives down in the Pricing section for the
+ * waitlist flavour, so cold paid traffic can convert above the fold without
+ * being asked for $50.
  */
 
 import { useState } from "react";
 import { sendGAEvent } from "@next/third-parties/google";
+import type { Variation } from "./variations";
 
 function fbqTrack(event: string, params?: Record<string, unknown>) {
   const w = window as typeof window & { fbq?: (...a: unknown[]) => void };
@@ -19,12 +29,13 @@ function fbqTrack(event: string, params?: Record<string, unknown>) {
 type State =
   | { kind: "idle" }
   | { kind: "submitting" }
-  | { kind: "success" }
+  | { kind: "success" } // waitlist only — buyNow redirects, never lands here
   | { kind: "error"; message: string };
 
-export function HeroWaitlist({ variationId }: { variationId: string }) {
+export function HeroWaitlist({ variation }: { variation: Variation }) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [email, setEmail] = useState("");
+  const isBuyNow = variation.mode === "buyNow";
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -35,9 +46,50 @@ export function HeroWaitlist({ variationId }: { variationId: string }) {
     }
     setState({ kind: "submitting" });
 
+    if (isBuyNow) {
+      // Skip the waitlist; go straight to a $249/yr Stripe checkout.
+      sendGAEvent("event", "buy_now_click", {
+        variation: variation.id,
+        source: "hero",
+      });
+      fbqTrack("InitiateCheckout", {
+        value: 249,
+        currency: "USD",
+        variation: variation.id,
+        source: "hero",
+      });
+      try {
+        const res = await fetch("/api/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: trimmed,
+            mode: "purchase",
+            variation: variation.id,
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { url?: string };
+        if (data?.url) {
+          window.location.href = data.url;
+          return;
+        }
+        setState({
+          kind: "error",
+          message: "Couldn't open checkout. Try again.",
+        });
+      } catch {
+        setState({
+          kind: "error",
+          message: "Network error. Try again.",
+        });
+      }
+      return;
+    }
+
+    // Waitlist flavour — soft email capture.
     const payload = {
       email: trimmed,
-      variation: variationId,
+      variation: variation.id,
       source:
         typeof window !== "undefined"
           ? window.location.pathname + window.location.search + "#hero"
@@ -53,7 +105,7 @@ export function HeroWaitlist({ variationId }: { variationId: string }) {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         sendGAEvent("event", "waitlist_error", {
-          variation: variationId,
+          variation: variation.id,
           status: res.status,
           source: "hero",
         });
@@ -64,15 +116,15 @@ export function HeroWaitlist({ variationId }: { variationId: string }) {
         return;
       }
       sendGAEvent("event", "waitlist_submit", {
-        variation: variationId,
+        variation: variation.id,
         source: "hero",
       });
-      sendGAEvent("event", "conversion", { variation: variationId });
+      sendGAEvent("event", "conversion", { variation: variation.id });
       fbqTrack("Lead", { content_name: "waitlist", source: "hero" });
       setState({ kind: "success" });
     } catch {
       sendGAEvent("event", "waitlist_error", {
-        variation: variationId,
+        variation: variation.id,
         status: "network",
         source: "hero",
       });
@@ -84,6 +136,7 @@ export function HeroWaitlist({ variationId }: { variationId: string }) {
   }
 
   if (state.kind === "success") {
+    // buyNow never reaches this — it window.location's to Stripe.
     return (
       <div className="mt-8 max-w-md rounded-2xl border border-[var(--color-rule)] bg-white p-5">
         <div className="flex items-start gap-3">
@@ -98,15 +151,16 @@ export function HeroWaitlist({ variationId }: { variationId: string }) {
           </span>
           <div>
             <p className="font-medium text-[var(--color-ink)]">
-              You&apos;re on the list.
+              You&apos;re on the waitlist.
             </p>
             <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-              We&apos;ll email you before your batch ships in September.{" "}
+              The waitlist is free but unordered — we email when the first batch
+              ships.{" "}
               <a
                 href="#waitlist"
                 className="font-medium text-[var(--color-accent)] underline-offset-4 hover:underline"
               >
-                Want to skip the line? Lock in your spot →
+                Want to lock in your device? $50 holds your spot →
               </a>
             </p>
           </div>
@@ -114,6 +168,14 @@ export function HeroWaitlist({ variationId }: { variationId: string }) {
       </div>
     );
   }
+
+  const buttonLabel = isBuyNow
+    ? state.kind === "submitting"
+      ? "Opening checkout…"
+      : "Buy now — $249/yr →"
+    : state.kind === "submitting"
+      ? "Joining…"
+      : variation.cta;
 
   return (
     <form onSubmit={onSubmit} className="mt-8 max-w-md">
@@ -133,11 +195,11 @@ export function HeroWaitlist({ variationId }: { variationId: string }) {
         <button
           type="submit"
           disabled={state.kind === "submitting"}
-          data-cta="hero-inline"
-          data-variation={variationId}
+          data-cta={isBuyNow ? "hero-buy-now" : "hero-waitlist"}
+          data-variation={variation.id}
           className="inline-flex items-center justify-center whitespace-nowrap rounded-lg bg-[var(--color-ink)] px-5 py-3.5 text-base font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)] disabled:opacity-60"
         >
-          {state.kind === "submitting" ? "Saving…" : "Reserve my spot →"}
+          {buttonLabel}
         </button>
       </div>
       {state.kind === "error" ? (
@@ -146,13 +208,27 @@ export function HeroWaitlist({ variationId }: { variationId: string }) {
         </p>
       ) : (
         <p className="mt-2.5 text-xs text-[var(--color-ink-soft)]">
-          No charge today.{" "}
-          <a
-            href="#how-it-works"
-            className="underline-offset-4 hover:text-[var(--color-ink)] hover:underline"
-          >
-            See how it works ↓
-          </a>
+          {isBuyNow ? (
+            <>
+              Device included · ships Sept 1 · cancel any time.{" "}
+              <a
+                href="#how-it-works"
+                className="underline-offset-4 hover:text-[var(--color-ink)] hover:underline"
+              >
+                See how it works ↓
+              </a>
+            </>
+          ) : (
+            <>
+              No charge today.{" "}
+              <a
+                href="#waitlist"
+                className="underline-offset-4 hover:text-[var(--color-ink)] hover:underline"
+              >
+                Or lock your device in for $50 →
+              </a>
+            </>
+          )}
         </p>
       )}
     </form>

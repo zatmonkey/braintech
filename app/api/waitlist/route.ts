@@ -189,6 +189,28 @@ export async function POST(req: Request) {
     persisted: id !== null,
   });
 
+  // Stamp the variation on the lead too, so per-variation conversion stats
+  // can join `waitlist` and `leads` without ambiguity. We never overwrite a
+  // previously-set variation — the FIRST landing-page variation that brought
+  // them in is the one that "owns" the conversion.
+  if (id !== null) {
+    const sql = getSql();
+    if (sql) {
+      try {
+        await ensureSmsSchema(sql);
+        await sql`
+          INSERT INTO leads (email, variation)
+          VALUES (${email}, ${variation || null})
+          ON CONFLICT (email) DO UPDATE SET
+            variation = COALESCE(leads.variation, EXCLUDED.variation),
+            updated_at = NOW();
+        `;
+      } catch (err) {
+        console.error("[waitlist] lead variation stamp failed", err);
+      }
+    }
+  }
+
   // Only text people who explicitly opted in (consent is optional, never required).
   if (smsConsent) {
     await startSmsConversation(phone, email);

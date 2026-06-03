@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { getStripe, DEPOSIT_AMOUNT_CENTS, SHIP_DATE } from "@/app/lib/stripe";
+import {
+  getStripe,
+  DEPOSIT_AMOUNT_CENTS,
+  PURCHASE_AMOUNT_CENTS,
+  SHIP_DATE,
+} from "@/app/lib/stripe";
 import { getSql, ensureSmsSchema } from "@/app/lib/db";
 
 export const runtime = "nodejs";
@@ -23,15 +28,33 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { email?: string; phone?: string };
+  let body: {
+    email?: string;
+    phone?: string;
+    variation?: string;
+    mode?: "deposit" | "purchase";
+  };
   try {
-    body = (await req.json()) as { email?: string; phone?: string };
+    body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
   const email = (body.email ?? "").trim().toLowerCase();
   const phone = (body.phone ?? "").trim();
+  // Prefer the variation passed on the body (set by the client from the
+  // active page state). Fall back to the bt_var cookie so deposits made via
+  // direct API hits still attribute correctly.
+  const variation = (
+    body.variation ?? req.headers.get("cookie")?.match(/(?:^|;\s*)bt_var=(\d+)/)?.[1] ?? ""
+  ).slice(0, 8);
+  // Two flavours of checkout:
+  //   - "deposit"  → $50, refundable, holds a queue spot (default; matches
+  //                  the old behaviour so existing CTAs don't change)
+  //   - "purchase" → $249/yr full membership, device included, no queue;
+  //                  the buy-now variation uses this.
+  const mode: "deposit" | "purchase" =
+    body.mode === "purchase" ? "purchase" : "deposit";
   if (!email || !email.includes("@")) {
     return NextResponse.json({ error: "Valid email required" }, { status: 400 });
   }
@@ -39,6 +62,19 @@ export async function POST(req: Request) {
   const base = siteUrl(req);
 
   try {
+    const isPurchase = mode === "purchase";
+    const lineItem = isPurchase
+      ? {
+          name: "Braintech — Founding Membership (Year 1)",
+          description: `$249/year founding membership. Device included, ships worldwide ${SHIP_DATE}. Founding price locked at every renewal.`,
+          amount: PURCHASE_AMOUNT_CENTS,
+        }
+      : {
+          name: "Braintech — Founding Device Reservation",
+          description: `Refundable $50 deposit to lock in one of the first 1,000 devices. Ships worldwide ${SHIP_DATE}. Applied toward your $249/yr founding membership.`,
+          amount: DEPOSIT_AMOUNT_CENTS,
+        };
+
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       customer_email: email,
@@ -47,16 +83,21 @@ export async function POST(req: Request) {
           quantity: 1,
           price_data: {
             currency: "usd",
-            unit_amount: DEPOSIT_AMOUNT_CENTS,
+            unit_amount: lineItem.amount,
             product_data: {
-              name: "Braintech — Founding Device Reservation",
-              description: `Refundable $50 deposit to lock in one of the first 1,000 devices. Ships worldwide ${SHIP_DATE}. Applied toward your $249/yr founding membership.`,
+              name: lineItem.name,
+              description: lineItem.description,
             },
           },
         },
       ],
-      metadata: { email, phone },
-      payment_intent_data: { metadata: { email, phone }, receipt_email: email },
+      // mode goes into metadata so the webhook can tell deposits from full
+      // purchases (different downstream emails, different lead state).
+      metadata: { email, phone, variation, mode },
+      payment_intent_data: {
+        metadata: { email, phone, variation, mode },
+        receipt_email: email,
+      },
       success_url: `${base}/reserved?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${base}/?reserve=cancelled#waitlist`,
       // Capture where to ship the device.
@@ -76,11 +117,17 @@ export async function POST(req: Request) {
       try {
         await ensureSmsSchema(sql);
         await sql`
-          INSERT INTO leads (email, phone, stripe_session_id)
-          VALUES (${email}, ${phone || null}, ${session.id})
+          INSERT INTO leads (
+            email, phone, stripe_session_id, variation, checkout_mode
+          ) VALUES (
+            ${email}, ${phone || null}, ${session.id},
+            ${variation || null}, ${mode}
+          )
           ON CONFLICT (email) DO UPDATE SET
             phone = COALESCE(EXCLUDED.phone, leads.phone),
             stripe_session_id = EXCLUDED.stripe_session_id,
+            variation = COALESCE(leads.variation, EXCLUDED.variation),
+            checkout_mode = EXCLUDED.checkout_mode,
             updated_at = NOW();
         `;
       } catch (err) {

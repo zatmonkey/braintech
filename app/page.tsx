@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { WaitlistForm } from "./waitlist-form";
 import { HeroWaitlist } from "./hero-waitlist";
 import { ChatWidget } from "./chat-widget";
@@ -6,6 +7,7 @@ import {
   FoundingMeter,
   FoundingToasts,
 } from "./founding-stats";
+import { VariationTracker } from "./variation-tracker";
 import { getVariation, type Variation } from "./variations";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -16,7 +18,15 @@ export default async function Home({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
-  const variation = getVariation(params.variation);
+  // Variation precedence (matches proxy.ts):
+  //   1. ?variation=N on the URL (paid-campaign override)
+  //   2. bt_var cookie (sticky for returning visitor)
+  //   3. fallback inside getVariation()
+  // proxy.ts has already ensured the cookie is set on first hit, so by the
+  // time we render here at least one of (1) or (2) is populated.
+  const cookieStore = await cookies();
+  const variationKey = params.variation ?? cookieStore.get("bt_var")?.value;
+  const variation = getVariation(variationKey);
   return (
     <main className="flex flex-1 flex-col" data-variation={variation.id}>
       <Nav variation={variation} />
@@ -31,6 +41,7 @@ export default async function Home({
       <Footer />
       <ChatWidget />
       <FoundingToasts />
+      <VariationTracker variationId={variation.id} />
     </main>
   );
 }
@@ -90,10 +101,15 @@ function Hero({ variation }: { variation: Variation }) {
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-[var(--color-ink-soft)] sm:text-xl">
             {variation.subhead}
           </p>
-          {/* Inline email capture above the fold. Cold paid traffic
-              shouldn't have to scroll to convert. The deposit upsell still
-              lives down at the Pricing section for visitors who scroll. */}
-          <HeroWaitlist variationId={variation.id} />
+          {/* Inline email capture above the fold. Behaviour depends on
+              variation.mode:
+                - "waitlist" → captures email, success state offers the $50
+                  deposit upsell. Pricing section below carries the deposit
+                  pitch.
+                - "buyNow" → email + button goes straight to a $249/yr
+                  Stripe purchase. No deposit, no queue.
+              Cold paid traffic shouldn't have to scroll to convert. */}
+          <HeroWaitlist variation={variation} />
         </div>
 
         <HeroDevice />
@@ -523,6 +539,7 @@ function Testimonials() {
 }
 
 function Pricing({ variation }: { variation: Variation }) {
+  const isBuyNow = variation.mode === "buyNow";
   return (
     <section
       id="waitlist"
@@ -534,13 +551,47 @@ function Pricing({ variation }: { variation: Variation }) {
             Founding members
           </div>
           <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
-            $249/year. Locked in for life.
+            {isBuyNow
+              ? "$249 for year one. Device included."
+              : "$249/year. Locked in for life."}
           </h2>
-          <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
-            We&apos;re building the first 1,000 devices in a single batch.
-            Founding members get the device, the membership, and the price they
-            join at — forever.
-          </p>
+          {isBuyNow ? (
+            <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
+              No waitlist, no deposit. Pay for your first year today, your
+              device ships in the first batch on{" "}
+              <strong>September 1</strong>, and your founding price stays{" "}
+              <strong>$249/year forever</strong>. Cancel anytime before
+              renewal.
+            </p>
+          ) : (
+            <>
+              <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
+                We&apos;re building the first 1,000 devices in a single batch.
+                There are two ways in:
+              </p>
+              <div className="mt-5 space-y-4 text-[var(--color-ink-soft)]">
+                <div className="rounded-xl border border-[var(--color-rule)] bg-white p-4">
+                  <div className="font-semibold text-[var(--color-ink)]">
+                    Free waitlist
+                  </div>
+                  <p className="mt-1 text-sm">
+                    Drop your email. We&apos;ll notify you when the batch
+                    ships. No guaranteed device — first-come from notification.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/[0.04] p-4">
+                  <div className="font-semibold text-[var(--color-ink)]">
+                    Lock in your device — $50 deposit
+                  </div>
+                  <p className="mt-1 text-sm">
+                    Refundable anytime before shipping. Skips the queue.
+                    Guarantees you one of the first 1,000. Credited toward your
+                    $249/yr founding membership.
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
           <ul className="mt-8 space-y-3 text-[var(--color-ink)]">
             {[
               "The braintech device, shipped to you",
@@ -561,7 +612,10 @@ function Pricing({ variation }: { variation: Variation }) {
           </p>
         </div>
         <div>
-          <WaitlistForm variationId={variation.id} />
+          <WaitlistForm
+            variationId={variation.id}
+            mode={isBuyNow ? "purchase" : "deposit"}
+          />
         </div>
       </div>
     </section>

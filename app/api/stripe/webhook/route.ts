@@ -35,6 +35,8 @@ export async function POST(req: Request) {
         .trim()
         .toLowerCase();
       const phone = session.metadata?.phone ?? null;
+      const variation = session.metadata?.variation || null;
+      const mode = session.metadata?.mode === "purchase" ? "purchase" : "deposit";
       const country =
         session.customer_details?.address?.country ??
         (
@@ -55,10 +57,12 @@ export async function POST(req: Request) {
           await sql`
             INSERT INTO leads (
               email, phone, deposit_paid, deposit_amount, deposit_at,
-              stripe_session_id, stripe_payment_intent, shipping_country
+              stripe_session_id, stripe_payment_intent, shipping_country,
+              variation, checkout_mode
             ) VALUES (
               ${email}, ${phone}, TRUE, ${session.amount_total ?? null}, NOW(),
-              ${session.id}, ${paymentIntent}, ${country}
+              ${session.id}, ${paymentIntent}, ${country},
+              ${variation}, ${mode}
             )
             ON CONFLICT (email) DO UPDATE SET
               phone = COALESCE(leads.phone, EXCLUDED.phone),
@@ -68,6 +72,8 @@ export async function POST(req: Request) {
               stripe_session_id = EXCLUDED.stripe_session_id,
               stripe_payment_intent = EXCLUDED.stripe_payment_intent,
               shipping_country = COALESCE(EXCLUDED.shipping_country, leads.shipping_country),
+              variation = COALESCE(leads.variation, EXCLUDED.variation),
+              checkout_mode = COALESCE(EXCLUDED.checkout_mode, leads.checkout_mode),
               updated_at = NOW();
           `;
           console.log("[stripe] deposit recorded", { email, amount: session.amount_total });

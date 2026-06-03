@@ -36,6 +36,7 @@
 #   btnet group-delete <group_id>     # delete a group (members get unassigned)
 #   btnet assign <mac> <group_id>     # add a device to a group ('-' to unassign)
 #   btnet reset                       # re-derive desired from active rules + push
+#   btnet variations                  # per-variation views/signups/deposits/purchases + rates
 #   btnet test                        # full propose→confirm→verify→remove cycle
 
 set -euo pipefail
@@ -291,6 +292,30 @@ cmd_assign() {
   api_post /api/account/clients "$body" | jq
 }
 
+cmd_variations() {
+  cmd_login >/dev/null
+  local data
+  data=$(api_get /api/variation/stats)
+  echo "$data" | jq -r '
+    .rows as $rows
+    | $rows
+    | map([
+        .id,
+        .mode,
+        (.views|tostring),
+        (.signups|tostring),
+        (.deposits|tostring),
+        (.purchases|tostring),
+        (if .views > 0 then ((.signupRate * 100) | tostring + "%") else "—" end),
+        (if .views > 0 then ((.paidRate   * 100) | tostring + "%") else "—" end)
+      ] | @tsv
+    )
+    | .[]
+  ' | column -t -s $'\t' -N ID,MODE,VIEWS,SIGNUPS,DEPOSITS,PURCHASES,SIGNUP%,PAID%
+  echo ""
+  echo "Totals: $(echo "$data" | jq -r '.totals | "views=\(.views) signups=\(.signups) deposits=\(.deposits) purchases=\(.purchases)"')"
+}
+
 cmd_reset() {
   api_post /api/device/reset '{}' | jq
 }
@@ -383,6 +408,7 @@ main() {
     group-delete)   cmd_group_delete "$@" ;;
     assign)         cmd_assign "$@" ;;
     reset)          cmd_reset ;;
+    variations|stats) cmd_variations ;;
     test)           cmd_test ;;
     *) echo "unknown command: $cmd (try: btnet help)" >&2; exit 2 ;;
   esac

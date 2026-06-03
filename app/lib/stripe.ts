@@ -9,5 +9,6 @@ export function getStripe(): Stripe | null {
   return cached;
 }
 
-export const DEPOSIT_AMOUNT_CENTS = 5000; // $50
+export const DEPOSIT_AMOUNT_CENTS = 5000; // $50 — refundable lock-in deposit
+export const PURCHASE_AMOUNT_CENTS = 24900; // $249/yr — full founding membership
 export const SHIP_DATE = "September 1";

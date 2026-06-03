@@ -17,26 +17,41 @@ type State =
 export function WaitlistForm({
   compact = false,
   variationId,
+  mode = "deposit",
 }: {
   compact?: boolean;
   variationId: string;
+  // "deposit" = current behaviour (waitlist email + $50 lock-in upsell).
+  // "purchase" = single button straight to a $249/yr Stripe checkout.
+  mode?: "deposit" | "purchase";
 }) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [reserving, setReserving] = useState(false);
 
-  async function startCheckout(email: string) {
+  async function startCheckout(
+    email: string,
+    checkoutMode: "deposit" | "purchase" = "deposit",
+  ) {
     setReserving(true);
-    sendGAEvent("event", "reserve_click", { variation: variationId });
+    sendGAEvent("event", "reserve_click", {
+      variation: variationId,
+      mode: checkoutMode,
+    });
     fbqTrack("InitiateCheckout", {
-      value: 50,
+      value: checkoutMode === "purchase" ? 249 : 50,
       currency: "USD",
       variation: variationId,
+      mode: checkoutMode,
     });
     try {
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({
+          email,
+          mode: checkoutMode,
+          variation: variationId,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (data?.url) {
@@ -123,35 +138,91 @@ export function WaitlistForm({
       >
         <div className="inline-flex items-center gap-2 rounded-full bg-[var(--color-accent)]/10 px-3 py-1 text-xs font-medium text-[var(--color-accent)]">
           <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
-          You&apos;re on the list
+          On the waitlist
         </div>
         <h3 className="serif mt-4 text-2xl leading-snug sm:text-3xl">
-          Lock in one of the first 1,000 — now.
+          The waitlist is free — but unordered.
         </h3>
         <p className="mt-2 text-[var(--color-ink-soft)]">
-          Ships <strong>worldwide September 1</strong>. Reserve your build slot
-          with a <strong>$50 deposit</strong> — fully refundable, and applied
-          toward your $249/yr founding membership.
+          We&apos;ll email you when the first batch is ready to ship — no
+          guaranteed slot. Want a guaranteed device, ahead of everyone else?
+          Drop a <strong>$50 refundable deposit</strong> and we lock one of
+          the first 1,000 with your name on it. Ships{" "}
+          <strong>worldwide September 1</strong>.
         </p>
         <button
           type="button"
-          onClick={() => startCheckout(state.email)}
+          onClick={() => startCheckout(state.email, "deposit")}
           disabled={reserving}
           data-cta="reserve-deposit"
           data-variation={variationId}
           className="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-[var(--color-accent)] px-6 py-3.5 text-base font-medium text-white transition hover:brightness-95 disabled:opacity-60"
         >
-          {reserving ? "Taking you to checkout…" : "Reserve my device — $50 →"}
+          {reserving
+            ? "Taking you to checkout…"
+            : "Lock in my device — $50 deposit →"}
         </button>
         <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
-          Secure checkout via Stripe. The deposit only holds your spot in the
-          first batch — refundable anytime before your device ships.
+          Secure checkout via Stripe. Refundable any time before your device
+          ships. Credited toward your $249/yr founding membership.
         </p>
         <p className="mt-4 border-t border-[var(--color-rule)] pt-4 text-sm text-[var(--color-ink-soft)]">
-          Not ready? You&apos;re still on the list — we&apos;ll email you before
-          the batch ships.
+          Not ready? You&apos;re still on the waitlist — we&apos;ll email you
+          before the batch ships.
         </p>
       </div>
+    );
+  }
+
+  // Buy-now variation: the pricing form is a single $249/yr Stripe button.
+  // No waitlist step, no deposit, no upsell — they came here to buy.
+  if (mode === "purchase") {
+    return (
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const formData = new FormData(e.currentTarget);
+          const email = String(formData.get("email") ?? "").trim();
+          if (email && email.includes("@")) startCheckout(email, "purchase");
+          else setState({ kind: "error", message: "Enter a valid email." });
+        }}
+        className={`rounded-2xl border border-[var(--color-rule)] bg-white p-6 sm:p-8 ${
+          compact ? "" : "shadow-[0_1px_0_rgba(0,0,0,0.04)]"
+        }`}
+      >
+        <input type="hidden" name="variation" value={variationId} />
+        <div className="flex flex-col gap-3 sm:gap-4">
+          <label className="block">
+            <span className="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
+              Email
+            </span>
+            <input
+              name="email"
+              type="email"
+              required
+              autoComplete="email"
+              placeholder="you@example.com"
+              className="mt-1.5 w-full rounded-lg border border-[var(--color-rule)] bg-[var(--color-cream)] px-4 py-3 text-base outline-none transition focus:border-[var(--color-ink)] focus:bg-white"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={reserving}
+            data-cta="purchase-submit"
+            data-variation={variationId}
+            className="mt-2 inline-flex items-center justify-center rounded-lg bg-[var(--color-accent)] px-6 py-3.5 text-base font-medium text-white transition hover:brightness-95 disabled:opacity-60"
+          >
+            {reserving ? "Opening checkout…" : "Buy now — $249/yr →"}
+          </button>
+          {state.kind === "error" && (
+            <p className="text-sm text-[var(--color-accent)]">{state.message}</p>
+          )}
+          <p className="text-xs text-[var(--color-ink-soft)]">
+            Device included · ships worldwide September 1 · founding price
+            locked at every renewal. Secure checkout via Stripe.
+          </p>
+        </div>
+      </form>
     );
   }
 
@@ -185,15 +256,16 @@ export function WaitlistForm({
           className="mt-2 inline-flex items-center justify-center rounded-lg bg-[var(--color-ink)] px-6 py-3.5 text-base font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)] disabled:opacity-60"
         >
           {state.kind === "submitting"
-            ? "Reserving your spot..."
-            : "Claim a founding device →"}
+            ? "Joining…"
+            : "Join the waitlist — free →"}
         </button>
         {state.kind === "error" && (
           <p className="text-sm text-[var(--color-accent)]">{state.message}</p>
         )}
         <p className="text-xs text-[var(--color-ink-soft)]">
-          No charge today. Founding members lock in $249/year for life. We&apos;ll
-          confirm before your card is ever touched.
+          Free to join — we email when devices ship. No order in the queue.
+          Want yours guaranteed? Lock it in with a $50 refundable deposit on
+          the next step.
         </p>
       </div>
     </form>

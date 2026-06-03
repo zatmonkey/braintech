@@ -47,6 +47,13 @@ export async function ensureSmsSchema(
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS stripe_session_id TEXT;`;
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS stripe_payment_intent TEXT;`;
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS shipping_country TEXT;`;
+  // Which landing-page variation this lead came in on. Set when the lead
+  // first hits the waitlist or starts checkout; never overwritten.
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS variation TEXT;`;
+  // Stripe checkout flavour: 'deposit' = $50 refundable spot-lock,
+  // 'purchase' = $249/yr full membership (buy-now variation). NULL until
+  // the visitor opens a checkout session.
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS checkout_mode TEXT;`;
   await sql`
     CREATE TABLE IF NOT EXISTS sms_messages (
       id          SERIAL PRIMARY KEY,
@@ -96,6 +103,34 @@ export async function ensureChatSchema(
   // a fresh DB won't fail because chat_sessions doesn't exist yet.
   await sql`ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS pending_proposal JSONB;`;
   chatSchemaReady = true;
+}
+
+let variationSchemaReady = false;
+
+/**
+ * Per-variation view counter. One row per (variation, visitor_id) so we
+ * de-dupe unique views without storing IPs or user-agents. visitor_id is
+ * the bt_var cookie's sibling — a random ID set in sessionStorage by the
+ * client-side tracker. ON CONFLICT DO NOTHING is the whole de-dupe.
+ *
+ * Conversion rates come from joining this table's COUNT with
+ * waitlist.variation and leads.variation counts.
+ */
+export async function ensureVariationSchema(
+  sql: NeonQueryFunction<false, false>,
+): Promise<void> {
+  if (variationSchemaReady) return;
+  await sql`
+    CREATE TABLE IF NOT EXISTS variation_views (
+      variation   TEXT NOT NULL,
+      visitor_id  TEXT NOT NULL,
+      ua_hash     TEXT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (variation, visitor_id)
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS variation_views_var_idx ON variation_views (variation);`;
+  variationSchemaReady = true;
 }
 
 let deviceSchemaReady = false;
