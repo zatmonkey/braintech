@@ -12,6 +12,7 @@
  */
 
 import { useEffect } from "react";
+import { sendGAEvent } from "@next/third-parties/google";
 
 const VIEWED_KEY = "bt_var_viewed";
 const VISITOR_KEY = "bt_visitor_id";
@@ -34,13 +35,20 @@ export function VariationTracker({ variationId }: { variationId: string }) {
       if (sessionStorage.getItem(key)) return;
       sessionStorage.setItem(key, "1");
       const id = visitorId();
-      // Best-effort beacon; we never block on the response.
+
+      // 1) DB beacon: increments the per-variation unique-view counter.
       fetch("/api/variation/track", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ variation: variationId, visitorId: id }),
         keepalive: true,
       }).catch(() => {});
+
+      // 2) Event-scoped GA tag so the variation shows up in standard reports
+      //    without needing the user-property custom dimension wired in GA
+      //    Admin. The user_property is set in layout.tsx for the auto
+      //    page_view; this is the explicit, easy-to-find event.
+      sendGAEvent("event", "variation_view", { variation: variationId });
     } catch {
       // sessionStorage can throw in some embedded/private-mode contexts.
       // We'd rather over-count than fail render.
