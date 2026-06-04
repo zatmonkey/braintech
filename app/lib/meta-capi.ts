@@ -124,6 +124,82 @@ export async function sendCapiLead(p: CapiLead): Promise<void> {
   }
 }
 
+export type CapiCancel = {
+  occurredAt: Date;
+  eventId: string;
+  email: string;
+  ip?: string | null;
+  userAgent?: string | null;
+  value: number; // major units of the unstarted purchase
+  currency: string;
+  mode: "deposit" | "purchase";
+  variation: string | null;
+};
+
+/**
+ * Custom event for cart-abandoned signals. Meta lets you build a custom
+ * conversion off this event name in Events Manager — useful for
+ * remarketing audiences ("clicked checkout, didn't buy in 7 days").
+ */
+export async function sendCapiCancel(p: CapiCancel): Promise<void> {
+  const token = process.env.META_PIXEL_TOKEN ?? process.env.META_ADS_TOKEN;
+  if (!token) return;
+  if (!p.email) return;
+
+  const user_data: Record<string, unknown> = { em: [sha256Lower(p.email)] };
+  if (p.ip) user_data.client_ip_address = p.ip;
+  if (p.userAgent) user_data.client_user_agent = p.userAgent;
+
+  const body = {
+    data: [
+      {
+        event_name: "CheckoutCancelled",
+        event_time: Math.floor(p.occurredAt.getTime() / 1000),
+        event_id: p.eventId,
+        action_source: "website",
+        event_source_url: "https://getbraintech.com/?reserve=cancelled",
+        user_data,
+        custom_data: {
+          value: p.value,
+          currency: p.currency.toUpperCase(),
+          content_ids: [
+            p.mode === "purchase" ? "founding-membership" : "deposit-spot",
+          ],
+          content_type: "product",
+          mode: p.mode,
+          variation: p.variation ?? "unknown",
+        },
+      },
+    ],
+    ...(process.env.META_CAPI_TEST_CODE
+      ? { test_event_code: process.env.META_CAPI_TEST_CODE }
+      : {}),
+  };
+
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/${GRAPH_VERSION}/${PIXEL_ID}/events?access_token=${encodeURIComponent(token)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    const text = await res.text();
+    if (!res.ok) {
+      console.error("[capi] cancel failed", res.status, text.slice(0, 500));
+      return;
+    }
+    console.log("[capi] cancel sent", {
+      event_id: p.eventId,
+      mode: p.mode,
+      response: text.slice(0, 200),
+    });
+  } catch (err) {
+    console.error("[capi] cancel error", err);
+  }
+}
+
 export async function sendCapiPurchase(p: CapiPurchase): Promise<void> {
   const token = process.env.META_PIXEL_TOKEN ?? process.env.META_ADS_TOKEN;
   if (!token) {

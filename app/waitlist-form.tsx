@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { sendGAEvent } from "@next/third-parties/google";
 import type { Pricing } from "./lib/pricing";
+import { stashCheckout } from "./lib/checkout-stash";
 
 function fbqTrack(
   event: string,
@@ -74,9 +75,29 @@ export function WaitlistForm({
           variation: variationId,
         }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = (await res.json().catch(() => ({}))) as {
+        url?: string;
+        session_id?: string;
+        value?: number;
+        currency?: string;
+      };
       if (data?.url) {
-        window.location.href = data.url as string;
+        if (data.session_id) {
+          stashCheckout({
+            sessionId: data.session_id,
+            email,
+            mode: checkoutMode,
+            valueMinor:
+              data.value ??
+              (checkoutMode === "purchase"
+                ? pricing.purchaseMinor
+                : pricing.depositMinor),
+            currency: data.currency ?? pricing.currency.toLowerCase(),
+            variation: variationId,
+            startedAt: Math.floor(Date.now() / 1000),
+          });
+        }
+        window.location.href = data.url;
         return;
       }
     } catch {

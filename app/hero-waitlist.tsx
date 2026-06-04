@@ -21,6 +21,7 @@ import { useState } from "react";
 import { sendGAEvent } from "@next/third-parties/google";
 import type { Variation } from "./variations";
 import type { Pricing } from "./lib/pricing";
+import { stashCheckout } from "./lib/checkout-stash";
 
 function fbqTrack(
   event: string,
@@ -90,8 +91,24 @@ export function HeroWaitlist({
             variation: variation.id,
           }),
         });
-        const data = (await res.json().catch(() => ({}))) as { url?: string };
+        const data = (await res.json().catch(() => ({}))) as {
+          url?: string;
+          session_id?: string;
+          value?: number;
+          currency?: string;
+        };
         if (data?.url) {
+          if (data.session_id) {
+            stashCheckout({
+              sessionId: data.session_id,
+              email: trimmed,
+              mode: "purchase",
+              valueMinor: data.value ?? pricing.purchaseMinor,
+              currency: data.currency ?? pricing.currency.toLowerCase(),
+              variation: variation.id,
+              startedAt: Math.floor(Date.now() / 1000),
+            });
+          }
           window.location.href = data.url;
           return;
         }
@@ -194,8 +211,24 @@ export function HeroWaitlist({
           variation: variation.id,
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { url?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        url?: string;
+        session_id?: string;
+        value?: number;
+        currency?: string;
+      };
       if (data?.url) {
+        if (data.session_id) {
+          stashCheckout({
+            sessionId: data.session_id,
+            email: capturedEmail,
+            mode: "deposit",
+            valueMinor: data.value ?? pricing.depositMinor,
+            currency: data.currency ?? pricing.currency.toLowerCase(),
+            variation: variation.id,
+            startedAt: Math.floor(Date.now() / 1000),
+          });
+        }
         window.location.href = data.url;
         return;
       }

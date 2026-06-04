@@ -18,6 +18,9 @@ type Row = {
   signups: number; // unique waitlist emails
   deposits: number; // checkout_mode='deposit' AND deposit_paid
   purchases: number; // checkout_mode='purchase' AND deposit_paid
+  // Opened Stripe Checkout and bailed (checkout_cancelled_at IS NOT NULL
+  // AND deposit_paid = FALSE).
+  cancelled: number;
   signupRate: number; // signups / views
   paidRate: number; // (deposits + purchases) / views
 };
@@ -63,7 +66,8 @@ export async function GET() {
     sql`
       SELECT variation,
              COUNT(*) FILTER (WHERE deposit_paid AND checkout_mode = 'deposit')::int   AS deposits,
-             COUNT(*) FILTER (WHERE deposit_paid AND checkout_mode = 'purchase')::int  AS purchases
+             COUNT(*) FILTER (WHERE deposit_paid AND checkout_mode = 'purchase')::int  AS purchases,
+             COUNT(*) FILTER (WHERE checkout_cancelled_at IS NOT NULL AND NOT deposit_paid)::int AS cancelled
         FROM leads
        WHERE variation IS NOT NULL
        GROUP BY variation;
@@ -81,7 +85,7 @@ export async function GET() {
   ])) as unknown as [
     { variation: string; n: number }[],
     { variation: string; n: number }[],
-    { variation: string; deposits: number; purchases: number }[],
+    { variation: string; deposits: number; purchases: number; cancelled: number }[],
     {
       variation: string;
       currency: string;
@@ -101,6 +105,7 @@ export async function GET() {
     const l = leads.get(v.id);
     const d = l?.deposits ?? 0;
     const p = l?.purchases ?? 0;
+    const c = l?.cancelled ?? 0;
     return {
       id: v.id,
       mode: v.mode,
@@ -108,6 +113,7 @@ export async function GET() {
       signups: s,
       deposits: d,
       purchases: p,
+      cancelled: c,
       signupRate: n > 0 ? s / n : 0,
       paidRate: n > 0 ? (d + p) / n : 0,
     };

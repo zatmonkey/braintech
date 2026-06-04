@@ -60,6 +60,11 @@ export async function ensureSmsSchema(
   // reconciling refunds and for regional conversion analysis.
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS billing_country TEXT;`;
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS currency TEXT;`;
+  // Set when the visitor lands on /?reserve=cancelled — i.e. opened a
+  // Stripe Checkout session but didn't complete payment. NULL when never
+  // cancelled or when deposit_paid is true (a paid lead can't also be a
+  // cancelled lead — the webhook clears it).
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS checkout_cancelled_at TIMESTAMPTZ;`;
   await sql`
     CREATE TABLE IF NOT EXISTS sms_messages (
       id          SERIAL PRIMARY KEY,

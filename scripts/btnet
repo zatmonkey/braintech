@@ -393,12 +393,13 @@ cmd_variations() {
         (.signups|tostring),
         (.deposits|tostring),
         (.purchases|tostring),
+        ((.cancelled // 0)|tostring),
         (if .views > 0 then ((.signupRate * 100) | tostring + "%") else "—" end),
         (if .views > 0 then ((.paidRate   * 100) | tostring + "%") else "—" end)
       ] | @tsv
     )
     | .[]
-  ' | column -t -s $'\t' -N ID,MODE,VIEWS,SIGNUPS,DEPOSITS,PURCHASES,SIGNUP%,PAID%
+  ' | column -t -s $'\t' -N ID,MODE,VIEWS,SIGNUPS,DEPOSITS,PURCHASES,CANCELLED,SIGNUP%,PAID%
   echo ""
   echo "Totals: $(echo "$data" | jq -r '.totals | "views=\(.views) signups=\(.signups) deposits=\(.deposits) purchases=\(.purchases)"')"
   # Currency rollup at the bottom — concise so the main table stays the focus.

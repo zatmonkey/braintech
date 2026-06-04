@@ -10,6 +10,7 @@ import {
 import { PricingChoice } from "./pricing-choice";
 import { CurrencyPicker } from "./currency-picker";
 import { VariationTracker } from "./variation-tracker";
+import { CancelTracker } from "./cancel-tracker";
 import { getVariation, type Variation } from "./variations";
 import { pricingForCountry, type Pricing } from "./lib/pricing";
 
@@ -61,6 +62,7 @@ export default async function Home({
       <ChatWidget />
       <FoundingToasts />
       <VariationTracker variationId={variation.id} />
+      <CancelTracker />
     </main>
   );
 }

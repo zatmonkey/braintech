@@ -160,7 +160,17 @@ export async function POST(req: Request) {
       }
     }
 
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({
+      url: session.url,
+      // Echo back so the client can stash these in sessionStorage; the
+      // CancelTracker reads them when the visitor lands on
+      // /?reserve=cancelled and fires the abandonment events.
+      session_id: session.id,
+      mode,
+      value: unitAmount,
+      currency: stripeCurrency,
+      variation: variation || null,
+    });
   } catch (err) {
     console.error("[checkout] session create failed", err);
     return NextResponse.json(
