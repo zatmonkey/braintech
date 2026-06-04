@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSql, ensureSmsSchema } from "@/app/lib/db";
 import { twilioConfigured, sendSms } from "@/app/lib/twilio";
 import { generateOpener } from "@/app/lib/conversation";
-import { sendCapiLead } from "@/app/lib/meta-capi";
+import { sendCapiLead, readMetaCookies } from "@/app/lib/meta-capi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -220,6 +220,7 @@ export async function POST(req: Request) {
     const eventId =
       (body.eventId ?? "").trim() ||
       `wl_${id}_${Math.floor(Date.now() / 1000)}`;
+    const { fbc, fbp } = readMetaCookies(req.headers.get("cookie"));
     await sendCapiLead({
       occurredAt: new Date(),
       eventId,
@@ -227,6 +228,8 @@ export async function POST(req: Request) {
       phone: phone || null,
       ip: ip || null,
       userAgent: ua || null,
+      fbc,
+      fbp,
       source: source || "/",
       variation: variation || null,
       contentName: "waitlist",

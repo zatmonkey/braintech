@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getSql, ensureChatSchema, ensureSmsSchema } from "@/app/lib/db";
 import { runDemoChatTurn } from "@/app/lib/conversation";
-import { sendCapiLead } from "@/app/lib/meta-capi";
+import { sendCapiLead, readMetaCookies } from "@/app/lib/meta-capi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -133,14 +133,18 @@ export async function POST(req: Request) {
         "";
       // bt_var cookie carries the variation the chat visitor was on; pull
       // it from the request so the Lead is attributed correctly.
+      const cookieHeader = req.headers.get("cookie");
       const variation =
-        req.headers.get("cookie")?.match(/(?:^|;\s*)bt_var=(\d+)/)?.[1] ?? null;
+        cookieHeader?.match(/(?:^|;\s*)bt_var=(\d+)/)?.[1] ?? null;
+      const { fbc, fbp } = readMetaCookies(cookieHeader);
       await sendCapiLead({
         occurredAt: new Date(),
         eventId: `chat_${sessionId}`,
         email: capturedEmail,
         ip: ip || null,
         userAgent: ua || null,
+        fbc,
+        fbp,
         source: "chat",
         variation,
         contentName: "chat_email_capture",

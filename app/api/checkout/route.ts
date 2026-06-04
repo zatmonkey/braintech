@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getStripe, SHIP_DATE } from "@/app/lib/stripe";
 import { getSql, ensureSmsSchema } from "@/app/lib/db";
 import { pricingForCountry, stripeAmount } from "@/app/lib/pricing";
+import { readMetaCookies } from "@/app/lib/meta-capi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -100,23 +101,36 @@ export async function POST(req: Request) {
       ],
       // mode goes into metadata so the webhook can tell deposits from full
       // purchases (different downstream emails, different lead state).
-      metadata: {
-        email,
-        phone,
-        variation,
-        mode,
-        country: pricing.country,
-        currency: pricing.currency,
-      },
-      payment_intent_data: {
-        metadata: {
+      // fbc/fbp ride along because the webhook is server-to-server (Stripe
+      // → us) and so can't read the user's cookies directly — without
+      // these the Purchase CAPI fire would lose paid-attribution match.
+      metadata: (() => {
+        const { fbc, fbp } = readMetaCookies(req.headers.get("cookie"));
+        return {
           email,
           phone,
           variation,
           mode,
           country: pricing.country,
           currency: pricing.currency,
-        },
+          ...(fbc ? { fbc } : {}),
+          ...(fbp ? { fbp } : {}),
+        };
+      })(),
+      payment_intent_data: {
+        metadata: (() => {
+          const { fbc, fbp } = readMetaCookies(req.headers.get("cookie"));
+          return {
+            email,
+            phone,
+            variation,
+            mode,
+            country: pricing.country,
+            currency: pricing.currency,
+            ...(fbc ? { fbc } : {}),
+            ...(fbp ? { fbp } : {}),
+          };
+        })(),
         receipt_email: email,
       },
       success_url: `${base}/reserved?session_id={CHECKOUT_SESSION_ID}`,

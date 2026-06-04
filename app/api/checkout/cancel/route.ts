@@ -12,7 +12,7 @@
 
 import { NextResponse } from "next/server";
 import { getSql, ensureSmsSchema } from "@/app/lib/db";
-import { sendCapiCancel } from "@/app/lib/meta-capi";
+import { sendCapiCancel, readMetaCookies } from "@/app/lib/meta-capi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -72,12 +72,15 @@ export async function POST(req: Request) {
     req.headers.get("x-real-ip") ??
     "";
 
+  const { fbc, fbp } = readMetaCookies(req.headers.get("cookie"));
   await sendCapiCancel({
     occurredAt: new Date(),
     eventId: sessionId, // matches the client-side {eventID: sessionId}
     email,
     ip: ip || null,
     userAgent: ua || null,
+    fbc,
+    fbp,
     value: major,
     currency,
     mode,

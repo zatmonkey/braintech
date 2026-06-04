@@ -97,6 +97,39 @@ export function proxy(request: NextRequest) {
     });
   }
 
+  // Meta click-attribution cookie. When a visitor arrives from a Facebook
+  // or Instagram ad, the URL has `?fbclid=XXX`. We persist that as the
+  // _fbc cookie in Meta's canonical format (fb.<subdomain>.<ts>.<fbclid>)
+  // so every server-side Conversions API call from /api/waitlist,
+  // /api/chat, /api/checkout(/cancel), and the Stripe webhook can include
+  // it in user_data. Significantly improves Event Match Quality for paid
+  // traffic — server events tie back to the exact ad click that drove
+  // them, instead of fuzzy email-hash matching.
+  // The Pixel JS on the page would set this too — but proxy runs before
+  // JS so we don't miss the first events, and we only set if the cookie
+  // isn't already present so we don't race the Pixel's clock.
+  const fbclid = url.searchParams.get("fbclid");
+  const existingFbc = request.cookies.get("_fbc")?.value;
+  if (fbclid && !existingFbc) {
+    // Meta format: fb.<subdomain-index>.<millis>.<fbclid>
+    // subdomain-index = 1 means top-level domain (getbraintech.com).
+    // millis is the click timestamp — we use server time as a proxy since
+    // the click time isn't carried in the URL.
+    // Date.now() is unavailable inside Workflow scripts but proxy runs
+    // in the Edge/Node runtime, where it works normally.
+    const fbcValue = `fb.1.${Date.now()}.${fbclid}`;
+    response.cookies.set({
+      name: "_fbc",
+      value: fbcValue,
+      path: "/",
+      // Meta's recommended TTL is 90 days.
+      maxAge: 60 * 60 * 24 * 90,
+      sameSite: "lax",
+      httpOnly: false,
+      secure: true,
+    });
+  }
+
   return response;
 }
 

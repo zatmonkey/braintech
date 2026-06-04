@@ -24,6 +24,25 @@ function sha256Lower(s: string): string {
   return createHash("sha256").update(s.trim().toLowerCase()).digest("hex");
 }
 
+/**
+ * Pulls Meta's click-attribution cookies out of an HTTP request's Cookie
+ * header. Every route that fires CAPI should call this and pass the result
+ * through to sendCapiX — it ties server events back to the exact ad click
+ * that brought the visitor in, instead of fuzzy email-hash matching.
+ *
+ * Both cookies are best-effort:
+ *   _fbc is set by proxy.ts when ?fbclid=XXX is on a URL (or by Pixel JS).
+ *   _fbp is set automatically by the Pixel JS on every browser session.
+ */
+export function readMetaCookies(
+  cookieHeader: string | null | undefined,
+): { fbc: string | null; fbp: string | null } {
+  const cookies = cookieHeader ?? "";
+  const fbc = cookies.match(/(?:^|;\s*)_fbc=([^;]+)/)?.[1] ?? null;
+  const fbp = cookies.match(/(?:^|;\s*)_fbp=([^;]+)/)?.[1] ?? null;
+  return { fbc, fbp };
+}
+
 export type CapiPurchase = {
   // ISO-8601 or seconds-since-epoch; we accept Date and convert.
   occurredAt: Date;
@@ -35,6 +54,11 @@ export type CapiPurchase = {
   country?: string | null; // 2-letter ISO
   ip?: string | null;
   userAgent?: string | null;
+  // The webhook is server-to-server, so it can't read user cookies. We
+  // stash fbc/fbp in Stripe metadata at /api/checkout time and the
+  // webhook reads them back from there.
+  fbc?: string | null;
+  fbp?: string | null;
   // Origin page (the user's final step). The browser side fired at
   // /reserved so we mirror that here.
   sourceUrl?: string;
@@ -55,6 +79,9 @@ export type CapiLead = {
   phone?: string | null;
   ip?: string | null;
   userAgent?: string | null;
+  // Meta click-attribution cookies (read via readMetaCookies).
+  fbc?: string | null;
+  fbp?: string | null;
   sourceUrl?: string;
   // Where the lead came from on the page so Meta breakdowns work
   // ("hero", "pricing", "chat", ...) — surfaces in custom_data.source.
@@ -77,6 +104,8 @@ export async function sendCapiLead(p: CapiLead): Promise<void> {
   if (p.phone) user_data.ph = [sha256Lower(p.phone.replace(/\D/g, ""))];
   if (p.ip) user_data.client_ip_address = p.ip;
   if (p.userAgent) user_data.client_user_agent = p.userAgent;
+  if (p.fbc) user_data.fbc = p.fbc;
+  if (p.fbp) user_data.fbp = p.fbp;
 
   const body = {
     data: [
@@ -130,6 +159,8 @@ export type CapiCancel = {
   email: string;
   ip?: string | null;
   userAgent?: string | null;
+  fbc?: string | null;
+  fbp?: string | null;
   value: number; // major units of the unstarted purchase
   currency: string;
   mode: "deposit" | "purchase";
@@ -149,6 +180,8 @@ export async function sendCapiCancel(p: CapiCancel): Promise<void> {
   const user_data: Record<string, unknown> = { em: [sha256Lower(p.email)] };
   if (p.ip) user_data.client_ip_address = p.ip;
   if (p.userAgent) user_data.client_user_agent = p.userAgent;
+  if (p.fbc) user_data.fbc = p.fbc;
+  if (p.fbp) user_data.fbp = p.fbp;
 
   const body = {
     data: [
@@ -214,6 +247,8 @@ export async function sendCapiPurchase(p: CapiPurchase): Promise<void> {
   if (p.country) user_data.country = [sha256Lower(p.country)];
   if (p.ip) user_data.client_ip_address = p.ip;
   if (p.userAgent) user_data.client_user_agent = p.userAgent;
+  if (p.fbc) user_data.fbc = p.fbc;
+  if (p.fbp) user_data.fbp = p.fbp;
 
   const body = {
     data: [

@@ -93,6 +93,8 @@ export async function POST(req: Request) {
       // Fire the server-side Meta Purchase. Best-effort; we never block the
       // 200 to Stripe on Pixel's response. The eventId matches what
       // PurchaseTracker fires client-side on /reserved so Meta dedupes.
+      // fbc/fbp came in via Stripe metadata at checkout-create time so
+      // server attribution ties back to the original ad click.
       if (email) {
         const minor = session.amount_total ?? 0;
         const cur = currency ?? "usd";
@@ -103,6 +105,8 @@ export async function POST(req: Request) {
           email,
           phone: phone || null,
           country: country || billingCountry || null,
+          fbc: session.metadata?.fbc || null,
+          fbp: session.metadata?.fbp || null,
           value: major,
           currency: cur,
           mode,
