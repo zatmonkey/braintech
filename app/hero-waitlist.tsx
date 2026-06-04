@@ -22,9 +22,20 @@ import { sendGAEvent } from "@next/third-parties/google";
 import type { Variation } from "./variations";
 import type { Pricing } from "./lib/pricing";
 
-function fbqTrack(event: string, params?: Record<string, unknown>) {
+function fbqTrack(
+  event: string,
+  params?: Record<string, unknown>,
+  options?: { eventID?: string },
+) {
   const w = window as typeof window & { fbq?: (...a: unknown[]) => void };
-  if (typeof w.fbq === "function") w.fbq("track", event, params);
+  if (typeof w.fbq === "function") w.fbq("track", event, params, options);
+}
+
+function newEventId(prefix: string): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return `${prefix}_${crypto.randomUUID()}`;
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 type State =
@@ -94,6 +105,9 @@ export function HeroWaitlist({
     }
 
     // Waitlist flavour — soft email capture.
+    // Generate a stable event_id so the browser fbq Lead and the server-side
+    // CAPI Lead from /api/waitlist dedupe to one conversion in Meta.
+    const eventId = newEventId("wl");
     const payload = {
       email: trimmed,
       variation: variation.id,
@@ -101,6 +115,7 @@ export function HeroWaitlist({
         typeof window !== "undefined"
           ? window.location.pathname + window.location.search + "#hero"
           : "/#hero",
+      eventId,
     };
 
     try {
@@ -127,7 +142,11 @@ export function HeroWaitlist({
         source: "hero",
       });
       sendGAEvent("event", "conversion", { variation: variation.id });
-      fbqTrack("Lead", { content_name: "waitlist", source: "hero" });
+      fbqTrack(
+        "Lead",
+        { content_name: "waitlist", source: "hero", variation: variation.id },
+        { eventID: eventId },
+      );
       setState({ kind: "success" });
     } catch {
       sendGAEvent("event", "waitlist_error", {

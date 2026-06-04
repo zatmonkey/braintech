@@ -45,6 +45,85 @@ export type CapiPurchase = {
   variation: string | null;
 };
 
+export type CapiLead = {
+  occurredAt: Date;
+  // Client-generated UUID that the browser fbq Lead fire ALSO sends as
+  // {eventID: ...}. Same id on both paths → Meta dedupes inside its 7-day
+  // attribution window.
+  eventId: string;
+  email: string;
+  phone?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  sourceUrl?: string;
+  // Where the lead came from on the page so Meta breakdowns work
+  // ("hero", "pricing", "chat", ...) — surfaces in custom_data.source.
+  source: string;
+  variation: string | null;
+  // Optional content_name lets you split waitlist vs. demo vs. anything else
+  // in Meta reports. Defaults to "waitlist".
+  contentName?: string;
+};
+
+export async function sendCapiLead(p: CapiLead): Promise<void> {
+  const token = process.env.META_PIXEL_TOKEN ?? process.env.META_ADS_TOKEN;
+  if (!token) {
+    console.warn("[capi] no META_PIXEL_TOKEN / META_ADS_TOKEN — skipping lead");
+    return;
+  }
+  if (!p.email) return; // a Lead without an email is meaningless to Meta
+
+  const user_data: Record<string, unknown> = { em: [sha256Lower(p.email)] };
+  if (p.phone) user_data.ph = [sha256Lower(p.phone.replace(/\D/g, ""))];
+  if (p.ip) user_data.client_ip_address = p.ip;
+  if (p.userAgent) user_data.client_user_agent = p.userAgent;
+
+  const body = {
+    data: [
+      {
+        event_name: "Lead",
+        event_time: Math.floor(p.occurredAt.getTime() / 1000),
+        event_id: p.eventId,
+        action_source: "website",
+        event_source_url: p.sourceUrl ?? "https://getbraintech.com/",
+        user_data,
+        custom_data: {
+          content_name: p.contentName ?? "waitlist",
+          source: p.source,
+          variation: p.variation ?? "unknown",
+        },
+      },
+    ],
+    ...(process.env.META_CAPI_TEST_CODE
+      ? { test_event_code: process.env.META_CAPI_TEST_CODE }
+      : {}),
+  };
+
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/${GRAPH_VERSION}/${PIXEL_ID}/events?access_token=${encodeURIComponent(token)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    const text = await res.text();
+    if (!res.ok) {
+      console.error("[capi] lead failed", res.status, text.slice(0, 500));
+      return;
+    }
+    console.log("[capi] lead sent", {
+      event_id: p.eventId,
+      source: p.source,
+      variation: p.variation,
+      response: text.slice(0, 200),
+    });
+  } catch (err) {
+    console.error("[capi] lead error", err);
+  }
+}
+
 export async function sendCapiPurchase(p: CapiPurchase): Promise<void> {
   const token = process.env.META_PIXEL_TOKEN ?? process.env.META_ADS_TOKEN;
   if (!token) {

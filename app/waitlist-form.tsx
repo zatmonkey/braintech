@@ -4,9 +4,20 @@ import { useState } from "react";
 import { sendGAEvent } from "@next/third-parties/google";
 import type { Pricing } from "./lib/pricing";
 
-function fbqTrack(event: string, params?: Record<string, unknown>) {
+function fbqTrack(
+  event: string,
+  params?: Record<string, unknown>,
+  options?: { eventID?: string },
+) {
   const w = window as typeof window & { fbq?: (...a: unknown[]) => void };
-  if (typeof w.fbq === "function") w.fbq("track", event, params);
+  if (typeof w.fbq === "function") w.fbq("track", event, params, options);
+}
+
+function newEventId(prefix: string): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return `${prefix}_${crypto.randomUUID()}`;
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 type State =
@@ -79,6 +90,9 @@ export function WaitlistForm({
     setState({ kind: "submitting" });
     const form = e.currentTarget;
     const data = new FormData(form);
+    // Same id sent client-side (fbq eventID) and server-side (CAPI event_id)
+    // so Meta dedupes the Lead pair into a single conversion.
+    const eventId = newEventId("wl");
     const payload = {
       email: String(data.get("email") ?? "").trim(),
       variation: variationId,
@@ -86,6 +100,7 @@ export function WaitlistForm({
         typeof window !== "undefined"
           ? window.location.pathname + window.location.search
           : "/",
+      eventId,
     };
 
     if (!payload.email || !payload.email.includes("@")) {
@@ -120,7 +135,11 @@ export function WaitlistForm({
         variation: variationId,
       });
       fbqTrack("Contact", { variation: variationId });
-      fbqTrack("Lead", { content_name: "waitlist", variation: variationId });
+      fbqTrack(
+        "Lead",
+        { content_name: "waitlist", variation: variationId, source: "pricing" },
+        { eventID: eventId },
+      );
       setState({
         kind: "success",
         position: body?.position,

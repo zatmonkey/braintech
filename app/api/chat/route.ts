@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getSql, ensureChatSchema, ensureSmsSchema } from "@/app/lib/db";
 import { runDemoChatTurn } from "@/app/lib/conversation";
+import { sendCapiLead } from "@/app/lib/meta-capi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,10 +80,27 @@ export async function POST(req: Request) {
         content: r.content,
       }));
 
+    // Capture the email out of the save() callback so we can fire CAPI Lead
+    // exactly once, after the turn completes (only for the first email
+    // we've seen this session — `existing_email IS NULL` guards against
+    // re-firing on every subsequent turn).
+    let capturedEmail: string | null = null;
+    let isFirstEmailCapture = false;
     const { reply } = await runDemoChatTurn({
       history,
       currentMemory,
       save: async ({ memory, email, complete }) => {
+        // Did chat_sessions already have an email before we update it?
+        if (email) {
+          const before = (await sql`
+            SELECT email FROM chat_sessions WHERE session_id = ${sessionId};
+          `) as { email: string | null }[];
+          if (!before[0]?.email) {
+            isFirstEmailCapture = true;
+            capturedEmail = email;
+          }
+        }
+
         await sql`
           UPDATE chat_sessions SET
             memory = ${memory},
@@ -103,6 +121,31 @@ export async function POST(req: Request) {
         }
       },
     });
+
+    // Server-side Meta Lead fire — only the FIRST time we capture an email
+    // in this chat session, to avoid double-counting on subsequent turns.
+    // Best-effort; never blocks the response.
+    if (isFirstEmailCapture && capturedEmail) {
+      const ua = req.headers.get("user-agent")?.slice(0, 300) ?? "";
+      const ip =
+        req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+        req.headers.get("x-real-ip") ??
+        "";
+      // bt_var cookie carries the variation the chat visitor was on; pull
+      // it from the request so the Lead is attributed correctly.
+      const variation =
+        req.headers.get("cookie")?.match(/(?:^|;\s*)bt_var=(\d+)/)?.[1] ?? null;
+      await sendCapiLead({
+        occurredAt: new Date(),
+        eventId: `chat_${sessionId}`,
+        email: capturedEmail,
+        ip: ip || null,
+        userAgent: ua || null,
+        source: "chat",
+        variation,
+        contentName: "chat_email_capture",
+      });
+    }
 
     await sql`
       INSERT INTO chat_messages (session_id, role, content)

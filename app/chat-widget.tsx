@@ -68,7 +68,10 @@ export function ChatWidget() {
     if (!started) {
       setStarted(true);
       sendGAEvent("event", "demo_chat_started", {});
-      fbqTrack("Lead", { content_name: "chat_demo", variation: currentVariation() });
+      // NOT a Lead — no email yet. Use a custom event so Meta's Lead
+      // optimization doesn't get polluted with chat-openers. (When Bri
+      // captures an email later in /api/chat, the server fires CAPI Lead.)
+      fbqTrack("ChatDemoStarted", { variation: currentVariation() });
     }
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);

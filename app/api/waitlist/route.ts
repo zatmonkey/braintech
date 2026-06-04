@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSql, ensureSmsSchema } from "@/app/lib/db";
 import { twilioConfigured, sendSms } from "@/app/lib/twilio";
 import { generateOpener } from "@/app/lib/conversation";
+import { sendCapiLead } from "@/app/lib/meta-capi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +13,9 @@ type Payload = {
   source?: string;
   variation?: string;
   smsConsent?: boolean;
+  // Client-generated UUID; same id is passed to fbq("track", "Lead", …,
+  // {eventID}) on the browser. Meta dedupes the pair.
+  eventId?: string;
 };
 
 function normalizeEmail(raw: string) {
@@ -209,6 +213,24 @@ export async function POST(req: Request) {
         console.error("[waitlist] lead variation stamp failed", err);
       }
     }
+
+    // Server-side Meta Lead fire. Same event_id as the browser side so Meta
+    // dedupes. If no client event_id came through, generate one — Meta will
+    // still count this side; we just won't dedupe the browser fire.
+    const eventId =
+      (body.eventId ?? "").trim() ||
+      `wl_${id}_${Math.floor(Date.now() / 1000)}`;
+    await sendCapiLead({
+      occurredAt: new Date(),
+      eventId,
+      email,
+      phone: phone || null,
+      ip: ip || null,
+      userAgent: ua || null,
+      source: source || "/",
+      variation: variation || null,
+      contentName: "waitlist",
+    });
   }
 
   // Only text people who explicitly opted in (consent is optional, never required).
