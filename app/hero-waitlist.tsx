@@ -41,7 +41,11 @@ function newEventId(prefix: string): string {
 type State =
   | { kind: "idle" }
   | { kind: "submitting" }
-  | { kind: "success" } // waitlist only — buyNow redirects, never lands here
+  // waitlist only — buyNow redirects, never lands here. Carries the email
+  // so the in-success "Lock in" button can go straight to Stripe without
+  // asking for it again.
+  | { kind: "success"; email: string }
+  | { kind: "checkingOut" }
   | { kind: "error"; message: string };
 
 export function HeroWaitlist({
@@ -147,7 +151,7 @@ export function HeroWaitlist({
         { content_name: "waitlist", source: "hero", variation: variation.id },
         { eventID: eventId },
       );
-      setState({ kind: "success" });
+      setState({ kind: "success", email: trimmed });
     } catch {
       sendGAEvent("event", "waitlist_error", {
         variation: variation.id,
@@ -161,8 +165,55 @@ export function HeroWaitlist({
     }
   }
 
-  if (state.kind === "success") {
+  // After a successful waitlist submission we hand the visitor a one-click
+  // path to Stripe — using the email they just gave us, so they don't have
+  // to re-enter it. Skipping the second-form friction is the whole point of
+  // the success-state CTA.
+  async function lockInWithCapturedEmail() {
+    if (state.kind !== "success") return;
+    const capturedEmail = state.email;
+    setState({ kind: "checkingOut" });
+    sendGAEvent("event", "hero_lockin_click", { variation: variation.id });
+    fbqTrack(
+      "InitiateCheckout",
+      {
+        value: pricing.depositMinor / (pricing.currency === "JPY" ? 1 : 100),
+        currency: pricing.currency,
+        variation: variation.id,
+        source: "hero-success",
+        mode: "deposit",
+      },
+    );
+    try {
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: capturedEmail,
+          mode: "deposit",
+          variation: variation.id,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { url?: string };
+      if (data?.url) {
+        window.location.href = data.url;
+        return;
+      }
+      setState({
+        kind: "error",
+        message: "Couldn't open checkout. Try again.",
+      });
+    } catch {
+      setState({
+        kind: "error",
+        message: "Network error. Try again.",
+      });
+    }
+  }
+
+  if (state.kind === "success" || state.kind === "checkingOut") {
     // buyNow never reaches this — it window.location's to Stripe.
+    const checkingOut = state.kind === "checkingOut";
     return (
       <div className="mt-8 max-w-md rounded-2xl border border-[var(--color-rule)] bg-white p-5">
         <div className="flex items-start gap-3">
@@ -180,18 +231,28 @@ export function HeroWaitlist({
               You&apos;re on the waitlist.
             </p>
             <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-              The waitlist is free but unordered — we email when the first batch
-              ships.{" "}
-              <a
-                href="#lockin"
-                className="font-medium text-[var(--color-accent)] underline-offset-4 hover:underline"
-              >
-                Want to lock in your device? {pricing.depositLabel} holds your
-                spot →
-              </a>
+              The waitlist is free but unordered — we email when the first
+              batch ships. Want a guaranteed device?
             </p>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={lockInWithCapturedEmail}
+          disabled={checkingOut}
+          data-cta="hero-success-lockin"
+          data-variation={variation.id}
+          className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-[var(--color-accent)] px-5 py-3 text-base font-medium text-white transition hover:brightness-95 disabled:opacity-60"
+        >
+          {checkingOut
+            ? "Opening checkout…"
+            : `Lock in your device — ${pricing.depositLabel} deposit →`}
+        </button>
+        <p className="mt-2 text-center text-xs text-[var(--color-ink-soft)]">
+          {pricing.depositLabel} refundable any time before your device ships.
+          Skips the queue. Credited toward your {pricing.purchaseLabel}{" "}
+          founding membership.
+        </p>
       </div>
     );
   }
