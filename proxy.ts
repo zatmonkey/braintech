@@ -74,6 +74,29 @@ export function proxy(request: NextRequest) {
     });
   }
 
+  // Stash the visitor's IP-country in a cookie so /api/checkout (and any
+  // other downstream route that doesn't see geo headers cleanly) can
+  // attribute pricing without re-running geo lookup. Re-stamped each
+  // request — cheap and keeps a moving visitor on the right currency.
+  // ?country=AU lets us preview localized pricing without changing IP.
+  const queryCountry = url.searchParams.get("country");
+  const country = (
+    queryCountry ??
+    request.headers.get("x-vercel-ip-country") ??
+    ""
+  ).toUpperCase();
+  if (/^[A-Z]{2}$/.test(country)) {
+    response.cookies.set({
+      name: "bt_geo",
+      value: country,
+      path: "/",
+      maxAge: COOKIE_MAX_AGE,
+      sameSite: "lax",
+      httpOnly: false,
+      secure: true,
+    });
+  }
+
   return response;
 }
 

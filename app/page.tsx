@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { WaitlistForm } from "./waitlist-form";
 import { HeroWaitlist } from "./hero-waitlist";
 import { ChatWidget } from "./chat-widget";
@@ -7,8 +7,10 @@ import {
   FoundingMeter,
   FoundingToasts,
 } from "./founding-stats";
+import { PricingChoice } from "./pricing-choice";
 import { VariationTracker } from "./variation-tracker";
 import { getVariation, type Variation } from "./variations";
+import { pricingForCountry, type Pricing } from "./lib/pricing";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -27,16 +29,32 @@ export default async function Home({
   const cookieStore = await cookies();
   const variationKey = params.variation ?? cookieStore.get("bt_var")?.value;
   const variation = getVariation(variationKey);
+
+  // Vercel injects the visitor's IP-country in this header on every request.
+  // proxy.ts also stashes it in a `bt_geo` cookie so /api/checkout (which
+  // doesn't always see vercel headers cleanly) can attribute correctly.
+  // ?country=AU lets us preview localized pricing without changing IP.
+  const hdrs = await headers();
+  const countryOverride = Array.isArray(params.country)
+    ? params.country[0]
+    : params.country;
+  const country =
+    countryOverride ??
+    cookieStore.get("bt_geo")?.value ??
+    hdrs.get("x-vercel-ip-country") ??
+    "US";
+  const pricing = pricingForCountry(country);
+
   return (
     <main className="flex flex-1 flex-col" data-variation={variation.id}>
       <Nav variation={variation} />
-      <Hero variation={variation} />
+      <Hero variation={variation} pricing={pricing} />
       <Problem />
       <HowItWorks />
       <ContentPartners />
       <Examples />
       <Testimonials />
-      <Pricing variation={variation} />
+      <Pricing variation={variation} pricing={pricing} />
       <FAQ />
       <Footer />
       <ChatWidget />
@@ -82,7 +100,13 @@ function Logo() {
   );
 }
 
-function Hero({ variation }: { variation: Variation }) {
+function Hero({
+  variation,
+  pricing,
+}: {
+  variation: Variation;
+  pricing: Pricing;
+}) {
   return (
     <section className="relative mx-auto w-full max-w-6xl px-6 pb-16 pt-8 sm:px-10 sm:pb-24 sm:pt-12">
       <div className="grid items-start gap-12 lg:grid-cols-[1.1fr_1fr] lg:gap-16">
@@ -109,7 +133,7 @@ function Hero({ variation }: { variation: Variation }) {
                 - "buyNow" → email + button goes straight to a $249/yr
                   Stripe purchase. No deposit, no queue.
               Cold paid traffic shouldn't have to scroll to convert. */}
-          <HeroWaitlist variation={variation} />
+          <HeroWaitlist variation={variation} pricing={pricing} />
         </div>
 
         <HeroDevice />
@@ -538,86 +562,78 @@ function Testimonials() {
   );
 }
 
-function Pricing({ variation }: { variation: Variation }) {
+function Pricing({
+  variation,
+  pricing,
+}: {
+  variation: Variation;
+  pricing: Pricing;
+}) {
   const isBuyNow = variation.mode === "buyNow";
+
+  // Buy-now variation: single-path purchase, no choice toggle.
+  if (isBuyNow) {
+    return (
+      <section
+        id="waitlist"
+        className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-28"
+      >
+        <div className="grid items-start gap-12 lg:grid-cols-[1fr_1.1fr] lg:gap-16">
+          <div>
+            <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
+              Founding members
+            </div>
+            <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
+              {pricing.purchaseLabel.replace("/yr", "")} for year one. Device
+              included.
+            </h2>
+            <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
+              No waitlist, no deposit. Pay for your first year today, your
+              device ships in the first batch on{" "}
+              <strong>September 1</strong>, and your founding price stays{" "}
+              <strong>{pricing.purchaseLabel} forever</strong>. Cancel anytime
+              before renewal.
+            </p>
+            <ul className="mt-8 space-y-3 text-[var(--color-ink)]">
+              {[
+                "The braintech device, shipped to you",
+                "Unlimited rules across every screen in your home",
+                "Up to 6 kids, named and personalized",
+                "Direct line to the founders during the beta",
+                "Founding price locked in at every renewal",
+              ].map((item) => (
+                <li key={item} className="flex items-start gap-3">
+                  <Check />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+            <FoundingMeter />
+            <p className="mt-4 text-sm text-[var(--color-ink-soft)]">
+              After the first 1,000, founding pricing goes away.
+            </p>
+          </div>
+          <div>
+            <WaitlistForm
+              variationId={variation.id}
+              mode="purchase"
+              pricing={pricing}
+            />
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // Waitlist variations: interactive two-card toggle drives the right-hand
+  // form between the soft waitlist sign-up and a direct deposit checkout.
+  // Deep-link via `#lockin` to land in lock-in mode from a hero link.
   return (
     <section
       id="waitlist"
       className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-28"
     >
-      <div className="grid items-start gap-12 lg:grid-cols-[1fr_1.1fr] lg:gap-16">
-        <div>
-          <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
-            Founding members
-          </div>
-          <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
-            {isBuyNow
-              ? "$249 for year one. Device included."
-              : "$249/year. Locked in for life."}
-          </h2>
-          {isBuyNow ? (
-            <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
-              No waitlist, no deposit. Pay for your first year today, your
-              device ships in the first batch on{" "}
-              <strong>September 1</strong>, and your founding price stays{" "}
-              <strong>$249/year forever</strong>. Cancel anytime before
-              renewal.
-            </p>
-          ) : (
-            <>
-              <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
-                We&apos;re building the first 1,000 devices in a single batch.
-                There are two ways in:
-              </p>
-              <div className="mt-5 space-y-4 text-[var(--color-ink-soft)]">
-                <div className="rounded-xl border border-[var(--color-rule)] bg-white p-4">
-                  <div className="font-semibold text-[var(--color-ink)]">
-                    Free waitlist
-                  </div>
-                  <p className="mt-1 text-sm">
-                    Drop your email. We&apos;ll notify you when the batch
-                    ships. No guaranteed device — first-come from notification.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/[0.04] p-4">
-                  <div className="font-semibold text-[var(--color-ink)]">
-                    Lock in your device — $50 deposit
-                  </div>
-                  <p className="mt-1 text-sm">
-                    Refundable anytime before shipping. Skips the queue.
-                    Guarantees you one of the first 1,000. Credited toward your
-                    $249/yr founding membership.
-                  </p>
-                </div>
-              </div>
-            </>
-          )}
-          <ul className="mt-8 space-y-3 text-[var(--color-ink)]">
-            {[
-              "The braintech device, shipped to you",
-              "Unlimited rules across every screen in your home",
-              "Up to 6 kids, named and personalized",
-              "Direct line to the founders during the beta",
-              "Founding price locked in at every renewal",
-            ].map((item) => (
-              <li key={item} className="flex items-start gap-3">
-                <Check />
-                <span>{item}</span>
-              </li>
-            ))}
-          </ul>
-          <FoundingMeter />
-          <p className="mt-4 text-sm text-[var(--color-ink-soft)]">
-            After the first 1,000, pricing goes to $349/year.
-          </p>
-        </div>
-        <div>
-          <WaitlistForm
-            variationId={variation.id}
-            mode={isBuyNow ? "purchase" : "deposit"}
-          />
-        </div>
-      </div>
+      <PricingChoice variation={variation} pricing={pricing} />
     </section>
   );
 }

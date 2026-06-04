@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { sendGAEvent } from "@next/third-parties/google";
+import type { Pricing } from "./lib/pricing";
 
 function fbqTrack(event: string, params?: Record<string, unknown>) {
   const w = window as typeof window & { fbq?: (...a: unknown[]) => void };
@@ -18,12 +19,18 @@ export function WaitlistForm({
   compact = false,
   variationId,
   mode = "deposit",
+  pricing,
 }: {
   compact?: boolean;
   variationId: string;
-  // "deposit" = current behaviour (waitlist email + $50 lock-in upsell).
-  // "purchase" = single button straight to a $249/yr Stripe checkout.
-  mode?: "deposit" | "purchase";
+  // "deposit"  = soft path: collect email → success state offers the $50
+  //              lock-in upsell. (The name is historical — kept as default
+  //              for backwards-compat with existing callers.)
+  // "lockIn"   = direct path: email + button goes straight to deposit Stripe.
+  //              No waitlist row, no upsell card — they already opted in.
+  // "purchase" = full annual Stripe checkout (buy-now variation 6).
+  mode?: "deposit" | "lockIn" | "purchase";
+  pricing: Pricing;
 }) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [reserving, setReserving] = useState(false);
@@ -37,9 +44,12 @@ export function WaitlistForm({
       variation: variationId,
       mode: checkoutMode,
     });
+    const minor =
+      checkoutMode === "purchase" ? pricing.purchaseMinor : pricing.depositMinor;
     fbqTrack("InitiateCheckout", {
-      value: checkoutMode === "purchase" ? 249 : 50,
-      currency: "USD",
+      // FB expects value in major units. JPY is zero-decimal.
+      value: pricing.currency === "JPY" ? minor : minor / 100,
+      currency: pricing.currency,
       variation: variationId,
       mode: checkoutMode,
     });
@@ -146,8 +156,9 @@ export function WaitlistForm({
         <p className="mt-2 text-[var(--color-ink-soft)]">
           We&apos;ll email you when the first batch is ready to ship — no
           guaranteed slot. Want a guaranteed device, ahead of everyone else?
-          Drop a <strong>$50 refundable deposit</strong> and we lock one of
-          the first 1,000 with your name on it. Ships{" "}
+          Drop a{" "}
+          <strong>{pricing.depositLabel} refundable deposit</strong> and we
+          lock one of the first 1,000 with your name on it. Ships{" "}
           <strong>worldwide September 1</strong>.
         </p>
         <button
@@ -160,17 +171,79 @@ export function WaitlistForm({
         >
           {reserving
             ? "Taking you to checkout…"
-            : "Lock in my device — $50 deposit →"}
+            : `Lock in my device — ${pricing.depositLabel} deposit →`}
         </button>
         <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
           Secure checkout via Stripe. Refundable any time before your device
-          ships. Credited toward your $249/yr founding membership.
+          ships. Credited toward your {pricing.purchaseLabel} founding
+          membership.
         </p>
         <p className="mt-4 border-t border-[var(--color-rule)] pt-4 text-sm text-[var(--color-ink-soft)]">
           Not ready? You&apos;re still on the waitlist — we&apos;ll email you
           before the batch ships.
         </p>
       </div>
+    );
+  }
+
+  // Direct lock-in: skip the waitlist row entirely. The visitor clicked
+  // "Lock in your device" on the left card, so they're past the soft sell
+  // — go straight from email to a $50 refundable Stripe deposit.
+  if (mode === "lockIn") {
+    return (
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const formData = new FormData(e.currentTarget);
+          const email = String(formData.get("email") ?? "").trim();
+          if (email && email.includes("@")) startCheckout(email, "deposit");
+          else setState({ kind: "error", message: "Enter a valid email." });
+        }}
+        className={`rounded-2xl border border-[var(--color-rule)] bg-white p-6 sm:p-8 ${
+          compact ? "" : "shadow-[0_1px_0_rgba(0,0,0,0.04)]"
+        }`}
+      >
+        <input type="hidden" name="variation" value={variationId} />
+        <div className="flex flex-col gap-3 sm:gap-4">
+          <div className="inline-flex items-center gap-2 self-start rounded-full bg-[var(--color-accent)]/10 px-3 py-1 text-xs font-medium text-[var(--color-accent)]">
+            <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
+            Lock in your device
+          </div>
+          <label className="block">
+            <span className="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
+              Email
+            </span>
+            <input
+              name="email"
+              type="email"
+              required
+              autoComplete="email"
+              placeholder="you@example.com"
+              className="mt-1.5 w-full rounded-lg border border-[var(--color-rule)] bg-[var(--color-cream)] px-4 py-3 text-base outline-none transition focus:border-[var(--color-ink)] focus:bg-white"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={reserving}
+            data-cta="lockin-submit"
+            data-variation={variationId}
+            className="mt-2 inline-flex items-center justify-center rounded-lg bg-[var(--color-accent)] px-6 py-3.5 text-base font-medium text-white transition hover:brightness-95 disabled:opacity-60"
+          >
+            {reserving
+              ? "Opening checkout…"
+              : `Continue to ${pricing.depositLabel} deposit →`}
+          </button>
+          {state.kind === "error" && (
+            <p className="text-sm text-[var(--color-accent)]">{state.message}</p>
+          )}
+          <p className="text-xs text-[var(--color-ink-soft)]">
+            {pricing.depositLabel} refundable any time before your device
+            ships. Skips the queue; guarantees one of the first 1,000.
+            Credited toward your {pricing.purchaseLabel} founding membership.
+            Secure checkout via Stripe.
+          </p>
+        </div>
+      </form>
     );
   }
 
@@ -212,7 +285,9 @@ export function WaitlistForm({
             data-variation={variationId}
             className="mt-2 inline-flex items-center justify-center rounded-lg bg-[var(--color-accent)] px-6 py-3.5 text-base font-medium text-white transition hover:brightness-95 disabled:opacity-60"
           >
-            {reserving ? "Opening checkout…" : "Buy now — $249/yr →"}
+            {reserving
+              ? "Opening checkout…"
+              : `Buy now — ${pricing.purchaseLabel} →`}
           </button>
           {state.kind === "error" && (
             <p className="text-sm text-[var(--color-accent)]">{state.message}</p>

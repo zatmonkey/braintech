@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
-import {
-  getStripe,
-  DEPOSIT_AMOUNT_CENTS,
-  PURCHASE_AMOUNT_CENTS,
-  SHIP_DATE,
-} from "@/app/lib/stripe";
+import { getStripe, SHIP_DATE } from "@/app/lib/stripe";
 import { getSql, ensureSmsSchema } from "@/app/lib/db";
+import { pricingForCountry, stripeAmount } from "@/app/lib/pricing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,18 +57,29 @@ export async function POST(req: Request) {
 
   const base = siteUrl(req);
 
+  // Server is the only authority on price — never trust client-supplied
+  // amounts. Country detection mirrors page.tsx: cookie first (set on the
+  // visitor's previous /  hit), then Vercel's IP-country header.
+  const country =
+    req.headers.get("cookie")?.match(/(?:^|;\s*)bt_geo=([A-Za-z]{2})/)?.[1] ??
+    req.headers.get("x-vercel-ip-country") ??
+    "US";
+  const pricing = pricingForCountry(country);
+  const { amount: unitAmount, currency: stripeCurrency } = stripeAmount(
+    pricing,
+    mode,
+  );
+
   try {
     const isPurchase = mode === "purchase";
     const lineItem = isPurchase
       ? {
           name: "Braintech — Founding Membership (Year 1)",
-          description: `$249/year founding membership. Device included, ships worldwide ${SHIP_DATE}. Founding price locked at every renewal.`,
-          amount: PURCHASE_AMOUNT_CENTS,
+          description: `${pricing.purchaseLabel} founding membership. Device included, ships worldwide ${SHIP_DATE}. Founding price locked at every renewal.`,
         }
       : {
           name: "Braintech — Founding Device Reservation",
-          description: `Refundable $50 deposit to lock in one of the first 1,000 devices. Ships worldwide ${SHIP_DATE}. Applied toward your $249/yr founding membership.`,
-          amount: DEPOSIT_AMOUNT_CENTS,
+          description: `Refundable ${pricing.depositLabel} deposit to lock in one of the first 1,000 devices. Ships worldwide ${SHIP_DATE}. Applied toward your ${pricing.purchaseLabel} founding membership.`,
         };
 
     const session = await stripe.checkout.sessions.create({
@@ -82,8 +89,8 @@ export async function POST(req: Request) {
         {
           quantity: 1,
           price_data: {
-            currency: "usd",
-            unit_amount: lineItem.amount,
+            currency: stripeCurrency,
+            unit_amount: unitAmount,
             product_data: {
               name: lineItem.name,
               description: lineItem.description,
@@ -93,9 +100,23 @@ export async function POST(req: Request) {
       ],
       // mode goes into metadata so the webhook can tell deposits from full
       // purchases (different downstream emails, different lead state).
-      metadata: { email, phone, variation, mode },
+      metadata: {
+        email,
+        phone,
+        variation,
+        mode,
+        country: pricing.country,
+        currency: pricing.currency,
+      },
       payment_intent_data: {
-        metadata: { email, phone, variation, mode },
+        metadata: {
+          email,
+          phone,
+          variation,
+          mode,
+          country: pricing.country,
+          currency: pricing.currency,
+        },
         receipt_email: email,
       },
       success_url: `${base}/reserved?session_id={CHECKOUT_SESSION_ID}`,
@@ -118,16 +139,20 @@ export async function POST(req: Request) {
         await ensureSmsSchema(sql);
         await sql`
           INSERT INTO leads (
-            email, phone, stripe_session_id, variation, checkout_mode
+            email, phone, stripe_session_id, variation, checkout_mode,
+            billing_country, currency
           ) VALUES (
             ${email}, ${phone || null}, ${session.id},
-            ${variation || null}, ${mode}
+            ${variation || null}, ${mode},
+            ${pricing.country}, ${pricing.currency.toLowerCase()}
           )
           ON CONFLICT (email) DO UPDATE SET
             phone = COALESCE(EXCLUDED.phone, leads.phone),
             stripe_session_id = EXCLUDED.stripe_session_id,
             variation = COALESCE(leads.variation, EXCLUDED.variation),
             checkout_mode = EXCLUDED.checkout_mode,
+            billing_country = COALESCE(leads.billing_country, EXCLUDED.billing_country),
+            currency = COALESCE(leads.currency, EXCLUDED.currency),
             updated_at = NOW();
         `;
       } catch (err) {

@@ -50,10 +50,16 @@ export async function ensureSmsSchema(
   // Which landing-page variation this lead came in on. Set when the lead
   // first hits the waitlist or starts checkout; never overwritten.
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS variation TEXT;`;
-  // Stripe checkout flavour: 'deposit' = $50 refundable spot-lock,
-  // 'purchase' = $249/yr full membership (buy-now variation). NULL until
+  // Stripe checkout flavour: 'deposit' = refundable spot-lock,
+  // 'purchase' = full annual membership (buy-now variation). NULL until
   // the visitor opens a checkout session.
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS checkout_mode TEXT;`;
+  // Localized-pricing context: the ISO country code we attributed the
+  // lead to at checkout time, and the currency Stripe billed in (lowercase
+  // ISO 4217). These pin the lead to the price tier they saw — useful when
+  // reconciling refunds and for regional conversion analysis.
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS billing_country TEXT;`;
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS currency TEXT;`;
   await sql`
     CREATE TABLE IF NOT EXISTS sms_messages (
       id          SERIAL PRIMARY KEY,

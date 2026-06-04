@@ -20,6 +20,7 @@
 import { useState } from "react";
 import { sendGAEvent } from "@next/third-parties/google";
 import type { Variation } from "./variations";
+import type { Pricing } from "./lib/pricing";
 
 function fbqTrack(event: string, params?: Record<string, unknown>) {
   const w = window as typeof window & { fbq?: (...a: unknown[]) => void };
@@ -32,7 +33,13 @@ type State =
   | { kind: "success" } // waitlist only — buyNow redirects, never lands here
   | { kind: "error"; message: string };
 
-export function HeroWaitlist({ variation }: { variation: Variation }) {
+export function HeroWaitlist({
+  variation,
+  pricing,
+}: {
+  variation: Variation;
+  pricing: Pricing;
+}) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [email, setEmail] = useState("");
   const isBuyNow = variation.mode === "buyNow";
@@ -53,8 +60,8 @@ export function HeroWaitlist({ variation }: { variation: Variation }) {
         source: "hero",
       });
       fbqTrack("InitiateCheckout", {
-        value: 249,
-        currency: "USD",
+        value: pricing.purchaseMinor / (pricing.currency === "JPY" ? 1 : 100),
+        currency: pricing.currency,
         variation: variation.id,
         source: "hero",
       });
@@ -157,10 +164,11 @@ export function HeroWaitlist({ variation }: { variation: Variation }) {
               The waitlist is free but unordered — we email when the first batch
               ships.{" "}
               <a
-                href="#waitlist"
+                href="#lockin"
                 className="font-medium text-[var(--color-accent)] underline-offset-4 hover:underline"
               >
-                Want to lock in your device? $50 holds your spot →
+                Want to lock in your device? {pricing.depositLabel} holds your
+                spot →
               </a>
             </p>
           </div>
@@ -172,7 +180,7 @@ export function HeroWaitlist({ variation }: { variation: Variation }) {
   const buttonLabel = isBuyNow
     ? state.kind === "submitting"
       ? "Opening checkout…"
-      : "Buy now — $249/yr →"
+      : `Buy now — ${pricing.purchaseLabel} →`
     : state.kind === "submitting"
       ? "Joining…"
       : variation.cta;
@@ -222,10 +230,10 @@ export function HeroWaitlist({ variation }: { variation: Variation }) {
             <>
               No charge today.{" "}
               <a
-                href="#waitlist"
+                href="#lockin"
                 className="underline-offset-4 hover:text-[var(--color-ink)] hover:underline"
               >
-                Or lock your device in for $50 →
+                Or lock your device in for {pricing.depositLabel} →
               </a>
             </>
           )}
