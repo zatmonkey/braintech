@@ -310,15 +310,21 @@ cmd_variations() {
     # Filtered table: only deposits/purchases in this currency. Views and
     # signups don't carry currency, so we hide those columns — what you're
     # asking is "how many people paid in $CUR for each variation".
-    echo "$data" | jq -r --arg cur "$filter_cur" '
+    local filtered
+    filtered=$(echo "$data" | jq -r --arg cur "$filter_cur" '
       .byCurrency
       | map(select(.currency == $cur))
       | sort_by(.variation)
       | .[]
       | [.variation, .currency, (.deposits|tostring), (.purchases|tostring),
-         ((.amountMinor / 100) | tostring)]
+         (((.amountMinor) / 100) | tostring)]
       | @tsv
-    ' | column -t -s $'\t' -N ID,CUR,DEPOSITS,PURCHASES,REVENUE
+    ')
+    if [ -z "$filtered" ]; then
+      echo "No paid conversions in $filter_cur yet."
+    else
+      echo "$filtered" | column -t -s $'\t' -N ID,CUR,DEPOSITS,PURCHASES,REVENUE
+    fi
     echo ""
     echo "Showing $filter_cur only. Drop --currency to see the full table."
     return 0
@@ -343,6 +349,8 @@ cmd_variations() {
   echo ""
   echo "Totals: $(echo "$data" | jq -r '.totals | "views=\(.views) signups=\(.signups) deposits=\(.deposits) purchases=\(.purchases)"')"
   # Currency rollup at the bottom — concise so the main table stays the focus.
+  # Parens around `(add / 100)` matter: jq's object-literal parser otherwise
+  # bites on the `/` before it sees the closing brace.
   local cur_summary
   cur_summary=$(echo "$data" | jq -r '
     if (.byCurrency|length) == 0 then ""
@@ -352,7 +360,7 @@ cmd_variations() {
           currency: .[0].currency,
           deposits: (map(.deposits) | add),
           purchases: (map(.purchases) | add),
-          amount: (map(.amountMinor) | add) / 100
+          amount: ((map(.amountMinor) | add) / 100)
         })
       | map("\(.currency|ascii_upcase): \(.deposits)d+\(.purchases)p (\(.amount))")
       | join(" · "))
