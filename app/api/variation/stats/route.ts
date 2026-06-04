@@ -22,6 +22,16 @@ type Row = {
   paidRate: number; // (deposits + purchases) / views
 };
 
+type CurrencyRow = {
+  variation: string;
+  currency: string; // lowercase ISO 4217 ("aud","usd",…)
+  deposits: number;
+  purchases: number;
+  // Stripe stores amounts in minor units; we sum them per variation+currency
+  // so the report can show total revenue per region.
+  amountMinor: number;
+};
+
 export async function GET() {
   const store = await cookies();
   const email = verifySession(store.get(sessionCookie.name)?.value);
@@ -37,8 +47,8 @@ export async function GET() {
   await ensureSmsSchema(sql);
   await ensureVariationSchema(sql);
 
-  // Pull all three counters in parallel.
-  const [viewRows, signupRows, leadRows] = (await Promise.all([
+  // Pull all four counters in parallel.
+  const [viewRows, signupRows, leadRows, currencyRows] = (await Promise.all([
     sql`
       SELECT variation, COUNT(*)::int AS n
         FROM variation_views
@@ -58,10 +68,27 @@ export async function GET() {
        WHERE variation IS NOT NULL
        GROUP BY variation;
     `,
+    sql`
+      SELECT variation,
+             COALESCE(currency, 'usd') AS currency,
+             COUNT(*) FILTER (WHERE deposit_paid AND checkout_mode = 'deposit')::int   AS deposits,
+             COUNT(*) FILTER (WHERE deposit_paid AND checkout_mode = 'purchase')::int  AS purchases,
+             COALESCE(SUM(deposit_amount) FILTER (WHERE deposit_paid), 0)::bigint      AS amount_minor
+        FROM leads
+       WHERE variation IS NOT NULL AND deposit_paid
+       GROUP BY variation, currency;
+    `,
   ])) as unknown as [
     { variation: string; n: number }[],
     { variation: string; n: number }[],
     { variation: string; deposits: number; purchases: number }[],
+    {
+      variation: string;
+      currency: string;
+      deposits: number;
+      purchases: number;
+      amount_minor: string | number;
+    }[],
   ];
 
   const views = new Map(viewRows.map((r) => [r.variation, r.n]));
@@ -96,5 +123,18 @@ export async function GET() {
     { views: 0, signups: 0, deposits: 0, purchases: 0 },
   );
 
-  return NextResponse.json({ rows, totals });
+  // Currency breakdown (deposits + purchases per variation per currency).
+  // amount_minor comes back as a bigint string for SUM(); coerce to number
+  // for JSON-friendliness. Won't exceed Number.MAX_SAFE_INTEGER unless we
+  // somehow rack up ~9 quadrillion in the smallest unit, which is a problem
+  // I would love to have.
+  const byCurrency: CurrencyRow[] = currencyRows.map((r) => ({
+    variation: r.variation,
+    currency: r.currency,
+    deposits: r.deposits,
+    purchases: r.purchases,
+    amountMinor: Number(r.amount_minor) || 0,
+  }));
+
+  return NextResponse.json({ rows, totals, byCurrency });
 }

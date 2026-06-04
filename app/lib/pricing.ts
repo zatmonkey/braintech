@@ -121,6 +121,78 @@ const USD_PRICING: Omit<Pricing, "country"> = {
   purchaseMinor: 24900,
 };
 
+// Currency → display prefix (USD: "$", AUD: "AU$", JPY: "¥", …). Used when
+// an env-var override changes an amount and we need to re-render the label.
+const PREFIX: Record<CurrencyCode, string> = {
+  USD: "$",
+  AUD: "AU$",
+  NZD: "NZ$",
+  GBP: "£",
+  EUR: "€",
+  CAD: "CA$",
+  SGD: "S$",
+  JPY: "¥",
+};
+
+// JPY is zero-decimal in Stripe; everything else uses 2 minor units per
+// major. https://docs.stripe.com/currencies#zero-decimal
+function majorToMinor(currency: CurrencyCode, major: number): number {
+  return currency === "JPY" ? major : major * 100;
+}
+function formatMajor(currency: CurrencyCode, major: number): string {
+  if (currency === "JPY") return `${PREFIX.JPY}${major.toLocaleString("en-US")}`;
+  return `${PREFIX[currency]}${major}`;
+}
+
+/**
+ * Read an env-var override of the form `BT_PRICE_<CURRENCY>_<KIND>`, where
+ * CURRENCY is USD/AUD/… and KIND is DEPOSIT or PURCHASE. The value is the
+ * MAJOR-unit amount (e.g. `79` for AU$79, `7500` for ¥7,500) so it's easy to
+ * eyeball in the Vercel dashboard without thinking in cents.
+ *
+ *   BT_PRICE_AUD_DEPOSIT=89
+ *   BT_PRICE_AUD_PURCHASE=399
+ *
+ * Returns null if unset or malformed (so the default applies).
+ */
+function envOverride(
+  currency: CurrencyCode,
+  kind: "DEPOSIT" | "PURCHASE",
+): number | null {
+  const raw = process.env[`BT_PRICE_${currency}_${kind}`];
+  if (!raw) return null;
+  const n = parseInt(raw.trim(), 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+/**
+ * Apply any env-var overrides for this Pricing entry. Idempotent — passing
+ * an already-overridden entry through again is a no-op (the override values
+ * are the same).
+ */
+function applyOverrides(
+  entry: Omit<Pricing, "country">,
+): Omit<Pricing, "country"> {
+  const depositOverride = envOverride(entry.currency, "DEPOSIT");
+  const purchaseOverride = envOverride(entry.currency, "PURCHASE");
+  if (depositOverride === null && purchaseOverride === null) return entry;
+
+  const next = { ...entry };
+  if (depositOverride !== null) {
+    const minor = majorToMinor(entry.currency, depositOverride);
+    const label = formatMajor(entry.currency, depositOverride);
+    next.depositMinor = minor;
+    next.depositLabel = label;
+    next.depositPhrase = `${label} deposit`;
+  }
+  if (purchaseOverride !== null) {
+    next.purchaseMinor = majorToMinor(entry.currency, purchaseOverride);
+    next.purchaseLabel = `${formatMajor(entry.currency, purchaseOverride)}/yr`;
+  }
+  return next;
+}
+
 /**
  * Given an ISO country code (e.g. "AU", "GB"), return the marketing pricing.
  * Falls back to USD if we don't have a mapping. Resolves IE → EUR for the
@@ -133,12 +205,12 @@ export function pricingForCountry(country: string | null | undefined): Pricing {
   // IE special-case: prefer EUR over the GB row (Ireland is Eurozone).
   if (c === "IE") {
     const eur = TABLE.find((e) => e.currency === "EUR");
-    if (eur) return { ...eur, country: c };
+    if (eur) return { ...applyOverrides(eur), country: c };
   }
 
   const match = TABLE.find((e) => e.countries.includes(c));
-  if (match) return { ...match, country: c };
-  return { ...USD_PRICING, country: c || "US" };
+  if (match) return { ...applyOverrides(match), country: c };
+  return { ...applyOverrides(USD_PRICING), country: c || "US" };
 }
 
 /**
@@ -147,6 +219,26 @@ export function pricingForCountry(country: string | null | undefined): Pricing {
  * the whole pricing object. Both `mode`s mapped explicitly so a typo in the
  * caller fails loudly.
  */
+/**
+ * Currencies the picker offers. Each entry has the primary country code we
+ * write to bt_geo when the visitor picks it (e.g. picking EUR sets country
+ * to "FR" — pricingForCountry will resolve that to the EUR row).
+ */
+export const PICKER_CURRENCIES: ReadonlyArray<{
+  currency: CurrencyCode;
+  country: string;
+  label: string; // shown in the <select>
+}> = [
+  { currency: "USD", country: "US", label: "USD ($)" },
+  { currency: "AUD", country: "AU", label: "AUD (AU$)" },
+  { currency: "GBP", country: "GB", label: "GBP (£)" },
+  { currency: "EUR", country: "FR", label: "EUR (€)" },
+  { currency: "CAD", country: "CA", label: "CAD (CA$)" },
+  { currency: "NZD", country: "NZ", label: "NZD (NZ$)" },
+  { currency: "SGD", country: "SG", label: "SGD (S$)" },
+  { currency: "JPY", country: "JP", label: "JPY (¥)" },
+];
+
 export function stripeAmount(
   pricing: Pricing,
   mode: "deposit" | "purchase",

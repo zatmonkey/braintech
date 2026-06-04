@@ -8,6 +8,7 @@ import {
   FoundingToasts,
 } from "./founding-stats";
 import { PricingChoice } from "./pricing-choice";
+import { CurrencyPicker } from "./currency-picker";
 import { VariationTracker } from "./variation-tracker";
 import { getVariation, type Variation } from "./variations";
 import { pricingForCountry, type Pricing } from "./lib/pricing";
@@ -56,7 +57,7 @@ export default async function Home({
       <Testimonials />
       <Pricing variation={variation} pricing={pricing} />
       <FAQ />
-      <Footer />
+      <Footer country={pricing.country} />
       <ChatWidget />
       <FoundingToasts />
       <VariationTracker variationId={variation.id} />
@@ -708,7 +709,7 @@ function FAQ() {
   );
 }
 
-function Footer() {
+function Footer({ country }: { country: string }) {
   return (
     <footer className="bg-[var(--color-night)] text-[var(--color-cream)]/80">
       <div className="mx-auto w-full max-w-6xl px-6 py-12 sm:px-10">
@@ -733,6 +734,9 @@ function Footer() {
               <a href="/login" className="hover:text-[var(--color-cream)]">
                 Member sign-in
               </a>
+            </div>
+            <div className="mb-3 flex sm:justify-end">
+              <CurrencyPicker currentCountry={country} />
             </div>
             <p>© {new Date().getFullYear()} Braintech · Mutant Ventures LLC</p>
             <p className="mt-1">Built for parents who&apos;d rather not fight.</p>

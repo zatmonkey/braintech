@@ -36,7 +36,7 @@
 #   btnet group-delete <group_id>     # delete a group (members get unassigned)
 #   btnet assign <mac> <group_id>     # add a device to a group ('-' to unassign)
 #   btnet reset                       # re-derive desired from active rules + push
-#   btnet variations                  # per-variation views/signups/deposits/purchases + rates
+#   btnet variations [--currency=AUD] # per-variation views/signups/deposits/purchases + rates
 #   btnet test                        # full propose→confirm→verify→remove cycle
 
 set -euo pipefail
@@ -294,8 +294,36 @@ cmd_assign() {
 
 cmd_variations() {
   cmd_login >/dev/null
+  # Parse optional --currency=XYZ.
+  local filter_cur=""
+  for arg in "$@"; do
+    case "$arg" in
+      --currency=*) filter_cur="${arg#--currency=}";;
+    esac
+  done
+  filter_cur="${filter_cur,,}" # lowercase to match leads.currency
+
   local data
   data=$(api_get /api/variation/stats)
+
+  if [ -n "$filter_cur" ]; then
+    # Filtered table: only deposits/purchases in this currency. Views and
+    # signups don't carry currency, so we hide those columns — what you're
+    # asking is "how many people paid in $CUR for each variation".
+    echo "$data" | jq -r --arg cur "$filter_cur" '
+      .byCurrency
+      | map(select(.currency == $cur))
+      | sort_by(.variation)
+      | .[]
+      | [.variation, .currency, (.deposits|tostring), (.purchases|tostring),
+         ((.amountMinor / 100) | tostring)]
+      | @tsv
+    ' | column -t -s $'\t' -N ID,CUR,DEPOSITS,PURCHASES,REVENUE
+    echo ""
+    echo "Showing $filter_cur only. Drop --currency to see the full table."
+    return 0
+  fi
+
   echo "$data" | jq -r '
     .rows as $rows
     | $rows
@@ -314,6 +342,25 @@ cmd_variations() {
   ' | column -t -s $'\t' -N ID,MODE,VIEWS,SIGNUPS,DEPOSITS,PURCHASES,SIGNUP%,PAID%
   echo ""
   echo "Totals: $(echo "$data" | jq -r '.totals | "views=\(.views) signups=\(.signups) deposits=\(.deposits) purchases=\(.purchases)"')"
+  # Currency rollup at the bottom — concise so the main table stays the focus.
+  local cur_summary
+  cur_summary=$(echo "$data" | jq -r '
+    if (.byCurrency|length) == 0 then ""
+    else (.byCurrency
+      | group_by(.currency)
+      | map({
+          currency: .[0].currency,
+          deposits: (map(.deposits) | add),
+          purchases: (map(.purchases) | add),
+          amount: (map(.amountMinor) | add) / 100
+        })
+      | map("\(.currency|ascii_upcase): \(.deposits)d+\(.purchases)p (\(.amount))")
+      | join(" · "))
+    end
+  ')
+  if [ -n "$cur_summary" ]; then
+    echo "By currency: $cur_summary"
+  fi
 }
 
 cmd_reset() {
@@ -408,7 +455,7 @@ main() {
     group-delete)   cmd_group_delete "$@" ;;
     assign)         cmd_assign "$@" ;;
     reset)          cmd_reset ;;
-    variations|stats) cmd_variations ;;
+    variations|stats) cmd_variations "$@" ;;
     test)           cmd_test ;;
     *) echo "unknown command: $cmd (try: btnet help)" >&2; exit 2 ;;
   esac
