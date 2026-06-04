@@ -37,6 +37,7 @@
 #   btnet assign <mac> <group_id>     # add a device to a group ('-' to unassign)
 #   btnet reset                       # re-derive desired from active rules + push
 #   btnet variations [--currency=AUD] # per-variation views/signups/deposits/purchases + rates
+#   btnet ads [period]                # Meta ad account snapshot (today, last_7d default, last_30d…)
 #   btnet test                        # full propose→confirm→verify→remove cycle
 
 set -euo pipefail
@@ -292,6 +293,58 @@ cmd_assign() {
   api_post /api/account/clients "$body" | jq
 }
 
+cmd_ads() {
+  # Snapshot of the Braintech Meta ad account: today + last-7d insights,
+  # active campaigns, top creative. Reads creds from ~/.config/braintech/meta.env.
+  if [ -f ~/.config/braintech/meta.env ]; then
+    source ~/.config/braintech/meta.env
+  fi
+  if [ -z "${META_ADS_TOKEN:-}" ] || [ -z "${META_AD_ACCOUNT_ID:-}" ]; then
+    echo "META_ADS_TOKEN / META_AD_ACCOUNT_ID not set (~/.config/braintech/meta.env)" >&2
+    return 1
+  fi
+  local acct="act_$META_AD_ACCOUNT_ID"
+  local period="${1:-last_7d}" # today | yesterday | last_7d | last_14d | last_30d | lifetime
+
+  echo "=== Account ==="
+  curl -sS "https://graph.facebook.com/v22.0/$acct?fields=name,currency,timezone_name,amount_spent,balance&access_token=$META_ADS_TOKEN" \
+    | jq -r '"\(.name)  ·  \(.currency)  ·  TZ \(.timezone_name)  ·  lifetime spent: \(((.amount_spent|tonumber)/100)|tostring) \(.currency)"'
+
+  echo ""
+  echo "=== Insights · $period ==="
+  curl -sS "https://graph.facebook.com/v22.0/$acct/insights?fields=spend,impressions,clicks,ctr,cpc,reach,actions&date_preset=$period&access_token=$META_ADS_TOKEN" \
+    | jq -r '
+      .data[0] as $d
+      | if $d == null then "  (no data for period)"
+        else
+          "  spend:       \($d.spend)
+  impressions: \($d.impressions)
+  reach:       \($d.reach)
+  clicks:      \($d.clicks)
+  CTR:         \((($d.ctr|tonumber) * 100 | floor) / 100)%
+  CPC:         \($d.cpc)
+  actions:
+" + (($d.actions // [] | map("    \(.action_type): \(.value)") | join("\n")))
+        end
+    '
+
+  echo ""
+  echo "=== Active campaigns ==="
+  curl -sS "https://graph.facebook.com/v22.0/$acct/campaigns?fields=id,name,status,objective,daily_budget,lifetime_budget,start_time&effective_status=%5B%22ACTIVE%22%5D&access_token=$META_ADS_TOKEN" \
+    | jq -r '
+      .data
+      | map([
+          .id,
+          .objective,
+          ((if .daily_budget then "daily " + (((.daily_budget|tonumber)/100)|tostring)
+           elif .lifetime_budget then "lifetime " + (((.lifetime_budget|tonumber)/100)|tostring)
+           else "—" end)),
+          (.name | if length > 60 then .[0:57] + "…" else . end)
+        ] | @tsv)
+      | .[]
+    ' | column -t -s $'\t' -N CAMPAIGN_ID,OBJECTIVE,BUDGET,NAME
+}
+
 cmd_variations() {
   cmd_login >/dev/null
   # Parse optional --currency=XYZ.
@@ -464,6 +517,7 @@ main() {
     assign)         cmd_assign "$@" ;;
     reset)          cmd_reset ;;
     variations|stats) cmd_variations "$@" ;;
+    ads)            cmd_ads "$@" ;;
     test)           cmd_test ;;
     *) echo "unknown command: $cmd (try: btnet help)" >&2; exit 2 ;;
   esac

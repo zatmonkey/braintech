@@ -3,18 +3,32 @@
 import { useEffect } from "react";
 
 /**
- * Meta Pixel Purchase event — fired once on /reserved when the Stripe
- * session confirms paid. Payload matches the catalog product id Meta
- * issued for the founding-deposit SKU so Events Manager attributes it
- * to the right campaign and Match Quality stays high.
+ * Meta Pixel Purchase event — fired once on /reserved when Stripe confirms
+ * the session is paid. The browser side is a best-effort signal that's easy
+ * for ad blockers/iOS-restricted-tracking to drop; the authoritative
+ * conversion record is fired server-side via the Conversions API in the
+ * Stripe webhook (see app/api/stripe/webhook/route.ts → metaCapiPurchase).
  *
- * The base Pixel script loads with strategy="afterInteractive" in the
- * root layout, which is AFTER React hydrates and this useEffect runs.
- * So we may land here before window.fbq exists — poll every 200 ms for
- * up to 10 s. Guarded against double-fires via a window-level flag so
- * strict-mode dev re-renders and the poll-loop both can't fire it twice.
+ * The base Pixel script loads with strategy="afterInteractive", so we may
+ * land here before window.fbq exists — poll every 200 ms for up to 10 s.
+ * Guarded by a window-level flag so React Strict Mode + the poll loop
+ * can't fire the event twice.
  */
-export function PurchaseTracker({ value = 50 }: { value?: number }) {
+export function PurchaseTracker({
+  value,
+  currency,
+  mode,
+  variation,
+  eventId,
+}: {
+  value: number; // major units (e.g. 50 for $50, 379 for AU$379)
+  currency: string; // ISO 4217 uppercase
+  mode: "deposit" | "purchase";
+  variation: string | null;
+  // Pixel ↔ CAPI dedup key. Same value sent both client- and server-side
+  // means Meta counts it once. Stripe session id is perfect for this.
+  eventId: string;
+}) {
   useEffect(() => {
     const w = window as typeof window & {
       fbq?: (...a: unknown[]) => void;
@@ -23,14 +37,28 @@ export function PurchaseTracker({ value = 50 }: { value?: number }) {
     if (w.__btPurchaseFired) return;
     const fire = () => {
       if (typeof w.fbq !== "function") return false;
-      // test_event_code is NOT honored by the browser Pixel — Events
-      // Manager's "Test browser events" tool tags by cookie/session, not
-      // by event param. Keep this payload clean.
-      w.fbq("track", "Purchase", {
+      const payload = {
         value,
-        currency: "USD",
-        contents: [{ id: "deposit-50", quantity: 1 }],
-      });
+        currency: currency.toUpperCase(),
+        // content_ids/contents lets Meta group by SKU in reports.
+        content_ids: [mode === "purchase" ? "founding-membership" : "deposit-spot"],
+        contents: [
+          {
+            id: mode === "purchase" ? "founding-membership" : "deposit-spot",
+            quantity: 1,
+            item_price: value,
+          },
+        ],
+        content_type: "product",
+        // Custom params for breakdown / custom-conversion building in Meta.
+        mode,
+        variation: variation ?? "unknown",
+      };
+      // The 2nd-arg `{eventID}` is what Pixel uses to dedupe against CAPI.
+      // Quirk of the JS lib: pass it via the optional third "eventID" key
+      // on the params object OR via the 4th-arg trackSingle. Pixel-side
+      // both are picked up by Events Manager.
+      w.fbq("track", "Purchase", payload, { eventID: eventId });
       w.__btPurchaseFired = true;
       return true;
     };
@@ -41,6 +69,6 @@ export function PurchaseTracker({ value = 50 }: { value?: number }) {
       if (fire() || attempts >= 50) clearInterval(id);
     }, 200);
     return () => clearInterval(id);
-  }, [value]);
+  }, [value, currency, mode, variation, eventId]);
   return null;
 }

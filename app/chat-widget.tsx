@@ -19,9 +19,16 @@ const OPENER: Msg = {
     "Hi! I'm Bri 🧠 This is how you'll run Braintech — just by chatting. Want to see it work? Tell me a screen-time rule you wish you could enforce — like “no TikTok for my 9-year-old until she reads 20 minutes” — and I'll show you exactly what Braintech would do. Or ask me anything.",
 };
 
-function fbqTrack(event: string) {
+function fbqTrack(event: string, params?: Record<string, unknown>) {
   const w = window as typeof window & { fbq?: (...a: unknown[]) => void };
-  if (typeof w.fbq === "function") w.fbq("track", event);
+  if (typeof w.fbq === "function") w.fbq("track", event, params);
+}
+
+// proxy.ts seeds bt_var on the first visit; we read it for Pixel breakdowns.
+function currentVariation(): string {
+  if (typeof document === "undefined") return "unknown";
+  const m = document.cookie.match(/(?:^|;\s*)bt_var=(\d+)/);
+  return m?.[1] ?? "unknown";
 }
 
 export function ChatWidget() {
@@ -61,7 +68,7 @@ export function ChatWidget() {
     if (!started) {
       setStarted(true);
       sendGAEvent("event", "demo_chat_started", {});
-      fbqTrack("Lead");
+      fbqTrack("Lead", { content_name: "chat_demo", variation: currentVariation() });
     }
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
@@ -162,7 +169,7 @@ export function ChatWidget() {
                       sendGAEvent("event", "chat_cta_click", {
                         label: m.cta?.label,
                       });
-                      fbqTrack("AddToCart");
+                      fbqTrack("AddToCart", { variation: currentVariation() });
                       // Close the widget so the form is unobscured.
                       setOpen(false);
                     }}

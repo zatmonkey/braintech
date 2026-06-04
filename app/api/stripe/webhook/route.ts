@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { getStripe } from "@/app/lib/stripe";
 import { getSql, ensureSmsSchema } from "@/app/lib/db";
+import { sendCapiPurchase } from "@/app/lib/meta-capi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -87,6 +88,26 @@ export async function POST(req: Request) {
         } catch (err) {
           console.error("[stripe] db update failed", err);
         }
+      }
+
+      // Fire the server-side Meta Purchase. Best-effort; we never block the
+      // 200 to Stripe on Pixel's response. The eventId matches what
+      // PurchaseTracker fires client-side on /reserved so Meta dedupes.
+      if (email) {
+        const minor = session.amount_total ?? 0;
+        const cur = currency ?? "usd";
+        const major = cur === "jpy" ? minor : minor / 100;
+        await sendCapiPurchase({
+          occurredAt: new Date(),
+          eventId: session.id,
+          email,
+          phone: phone || null,
+          country: country || billingCountry || null,
+          value: major,
+          currency: cur,
+          mode,
+          variation,
+        });
       }
     }
   }

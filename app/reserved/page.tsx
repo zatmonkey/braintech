@@ -13,10 +13,19 @@ export const metadata: Metadata = {
 
 type SearchParams = Promise<{ session_id?: string }>;
 
-async function confirmAndRecord(sessionId: string): Promise<{
+type Confirmation = {
   paid: boolean;
   email?: string;
-}> {
+  // Everything PurchaseTracker needs to fire the Pixel event with the
+  // exact same shape as the server-side CAPI call.
+  value?: number; // major units
+  currency?: string; // ISO 4217 lowercase from Stripe
+  mode?: "deposit" | "purchase";
+  variation?: string | null;
+  eventId?: string; // Pixel↔CAPI dedup id (Stripe session id)
+};
+
+async function confirmAndRecord(sessionId: string): Promise<Confirmation> {
   const stripe = getStripe();
   if (!stripe) return { paid: false };
   try {
@@ -51,7 +60,23 @@ async function confirmAndRecord(sessionId: string): Promise<{
         }
       }
     }
-    return { paid, email };
+
+    // Stripe amount_total is in minor units; JPY is zero-decimal.
+    const minor = session.amount_total ?? 0;
+    const cur = (session.currency ?? "usd").toLowerCase();
+    const major = cur === "jpy" ? minor : minor / 100;
+    const mode: "deposit" | "purchase" =
+      session.metadata?.mode === "purchase" ? "purchase" : "deposit";
+
+    return {
+      paid,
+      email,
+      value: major,
+      currency: cur,
+      mode,
+      variation: session.metadata?.variation ?? null,
+      eventId: session.id,
+    };
   } catch {
     return { paid: false };
   }
@@ -70,23 +95,40 @@ export default async function ReservedPage({
       <div className="w-full max-w-lg rounded-2xl border border-[var(--color-rule)] bg-white p-8 text-center shadow-[0_1px_0_rgba(0,0,0,0.04)] sm:p-12">
         {result.paid ? (
           <>
-            <PurchaseTracker value={50} />
+            <PurchaseTracker
+              value={result.value ?? 0}
+              currency={result.currency ?? "usd"}
+              mode={result.mode ?? "deposit"}
+              variation={result.variation ?? null}
+              eventId={result.eventId ?? ""}
+            />
             <div className="mx-auto grid size-14 place-items-center rounded-full bg-[var(--color-accent)]/15 text-[var(--color-accent)]">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="size-7">
                 <path d="M20 6 9 17l-5-5" />
               </svg>
             </div>
             <h1 className="serif mt-6 text-4xl tracking-[-0.02em]">
-              Your device is locked in.
+              {result.mode === "purchase"
+                ? "You're locked in for year one."
+                : "Your device is locked in."}
             </h1>
             <p className="mt-4 text-lg text-[var(--color-ink-soft)]">
-              You&apos;re one of the first 1,000 founding members. Your $50
-              deposit is applied toward your $249/yr membership and is fully
-              refundable.
+              {result.mode === "purchase"
+                ? `You're one of the first 1,000 founding members. Your founding membership is paid for year one — device included, ships ${SHIP_DATE}.`
+                : `You're one of the first 1,000 founding members. Your deposit is applied toward your founding membership and is fully refundable.`}
             </p>
             <div className="mt-6 rounded-xl border border-[var(--color-rule)] bg-[var(--color-cream)] p-5 text-left text-sm">
               <Row label="Reservation" value="Founding device #1 of 1,000" />
-              <Row label="Deposit" value="$50 (refundable)" />
+              <Row
+                label={result.mode === "purchase" ? "Membership" : "Deposit"}
+                value={
+                  result.value != null && result.currency
+                    ? `${formatPrice(result.value, result.currency)}${
+                        result.mode === "purchase" ? " (year one)" : " (refundable)"
+                      }`
+                    : ""
+                }
+              />
               <Row label="Ships" value={`Worldwide · ${SHIP_DATE}`} />
               {result.email ? <Row label="Confirmation to" value={result.email} /> : null}
             </div>
@@ -116,6 +158,25 @@ export default async function ReservedPage({
       </div>
     </main>
   );
+}
+
+// Lightweight currency display — symbol + value. Doesn't reuse
+// app/lib/pricing.ts because that module's labels are tied to the website's
+// marketing prices (charm-priced); here we want Stripe's actual amount.
+function formatPrice(major: number, currency: string): string {
+  const sym: Record<string, string> = {
+    usd: "$",
+    aud: "AU$",
+    nzd: "NZ$",
+    gbp: "£",
+    eur: "€",
+    cad: "CA$",
+    sgd: "S$",
+    jpy: "¥",
+  };
+  const s = sym[currency.toLowerCase()] ?? `${currency.toUpperCase()} `;
+  if (currency.toLowerCase() === "jpy") return `${s}${major.toLocaleString("en-US")}`;
+  return `${s}${major}`;
 }
 
 function Row({ label, value }: { label: string; value: string }) {
