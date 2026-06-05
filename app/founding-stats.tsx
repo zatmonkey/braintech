@@ -149,10 +149,12 @@ export function FoundingToasts() {
 
     if (shown >= SESSION_CAP) return;
 
-    // Stagger: first toast 8–15s in, then 25–45s between.
+    // Stagger: first toast 3–5s in (so social proof lands before bouncers
+    // leave), then 25–45s between. Big difference for paid traffic where
+    // ~50% bounce inside the first 5s.
     const delay =
       shown === 0
-        ? 8_000 + Math.floor(((Date.now() >> 4) & 0xff) * 27)
+        ? 3_000 + Math.floor(((Date.now() >> 4) & 0xff) * 8)
         : 25_000 + Math.floor(((Date.now() >> 3) & 0xff) * 78);
 
     const t = setTimeout(() => {

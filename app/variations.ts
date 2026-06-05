@@ -13,72 +13,76 @@ export type Variation = {
   mode: "waitlist" | "buyNow";
 };
 
+// Copy convention: lead with "Next 1,000 ship Sept 1" — concrete, near-term,
+// and nobody wants to be "first". Don't mention price above the fold.
+
 export const VARIATIONS: Variation[] = [
   {
     id: "0",
-    eyebrow: "First batch — 1,000 devices",
+    eyebrow: "Next 1,000 devices ship September 1",
     headlineTop: "Your kid wants TikTok.",
     headlineAccent: "Make them earn it.",
     subhead:
-      "A small device plugs between your router and your Wi-Fi. You text it like a friend. It turns every screen in your house into something your kid has to earn. Join the free waitlist — or lock in your device with a $50 deposit and jump the queue.",
+      "A small device plugs between your router and your Wi-Fi. You text it like a friend. It turns every screen in your house into something your kid has to earn. Drop your email — we'll let you know when the next batch is ready.",
     cta: "Join the waitlist — free →",
     mode: "waitlist",
   },
   {
     id: "1",
-    eyebrow: "First 1,000 founding members",
+    eyebrow: "Next 1,000 ship September 1",
     headlineTop: "Make your kids",
     headlineAccent: "smart again.",
     subhead:
-      "Text-message parental control that turns screen time into learning time. The defense against brainrot you wish you'd had. Join the free waitlist — we'll email you when the first batch ships. Want it guaranteed? Lock in your device with $50.",
+      "Text-message parental control that turns screen time into learning time. The defense against brainrot you wish you'd had. Free to join — we email you when the next batch is ready.",
     cta: "Join the waitlist — free →",
     mode: "waitlist",
   },
   {
     id: "2",
-    eyebrow: "Limited to 1,000 households",
+    eyebrow: "Next 1,000 households · ships September 1",
     headlineTop: "The ultimate defense",
     headlineAccent: "against brainrot.",
     subhead:
-      "One tiny box between your router and your Wi-Fi. Text the rules in plain English. Your kid earns TikTok by watching a TED talk. Free waitlist — or pay a $50 deposit to skip the queue and guarantee your device.",
+      "One tiny box between your router and your Wi-Fi. Text the rules in plain English. Your kid earns TikTok by watching a TED talk. Drop your email — we'll let you know when the next batch is ready.",
     cta: "Join the waitlist — free →",
     mode: "waitlist",
   },
   {
     id: "3",
-    eyebrow: "First batch — 1,000 devices",
+    eyebrow: "Next 1,000 devices ship September 1",
     headlineTop: "Parental controls that",
     headlineAccent: "make your kids smarter.",
     subhead:
-      "Control every screen in your home by text message. Turn screen time into earned learning time. No app for your kid to delete. Join the free waitlist — we email you when devices are ready. Or lock yours in now with a $50 deposit.",
+      "Control every screen in your home by text message. Turn screen time into earned learning time. No app for your kid to delete. Drop your email — we email when devices are ready.",
     cta: "Join the waitlist — free →",
     mode: "waitlist",
   },
   {
     id: "4",
-    eyebrow: "Founding members — 1,000 devices",
+    eyebrow: "Next 1,000 devices ship September 1",
     headlineTop: "Stop fighting about screens.",
     headlineAccent: "Make them earn them.",
     subhead:
-      "Text a rule. We enforce it. Your kid finishes a Khan Academy problem before YouTube. Reads 20 minutes before Roblox. You stay the good parent. Free to join the waitlist; $50 to lock in your device.",
+      "Text a rule. We enforce it. Your kid finishes a Khan Academy problem before YouTube. Reads 20 minutes before Roblox. You stay the good parent. We email you the moment the next batch is ready.",
     cta: "Join the waitlist — free →",
     mode: "waitlist",
   },
   {
     // Mirrors the IG ad copy ("Simplify parental controls / peace of mind").
-    // This is the variation paid social traffic should land on.
+    // This is the variation paid social traffic should land on. proxy.ts
+    // pins fbclid visitors here.
     id: "5",
-    eyebrow: "First batch — 1,000 devices",
+    eyebrow: "Next 1,000 devices ship September 1",
     headlineTop: "Simplify parental controls.",
     headlineAccent: "Peace of mind, by text.",
     subhead:
-      "Manage every screen in your home with simple text commands. No apps for your kids to delete. No dashboards to babysit. Join the free waitlist — or lock in your device with $50 and skip the line.",
+      "Manage every screen in your home with simple text commands. No apps for your kids to delete. No dashboards to babysit. Drop your email — we'll let you know when the next batch is ready.",
     cta: "Join the waitlist — free →",
     mode: "waitlist",
   },
   {
     // Direct-buy variation: no waitlist, no deposit. Full $249/yr membership
-    // upfront, device ships in the first batch. For visitors who already
+    // upfront, device ships in the next batch. For visitors who already
     // know they want it.
     id: "6",
     eyebrow: "Ships September 1 · device included",

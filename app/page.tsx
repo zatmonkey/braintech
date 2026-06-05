@@ -2,15 +2,15 @@ import { cookies, headers } from "next/headers";
 import { WaitlistForm } from "./waitlist-form";
 import { HeroWaitlist } from "./hero-waitlist";
 import { ChatWidget } from "./chat-widget";
-import {
-  FoundingBadge,
-  FoundingMeter,
-  FoundingToasts,
-} from "./founding-stats";
+// FoundingBadge + FoundingMeter intentionally removed — counters above
+// the fold read as gimmicky to cold paid traffic. Toasts kept for
+// subtle social proof in the corner.
+import { FoundingToasts } from "./founding-stats";
 import { PricingChoice } from "./pricing-choice";
 import { CurrencyPicker } from "./currency-picker";
 import { VariationTracker } from "./variation-tracker";
 import { CancelTracker } from "./cancel-tracker";
+import { ExitIntent } from "./exit-intent";
 import { getVariation, type Variation } from "./variations";
 import { pricingForCountry, type Pricing } from "./lib/pricing";
 
@@ -63,6 +63,7 @@ export default async function Home({
       <FoundingToasts />
       <VariationTracker variationId={variation.id} />
       <CancelTracker />
+      <ExitIntent />
     </main>
   );
 }
@@ -116,7 +117,7 @@ function Hero({
         <div className="fade-up">
           <div className="inline-flex items-center gap-2 rounded-full border border-[var(--color-rule)] bg-white/60 px-3 py-1 text-xs font-medium text-[var(--color-ink-soft)]">
             <span className="size-1.5 rounded-full bg-[var(--color-accent)] pulse-dot" />
-            <FoundingBadge />
+            {variation.eyebrow}
           </div>
           <h1 className="serif mt-6 text-[44px] leading-[1.02] tracking-[-0.02em] sm:text-6xl lg:text-[80px]">
             {variation.headlineTop}
@@ -520,7 +521,7 @@ function Testimonials() {
             Founding parents
           </div>
           <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
-            What the first families are saying.
+            What families are saying.
           </h2>
           <p className="mt-4 text-lg text-[var(--color-ink-soft)]">
             Real parents, real homes, weeks into using a Braintech device. We
@@ -592,7 +593,7 @@ function Pricing({
             </h2>
             <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
               No waitlist, no deposit. Pay for your first year today, your
-              device ships in the first batch on{" "}
+              device ships in the next batch on{" "}
               <strong>September 1</strong>, and your founding price stays{" "}
               <strong>{pricing.purchaseLabel} forever</strong>. Cancel anytime
               before renewal.
@@ -611,9 +612,8 @@ function Pricing({
                 </li>
               ))}
             </ul>
-            <FoundingMeter />
-            <p className="mt-4 text-sm text-[var(--color-ink-soft)]">
-              After the first 1,000, founding pricing goes away.
+            <p className="mt-6 text-sm text-[var(--color-ink-soft)]">
+              After the next 1,000 ship, founding pricing goes away.
             </p>
           </div>
           <div>
@@ -675,7 +675,7 @@ function FAQ() {
     },
     {
       q: "When does it ship?",
-      a: "We're taking founding reservations now. First batch ships when the first 1,000 spots are claimed. We'll text you with your batch date before charging anything.",
+      a: "We're taking founding reservations now. The next 1,000 devices ship on September 1. We'll email you the moment the next batch is ready, and confirm shipping before charging anything.",
     },
     {
       q: "Is this just screen time with extra steps?",

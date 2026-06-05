@@ -114,8 +114,8 @@ export default async function ReservedPage({
             </h1>
             <p className="mt-4 text-lg text-[var(--color-ink-soft)]">
               {result.mode === "purchase"
-                ? `You're one of the first 1,000 founding members. Your founding membership is paid for year one — device included, ships ${SHIP_DATE}.`
-                : `You're one of the first 1,000 founding members. Your deposit is applied toward your founding membership and is fully refundable.`}
+                ? `You're a founding member. Your year-one membership is paid — device included, ships ${SHIP_DATE}.`
+                : `You're a founding member. Your deposit is applied toward your founding membership and is fully refundable.`}
             </p>
             <div className="mt-6 rounded-xl border border-[var(--color-rule)] bg-[var(--color-cream)] p-5 text-left text-sm">
               <Row label="Reservation" value="Founding device #1 of 1,000" />

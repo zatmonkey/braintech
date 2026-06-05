@@ -23,6 +23,10 @@ import type { NextRequest } from "next/server";
 const TOTAL_VARIATIONS = 7; // keep in sync with app/variations.ts
 const COOKIE_NAME = "bt_var";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+// The variation that mirrors the live IG ad copy verbatim. Paid Meta
+// traffic (detected via ?fbclid=) gets pinned here so they don't fall
+// into the 1/N message-match lottery. Update when the ad creative changes.
+const PAID_META_VARIATION = "5";
 
 function isValidIndex(v: string | undefined | null): boolean {
   if (v === undefined || v === null || v === "") return false;
@@ -42,6 +46,13 @@ export function proxy(request: NextRequest) {
   const queryOverride = url.searchParams.get("variation");
   const existingCookie = request.cookies.get(COOKIE_NAME)?.value;
 
+  // fbclid is appended to every link clicked from Facebook/Instagram (paid
+  // or organic). Used here ONLY as a hint that "this visitor came from
+  // Meta" so we can pin them to the ad-mirror variation instead of the
+  // random-rotation lottery (only ~1/N visitors otherwise see copy that
+  // matches the ad they just clicked).
+  const fromMeta = url.searchParams.has("fbclid");
+
   let chosen: string;
   let mustSet = false;
 
@@ -53,6 +64,10 @@ export function proxy(request: NextRequest) {
   } else if (isValidIndex(existingCookie)) {
     // Returning visitor — keep them on the same variation.
     chosen = existingCookie as string;
+  } else if (fromMeta) {
+    // First visit via a Meta click and no explicit override → ad-mirror.
+    chosen = PAID_META_VARIATION;
+    mustSet = true;
   } else {
     chosen = pickRandom();
     mustSet = true;

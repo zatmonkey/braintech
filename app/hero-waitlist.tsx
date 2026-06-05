@@ -17,7 +17,7 @@
  * being asked for $50.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { sendGAEvent } from "@next/third-parties/google";
 import type { Variation } from "./variations";
 import type { Pricing } from "./lib/pricing";
@@ -59,6 +59,17 @@ export function HeroWaitlist({
   const [state, setState] = useState<State>({ kind: "idle" });
   const [email, setEmail] = useState("");
   const isBuyNow = variation.mode === "buyNow";
+  // Auto-focus the email field on mount — removes one tap on mobile, the
+  // exact ad-click → first-keystroke friction we'd otherwise pay. Skips
+  // on iOS-Safari (focusing programmatically triggers the keyboard which
+  // is jarring on landing) by checking userAgent.
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (typeof navigator === "undefined") return;
+    const isIosSafari = /iP(hone|od|ad)/.test(navigator.userAgent);
+    if (isIosSafari) return;
+    inputRef.current?.focus({ preventScroll: true });
+  }, []);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -304,6 +315,7 @@ export function HeroWaitlist({
         <label className="flex-1">
           <span className="sr-only">Email</span>
           <input
+            ref={inputRef}
             type="email"
             required
             autoComplete="email"
@@ -340,14 +352,12 @@ export function HeroWaitlist({
               </a>
             </>
           ) : (
+            // Deliberately no price reference above the fold — cold paid
+            // traffic that sees "$50" before any value is built bounces.
+            // The deposit upsell lives below in the Pricing section.
             <>
-              No charge today.{" "}
-              <a
-                href="#lockin"
-                className="underline-offset-4 hover:text-[var(--color-ink)] hover:underline"
-              >
-                Or lock your device in for {pricing.depositLabel} →
-              </a>
+              No charge today. We&apos;ll email you when the next batch is
+              ready.
             </>
           )}
         </p>

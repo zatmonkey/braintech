@@ -20,7 +20,6 @@
 import { useEffect, useState } from "react";
 import { sendGAEvent } from "@next/third-parties/google";
 import { WaitlistForm } from "./waitlist-form";
-import { FoundingMeter } from "./founding-stats";
 import type { Variation } from "./variations";
 import type { Pricing } from "./lib/pricing";
 
@@ -81,7 +80,7 @@ export function PricingChoice({
           {pricing.purchaseLabel}. Locked in for life.
         </h2>
         <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
-          We&apos;re building the first 1,000 devices in a single batch. Two
+          The next 1,000 devices ship on <strong>September 1</strong>. Two
           ways in — pick one:
         </p>
         <div className="mt-5 space-y-3">
@@ -98,7 +97,7 @@ export function PricingChoice({
             selected={choice === "lockIn"}
             onClick={() => pick("lockIn", "card")}
             title="Lock in your device"
-            body={`Refundable ${pricing.depositLabel} deposit. Skips the queue. Guarantees you one of the first 1,000. Credited toward your ${pricing.purchaseLabel} founding membership.`}
+            body={`Refundable ${pricing.depositLabel} deposit. Skips the queue. Guarantees one of the next 1,000 ships with your name on it. Credited toward your ${pricing.purchaseLabel} founding membership.`}
             badge={`${pricing.depositLabel} · refundable`}
             accent
           />
@@ -117,9 +116,8 @@ export function PricingChoice({
             </li>
           ))}
         </ul>
-        <FoundingMeter />
-        <p className="mt-4 text-sm text-[var(--color-ink-soft)]">
-          After the first 1,000, founding pricing goes away.
+        <p className="mt-6 text-sm text-[var(--color-ink-soft)]">
+          After the next 1,000 ship, founding pricing goes away.
         </p>
       </div>
       <div>

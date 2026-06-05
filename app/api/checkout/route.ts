@@ -80,7 +80,7 @@ export async function POST(req: Request) {
         }
       : {
           name: "Braintech — Founding Device Reservation",
-          description: `Refundable ${pricing.depositLabel} deposit to lock in one of the first 1,000 devices. Ships worldwide ${SHIP_DATE}. Applied toward your ${pricing.purchaseLabel} founding membership.`,
+          description: `Refundable ${pricing.depositLabel} deposit to lock in one of the next 1,000 devices. Ships worldwide ${SHIP_DATE}. Applied toward your ${pricing.purchaseLabel} founding membership.`,
         };
 
     const session = await stripe.checkout.sessions.create({

@@ -194,11 +194,11 @@ export function WaitlistForm({
           The waitlist is free — but unordered.
         </h3>
         <p className="mt-2 text-[var(--color-ink-soft)]">
-          We&apos;ll email you when the first batch is ready to ship — no
+          We&apos;ll email you when the next batch is ready to ship — no
           guaranteed slot. Want a guaranteed device, ahead of everyone else?
           Drop a{" "}
           <strong>{pricing.depositLabel} refundable deposit</strong> and we
-          lock one of the first 1,000 with your name on it. Ships{" "}
+          lock one of the next 1,000 with your name on it. Ships{" "}
           <strong>worldwide September 1</strong>.
         </p>
         <button
@@ -278,7 +278,7 @@ export function WaitlistForm({
           )}
           <p className="text-xs text-[var(--color-ink-soft)]">
             {pricing.depositLabel} refundable any time before your device
-            ships. Skips the queue; guarantees one of the first 1,000.
+            ships. Skips the queue; guarantees one of the next 1,000.
             Credited toward your {pricing.purchaseLabel} founding membership.
             Secure checkout via Stripe.
           </p>

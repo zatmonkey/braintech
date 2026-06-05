@@ -37,7 +37,7 @@ export async function GET() {
           }}
         >
           <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: "-0.02em" }}>
-            Join the waitlist — first 1,000 devices
+            Join the waitlist — next 1,000 ship September 1
           </div>
 
           <div style={{ marginTop: 28, display: "flex", flexDirection: "column", gap: 6 }}>
