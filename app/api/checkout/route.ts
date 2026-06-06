@@ -159,7 +159,11 @@ export async function POST(req: Request) {
           "MX", "BR", "JP", "SG", "HK", "KR", "AE", "IL", "ZA", "IN",
         ],
       },
-      allow_promotion_codes: false,
+      // Stripe rejects {discounts, allow_promotion_codes} as a pair — even
+      // when allow_promotion_codes=false. So only set the flag in the
+      // no-discount path. (Default behaviour without the flag is "no
+      // user-entered promo codes", which is what we want anyway.)
+      ...(couponId ? {} : { allow_promotion_codes: false }),
     });
 
     // Best-effort: record the reservation attempt against the lead.
