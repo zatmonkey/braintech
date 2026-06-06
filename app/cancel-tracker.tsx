@@ -50,9 +50,7 @@ export function CancelTracker() {
                 : stash.valueMinor / 100,
             currency: stash.currency.toUpperCase(),
             content_ids: [
-              stash.mode === "purchase"
-                ? "founding-membership"
-                : "deposit-spot",
+              stash.mode === "purchase" ? "year-one" : "reservation",
             ],
             mode: stash.mode,
             variation: stash.variation ?? "unknown",
@@ -85,7 +83,6 @@ export function CancelTracker() {
     clearStashedCheckout();
 
     // Strip the ?reserve=cancelled param so a refresh doesn't re-fire.
-    // Keep the #waitlist hash so PricingChoice's hash handler still works.
     params.delete("reserve");
     const search = params.toString();
     const hash = window.location.hash || "";

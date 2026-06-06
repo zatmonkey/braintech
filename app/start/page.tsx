@@ -103,24 +103,37 @@ export default async function Start({
             <div className="overflow-hidden rounded-[2rem] border border-[var(--color-rule)] bg-white shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src="/device-hero.webp"
-                alt="The Braintech device on a kitchen counter, glowing brain icon and orange button, with a Wi-Fi router behind it."
-                width={1024}
-                height={1024}
+                src="/hero-mum-kitchen.webp"
+                alt="A mum in a warm sunlit kitchen smiling as she reads her phone; her child reads a book in the soft-focus background; the Braintech device sits on a shelf behind her with a small glowing orange brain icon."
+                width={1600}
+                height={904}
                 loading="eager"
                 fetchPriority="high"
                 className="block h-full w-full"
               />
             </div>
-            <p className="mt-3 text-center text-xs text-[var(--color-ink-soft)]">
-              The Braintech device · sits between your internet and your Wi-Fi.
-            </p>
           </div>
         </div>
 
-        {/* One testimonial — the strongest one. Three would invite a scroll
-            past the form; one above it makes you stop and read. */}
-        <figure className="mt-14 rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)] p-6 sm:p-7">
+        {/* Trust strip — calms the techy intimidation of cold paid traffic
+            before they scroll past the form. */}
+        <ul className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-[var(--color-ink-soft)]">
+          <li className="inline-flex items-center gap-2">
+            <span aria-hidden className="size-1.5 rounded-full bg-[var(--color-accent)]" />
+            30-day refund
+          </li>
+          <li className="inline-flex items-center gap-2">
+            <span aria-hidden className="size-1.5 rounded-full bg-[var(--color-accent)]" />
+            No app for your kid to delete
+          </li>
+          <li className="inline-flex items-center gap-2">
+            <span aria-hidden className="size-1.5 rounded-full bg-[var(--color-accent)]" />
+            Built by parents, in Australia
+          </li>
+        </ul>
+
+        {/* One testimonial — AU mum, our paid-traffic audience. */}
+        <figure className="mt-10 rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)] p-6 sm:p-7">
           <svg
             viewBox="0 0 24 24"
             fill="currentColor"
@@ -130,19 +143,20 @@ export default async function Start({
             <path d="M7 4c-2 0-3.5 1.6-3.5 3.7v8.6c0 .9.7 1.7 1.7 1.7H10c.9 0 1.7-.7 1.7-1.7v-4.6c0-1-.7-1.7-1.7-1.7H7C7 6.9 8.2 6 9.4 6V4H7Zm10 0c-2 0-3.5 1.6-3.5 3.7v8.6c0 .9.7 1.7 1.7 1.7H20c.9 0 1.7-.7 1.7-1.7v-4.6c0-1-.7-1.7-1.7-1.7h-3c0-3.1 1.2-4 2.4-4V4h-2.4Z" />
           </svg>
           <blockquote className="mt-3 text-[17px] leading-relaxed text-[var(--color-ink)]">
-            &ldquo;Day 30, he told us about black holes at dinner. Then a
-            Spanish word he taught his sister.&rdquo;
+            &ldquo;Bedtime used to be a 20-minute negotiation. Now I text Bri
+            the rule once, and it just&hellip; runs. First quiet evening
+            I&rsquo;ve had in years.&rdquo;
           </blockquote>
           <figcaption className="mt-4 flex items-center gap-3 border-t border-[var(--color-rule)] pt-4 text-sm">
             <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--color-ink)] text-sm font-semibold text-[var(--color-cream)]">
-              M
+              S
             </div>
             <div className="leading-tight">
               <div className="font-semibold text-[var(--color-ink)]">
-                Marcus R.
+                Sarah W.
               </div>
               <div className="text-xs text-[var(--color-ink-soft)]">
-                Dad of two · Nashville, TN
+                Mum of two · Brisbane
               </div>
             </div>
           </figcaption>

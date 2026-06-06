@@ -13,10 +13,9 @@ export const dynamic = "force-dynamic";
 
 type Row = {
   id: string;
-  mode: "waitlist" | "buyNow";
   views: number;
-  signups: number; // unique waitlist emails
-  deposits: number; // checkout_mode='deposit' AND deposit_paid
+  signups: number; // unique discount-claim emails
+  deposits: number; // checkout_mode='deposit' AND deposit_paid (legacy)
   purchases: number; // checkout_mode='purchase' AND deposit_paid
   // Opened Stripe Checkout and bailed (checkout_cancelled_at IS NOT NULL
   // AND deposit_paid = FALSE).
@@ -108,7 +107,6 @@ export async function GET() {
     const c = l?.cancelled ?? 0;
     return {
       id: v.id,
-      mode: v.mode,
       views: n,
       signups: s,
       deposits: d,

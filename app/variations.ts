@@ -4,94 +4,86 @@ export type Variation = {
   headlineTop: string;
   headlineAccent: string;
   subhead: string;
-  // The default hero CTA — for waitlist variations this is the
-  // "join the (free) queue" button. variations.ts:5
+  // Hero CTA copy for the email-capture button (the "Get 10% off" flow).
   cta: string;
-  // What the form actually does. Most variations submit an email and then
-  // upsell the deposit; the "buyNow" variation skips the queue and goes
-  // straight to the $249/yr Stripe checkout — no waitlist, no deposit.
-  mode: "waitlist" | "buyNow";
 };
 
-// Copy convention: lead with "Next 1,000 ship Sept 1" — concrete, near-term,
-// and nobody wants to be "first". Don't mention price above the fold.
+// Phase 4 copy rules:
+//  - No "founding", "first 1,000", "next 1,000", "join the waitlist", or
+//    "ships September 1" framing — visitors found this confusing and
+//    "founding" reads as risky to AU mum-target. Ship date stays in fine
+//    print + FAQ only.
+//  - One funnel: email → 10% off discount → buy the device. Subscription
+//    starts when the device ships (mentioned once in fine print).
+//  - Permission / relief framing, not control / fight / earn / brainrot.
+//  - Australian English ("mum") where the variation is AU-targeted.
 
 export const VARIATIONS: Variation[] = [
   {
     id: "0",
-    eyebrow: "Next 1,000 devices ship September 1",
-    headlineTop: "Your kid wants TikTok.",
-    headlineAccent: "Make them earn it.",
+    eyebrow: "Screen time without the fight",
+    headlineTop: "Get dinner back.",
+    headlineAccent: "Text your way there.",
     subhead:
-      "A small device plugs between your router and your Wi-Fi. You text it like a friend. It turns every screen in your house into something your kid has to earn. Drop your email — we'll let you know when the next batch is ready.",
-    cta: "Join the waitlist — free →",
-    mode: "waitlist",
+      "A small device plugs between your router and your Wi-Fi. You text it the rules — bedtime, homework first, no Roblox until reading. It quietly looks after every screen in the house. Drop your email and we'll send you 10% off your device.",
+    cta: "Get 10% off →",
   },
   {
     id: "1",
-    eyebrow: "Next 1,000 ship September 1",
-    headlineTop: "Make your kids",
-    headlineAccent: "smart again.",
+    eyebrow: "A calmer house, by text",
+    headlineTop: "The screen-time fight",
+    headlineAccent: "doesn't have to be yours.",
     subhead:
-      "Text-message parental control that turns screen time into learning time. The defense against brainrot you wish you'd had. Free to join — we email you when the next batch is ready.",
-    cta: "Join the waitlist — free →",
-    mode: "waitlist",
+      "Plug one little box between your router and your Wi-Fi. Text it your house rules. It handles every screen — phones, iPads, the lot — so you don't have to be the bad guy. Email = 10% off when you order.",
+    cta: "Get 10% off →",
   },
   {
     id: "2",
-    eyebrow: "Next 1,000 households · ships September 1",
-    headlineTop: "The ultimate defense",
-    headlineAccent: "against brainrot.",
+    eyebrow: "Made for parents, not IT people",
+    headlineTop: "If you can plug in a lamp,",
+    headlineAccent: "you can run this.",
     subhead:
-      "One tiny box between your router and your Wi-Fi. Text the rules in plain English. Your kid earns TikTok by watching a TED talk. Drop your email — we'll let you know when the next batch is ready.",
-    cta: "Join the waitlist — free →",
-    mode: "waitlist",
+      "One tiny box between your router and your Wi-Fi. Text the rules in plain English. The kids' devices keep working — just on your terms. Drop your email for 10% off.",
+    cta: "Get 10% off →",
   },
   {
     id: "3",
-    eyebrow: "Next 1,000 devices ship September 1",
-    headlineTop: "Parental controls that",
-    headlineAccent: "make your kids smarter.",
+    eyebrow: "Screen time, the easy way",
+    headlineTop: "Parents who'd rather",
+    headlineAccent: "not fight about screens.",
     subhead:
-      "Control every screen in your home by text message. Turn screen time into earned learning time. No app for your kid to delete. Drop your email — we email when devices are ready.",
-    cta: "Join the waitlist — free →",
-    mode: "waitlist",
+      "Manage every screen in your home by text message. No apps for the kids to delete, no dashboards to babysit. We'll email you a 10% off code when you drop your address.",
+    cta: "Get 10% off →",
   },
   {
     id: "4",
-    eyebrow: "Next 1,000 devices ship September 1",
+    eyebrow: "Take the evening back",
     headlineTop: "Stop fighting about screens.",
-    headlineAccent: "Make them earn them.",
+    headlineAccent: "Get peace of mind back.",
     subhead:
-      "Text a rule. We enforce it. Your kid finishes a Khan Academy problem before YouTube. Reads 20 minutes before Roblox. You stay the good parent. We email you the moment the next batch is ready.",
-    cta: "Join the waitlist — free →",
-    mode: "waitlist",
+      "Text a rule — \"no YouTube until 20 minutes of reading\" — and it just happens. You stay the good parent, the device does the saying-no. Email us and we'll knock 10% off.",
+    cta: "Get 10% off →",
   },
   {
     // Mirrors the IG ad copy ("Simplify parental controls / peace of mind").
     // This is the variation paid social traffic should land on. proxy.ts
     // pins fbclid visitors here.
     id: "5",
-    eyebrow: "Next 1,000 devices ship September 1",
-    headlineTop: "Simplify parental controls.",
+    eyebrow: "Built by parents, in Australia",
+    headlineTop: "Screen time without the fight.",
     headlineAccent: "Peace of mind, by text.",
     subhead:
-      "Manage every screen in your home with simple text commands. No apps for your kids to delete. No dashboards to babysit. Drop your email — we'll let you know when the next batch is ready.",
-    cta: "Join the waitlist — free →",
-    mode: "waitlist",
+      "Plug it in. Text it the rules. Get dinner back. One little box looks after every screen in your home — no apps to install, no dashboards to mind. Drop your email and we'll send you 10% off your device.",
+    cta: "Get 10% off →",
   },
   {
-    // Direct-buy variation: no waitlist, no deposit. Full $249/yr membership
-    // upfront, device ships in the next batch. For visitors who already
-    // know they want it.
     id: "6",
-    eyebrow: "Ships September 1 · device included",
-    headlineTop: "Skip the waitlist.",
-    headlineAccent: "Get it on day one.",
+    eyebrow: "Skip the email step",
+    headlineTop: "Already sold?",
+    headlineAccent: "Order yours now.",
     subhead:
-      "$249 for your first year — device included, ships worldwide September 1. No queue, no deposit, no waiting. Just text it the rules and let your kid earn their screens back.",
-    cta: "Buy now — $249/yr →",
-    mode: "buyNow",
+      "Get the device, set it up in 90 seconds, and text your way to calmer evenings. Your subscription starts the day your device ships.",
+    cta: "Order yours →",
   },
 ];
 

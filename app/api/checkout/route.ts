@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { getStripe, SHIP_DATE } from "@/app/lib/stripe";
+import {
+  getStripe,
+  DISCOUNT_COOKIE,
+  DISCOUNT_COUPON_ID,
+} from "@/app/lib/stripe";
 import { getSql, ensureSmsSchema } from "@/app/lib/db";
 import { pricingForCountry, stripeAmount } from "@/app/lib/pricing";
 import { readMetaCookies } from "@/app/lib/meta-capi";
@@ -71,16 +75,27 @@ export async function POST(req: Request) {
     mode,
   );
 
+  // Read the discount cookie set by /api/waitlist after email capture. Only
+  // apply if the value matches the *current* coupon id — old cookies for
+  // retired promotions naturally stop working without code changes.
+  const discountCookie = req.headers
+    .get("cookie")
+    ?.match(new RegExp(`(?:^|;\\s*)${DISCOUNT_COOKIE}=([^;]+)`))?.[1];
+  const couponId =
+    discountCookie === DISCOUNT_COUPON_ID ? DISCOUNT_COUPON_ID : null;
+
   try {
     const isPurchase = mode === "purchase";
     const lineItem = isPurchase
       ? {
-          name: "Braintech — Founding Membership (Year 1)",
-          description: `${pricing.purchaseLabel} founding membership. Device included, ships worldwide ${SHIP_DATE}. Founding price locked at every renewal.`,
+          name: "Braintech — Year One",
+          description: `${pricing.purchaseLabel}. Device included. Your subscription starts the day your device ships. Cancel any time before renewal.`,
         }
       : {
-          name: "Braintech — Founding Device Reservation",
-          description: `Refundable ${pricing.depositLabel} deposit to lock in one of the next 1,000 devices. Ships worldwide ${SHIP_DATE}. Applied toward your ${pricing.purchaseLabel} founding membership.`,
+          // Legacy "deposit" mode kept so old links don't break; no longer
+          // surfaced in the UI. Treats the deposit as a soft device reservation.
+          name: "Braintech — Device Reservation",
+          description: `Refundable reservation. Your subscription starts the day your device ships.`,
         };
 
     const session = await stripe.checkout.sessions.create({
@@ -99,6 +114,7 @@ export async function POST(req: Request) {
           },
         },
       ],
+      ...(couponId ? { discounts: [{ coupon: couponId }] } : {}),
       // mode goes into metadata so the webhook can tell deposits from full
       // purchases (different downstream emails, different lead state).
       // fbc/fbp ride along because the webhook is server-to-server (Stripe

@@ -30,10 +30,9 @@ export type Pricing = {
   // ISO country code we matched on (for analytics / debugging).
   country: string;
   // Marketing labels — these are what users see.
-  depositLabel: string; // e.g. "$50", "AU$79", "£39"
+  depositLabel: string; // legacy / unused after Phase 4. Kept so older callers don't break.
   purchaseLabel: string; // e.g. "$249/yr", "AU$379/yr"
-  // The deposit amount written as a sentence-friendly phrase.
-  depositPhrase: string; // "$50 deposit", "AU$79 deposit"
+  depositPhrase: string; // legacy / unused after Phase 4.
   // Raw cents / minor units, what Stripe gets.
   depositMinor: number;
   purchaseMinor: number;
@@ -246,5 +245,27 @@ export function stripeAmount(
   return {
     amount: mode === "purchase" ? pricing.purchaseMinor : pricing.depositMinor,
     currency: pricing.currency.toLowerCase(),
+  };
+}
+
+/**
+ * Compute the displayable discounted-purchase label using a percent-off
+ * coupon (the Phase 4 "10% off via email" mechanic). Rounds to a whole
+ * unit so the label reads as a charm price ("$224" not "$224.10"). For
+ * JPY we just multiply minor units directly since 1 JPY = 1 minor.
+ */
+export function discountedPurchase(
+  pricing: Pricing,
+  percentOff: number,
+): { label: string; minor: number } {
+  const factor = (100 - percentOff) / 100;
+  const major =
+    pricing.currency === "JPY"
+      ? Math.round(pricing.purchaseMinor * factor)
+      : Math.round((pricing.purchaseMinor / 100) * factor);
+  const formatted = formatMajor(pricing.currency, major);
+  return {
+    label: `${formatted}/yr`,
+    minor: pricing.currency === "JPY" ? major : major * 100,
   };
 }

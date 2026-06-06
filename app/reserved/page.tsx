@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getStripe, SHIP_DATE } from "@/app/lib/stripe";
+import { getStripe } from "@/app/lib/stripe";
 import { getSql, ensureSmsSchema } from "@/app/lib/db";
 import { PurchaseTracker } from "./purchase-tracker";
 
@@ -109,32 +109,35 @@ export default async function ReservedPage({
             </div>
             <h1 className="serif mt-6 text-4xl tracking-[-0.02em]">
               {result.mode === "purchase"
-                ? "You're locked in for year one."
-                : "Your device is locked in."}
+                ? "You're all set."
+                : "Your reservation is in."}
             </h1>
             <p className="mt-4 text-lg text-[var(--color-ink-soft)]">
               {result.mode === "purchase"
-                ? `You're a founding member. Your year-one membership is paid — device included, ships ${SHIP_DATE}.`
-                : `You're a founding member. Your deposit is applied toward your founding membership and is fully refundable.`}
+                ? `Your device is on the way. Your subscription starts the day it ships — and not a minute before.`
+                : `Your spot is held. Your deposit is fully refundable any time before your device ships.`}
             </p>
             <div className="mt-6 rounded-xl border border-[var(--color-rule)] bg-[var(--color-cream)] p-5 text-left text-sm">
-              <Row label="Reservation" value="Founding device #1 of 1,000" />
               <Row
-                label={result.mode === "purchase" ? "Membership" : "Deposit"}
+                label={result.mode === "purchase" ? "Year one" : "Reservation"}
                 value={
                   result.value != null && result.currency
                     ? `${formatPrice(result.value, result.currency)}${
-                        result.mode === "purchase" ? " (year one)" : " (refundable)"
+                        result.mode === "purchase"
+                          ? " (device included)"
+                          : " (refundable)"
                       }`
                     : ""
                 }
               />
-              <Row label="Ships" value={`Worldwide · ${SHIP_DATE}`} />
-              {result.email ? <Row label="Confirmation to" value={result.email} /> : null}
+              <Row label="Subscription" value="Starts when your device ships" />
+              {result.email ? (
+                <Row label="Confirmation to" value={result.email} />
+              ) : null}
             </div>
             <p className="mt-6 text-sm text-[var(--color-ink-soft)]">
-              We&apos;ll text you to finish setup and confirm shipping before
-              your batch ships. Talk soon!
+              We&apos;ll email you a tracking number and a quick setup link as
+              soon as your device leaves the warehouse. Talk soon!
             </p>
           </>
         ) : (

@@ -77,12 +77,15 @@ export default function TermsPage() {
         for marketing or promotional purposes.
       </P>
 
-      <H2>Eligibility &amp; the waitlist</H2>
+      <H2>Pricing &amp; subscription</H2>
       <P>
-        Joining the waitlist reserves a founding-member spot; it is not a
-        purchase, and no payment is collected at sign-up. Founding pricing of
-        $249/year applies to the first 1,000 devices. We will confirm with you
-        before any charge is made.
+        The device price (currently $249/year and localised in eight currencies
+        on the product pages) covers the device and your first year of
+        Braintech service. Customers who provide their email may receive an
+        introductory discount code. Your annual subscription begins on the
+        day your device ships — not on the day you order — and renews
+        annually thereafter unless you cancel. You can request a full refund
+        within 30 days of receiving your device.
       </P>
     </LegalChrome>
   );

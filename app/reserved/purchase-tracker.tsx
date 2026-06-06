@@ -41,10 +41,10 @@ export function PurchaseTracker({
         value,
         currency: currency.toUpperCase(),
         // content_ids/contents lets Meta group by SKU in reports.
-        content_ids: [mode === "purchase" ? "founding-membership" : "deposit-spot"],
+        content_ids: [mode === "purchase" ? "year-one" : "reservation"],
         contents: [
           {
-            id: mode === "purchase" ? "founding-membership" : "deposit-spot",
+            id: mode === "purchase" ? "year-one" : "reservation",
             quantity: 1,
             item_price: value,
           },

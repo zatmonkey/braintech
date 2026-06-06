@@ -42,7 +42,7 @@ export default function PrivacyPage() {
 
       <H2>How we use your information</H2>
       <UL>
-        <li>To operate the founding-member waitlist and reserve your device.</li>
+        <li>To fulfil your device order and to email you any discount code you have claimed.</li>
         <li>
           To send you text messages that welcome you, set up your account, and
           ask a few onboarding questions.

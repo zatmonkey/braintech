@@ -202,7 +202,7 @@ export function FoundingToasts() {
             {current.name} from {current.region}
           </div>
           <div className="text-[var(--color-ink-soft)]">
-            Reserved a founding device · {formatAgo(current.minutesAgo)}
+            Just ordered a device · {formatAgo(current.minutesAgo)}
           </div>
         </div>
         <button

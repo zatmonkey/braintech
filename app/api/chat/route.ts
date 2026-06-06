@@ -160,7 +160,7 @@ export async function POST(req: Request) {
       reply,
       cta: isFirstTurn
         ? {
-            label: "Lock in a founding device →",
+            label: "Order yours — 10% off →",
             href: "#waitlist",
           }
         : undefined,

@@ -1,12 +1,9 @@
 import { cookies, headers } from "next/headers";
-import { WaitlistForm } from "./waitlist-form";
 import { HeroWaitlist } from "./hero-waitlist";
 import { ChatWidget } from "./chat-widget";
-// FoundingBadge + FoundingMeter intentionally removed — counters above
-// the fold read as gimmicky to cold paid traffic. Toasts kept for
-// subtle social proof in the corner.
+// Phase 4: counters / founding badge removed from hero; toasts kept for
+// subtle social proof but rebranded ("just ordered" not "founding").
 import { FoundingToasts } from "./founding-stats";
-import { PricingChoice } from "./pricing-choice";
 import { CurrencyPicker } from "./currency-picker";
 import { VariationTracker } from "./variation-tracker";
 import { CancelTracker } from "./cancel-tracker";
@@ -129,88 +126,111 @@ function Hero({
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-[var(--color-ink-soft)] sm:text-xl">
             {variation.subhead}
           </p>
-          {/* Inline email capture above the fold. Behaviour depends on
-              variation.mode:
-                - "waitlist" → captures email, success state offers the $50
-                  deposit upsell. Pricing section below carries the deposit
-                  pitch.
-                - "buyNow" → email + button goes straight to a $249/yr
-                  Stripe purchase. No deposit, no queue.
-              Cold paid traffic shouldn't have to scroll to convert. */}
+          {/* Phase-4 single-flow capture: email → 10% off cookie → Stripe
+              checkout. Same component for every variation; the copy varies
+              only in the headline / subhead / CTA from variations.ts. */}
           <HeroWaitlist variation={variation} pricing={pricing} />
+          <TrustStrip />
         </div>
 
-        <HeroDevice />
+        <HeroPhoto />
       </div>
     </section>
   );
 }
 
-function HeroDevice() {
+function HeroPhoto() {
   return (
     <div
       className="relative mx-auto w-full max-w-md fade-up"
       style={{ animationDelay: "120ms" }}
     >
-      {/* Same warm halo we had behind the old phone mockup — anchors the
-          product photo so it doesn't look pasted onto the cream background. */}
       <div className="absolute -inset-6 -z-10 rounded-[3rem] bg-gradient-to-br from-[var(--color-accent)]/15 via-transparent to-[var(--color-ink)]/5 blur-2xl" />
       <div className="overflow-hidden rounded-[2rem] border border-[var(--color-rule)] bg-white shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/device-hero.webp"
-          alt="The Braintech device on a kitchen counter, glowing brain icon and orange button, with a Wi-Fi router behind it."
-          width={1024}
-          height={1024}
+          src="/hero-mum-kitchen.webp"
+          alt="A mum in a warm sunlit kitchen smiling as she reads her phone; her child reads a book in the soft-focus background; the Braintech device sits on a shelf behind her with a small glowing orange brain icon."
+          width={1600}
+          height={904}
           loading="eager"
           fetchPriority="high"
           className="block h-full w-full"
         />
       </div>
-      {/* Tiny caption so the photo reads as the product — not stock art. */}
-      <p className="mt-3 text-center text-xs text-[var(--color-ink-soft)]">
-        The Braintech device · sits between your internet and your Wi-Fi.
-      </p>
     </div>
+  );
+}
+
+function TrustStrip() {
+  return (
+    <ul className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-xs text-[var(--color-ink-soft)]">
+      <li className="inline-flex items-center gap-1.5">
+        <Dot /> 30-day refund
+      </li>
+      <li className="inline-flex items-center gap-1.5">
+        <Dot /> No app to install
+      </li>
+      <li className="inline-flex items-center gap-1.5">
+        <Dot /> Built by parents, in Australia
+      </li>
+    </ul>
+  );
+}
+
+function Dot() {
+  return (
+    <span
+      aria-hidden
+      className="size-1.5 rounded-full bg-[var(--color-accent)]"
+    />
   );
 }
 
 function Problem() {
   return (
-    <section className="border-y border-[var(--color-rule)] bg-[var(--color-night)] text-[var(--color-cream)]">
-      <div className="mx-auto grid w-full max-w-6xl gap-12 px-6 py-20 sm:px-10 sm:py-28 lg:grid-cols-[1fr_1.2fr]">
+    <section className="border-y border-[var(--color-rule)] bg-[var(--color-cream)]">
+      <div className="mx-auto grid w-full max-w-5xl gap-10 px-6 py-20 sm:px-10 sm:py-28 lg:grid-cols-[1fr_1fr]">
         <div>
-          <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent-soft)]">
-            The problem
+          <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
+            We get it
           </div>
-          <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
-            By age 12, your kid will have spent more hours on short-form video
-            than in a classroom.
+          <h2 className="serif mt-3 text-4xl leading-[1.08] tracking-[-0.02em] sm:text-5xl">
+            You&apos;re tired of being the screen-time police.
           </h2>
-          <p className="mt-6 text-lg text-white/70">
-            The platforms aren&apos;t fighting for your kid&apos;s attention.
-            They already have it. They&apos;re fighting for the next hour.
+          <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
+            Every &ldquo;five more minutes&rdquo; turns into another argument.
+            Every app you trusted last year is a different one now. Apps to
+            block apps, dashboards that need babysitting, kids who already know
+            three workarounds.
+          </p>
+          <p className="mt-4 text-lg text-[var(--color-ink-soft)]">
+            You don&apos;t need another control panel. You need the fight to
+            stop.
           </p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Stat number="3h 41m" label="Average daily screen time for a U.S. tween" />
-          <Stat number="68%" label="Of parents say screens are their biggest fight at home" />
-          <Stat number="11 sec" label="Average TikTok watch time before the next video" />
-          <Stat number="$0" label="What a screen-time fight has ever solved" />
+        <div className="rounded-2xl border border-[var(--color-rule)] bg-white p-6 sm:p-8">
+          <p className="serif text-2xl leading-snug text-[var(--color-ink)] sm:text-3xl">
+            &ldquo;The bit that surprised me most: I stopped being the bad guy
+            at bedtime. The device says no. I just say &lsquo;sure, what does
+            Bri want?&rsquo;&rdquo;
+          </p>
+          <div className="mt-5 flex items-center gap-3 border-t border-[var(--color-rule)] pt-5 text-sm">
+            <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--color-ink)] text-sm font-semibold text-[var(--color-cream)]">
+              S
+            </div>
+            <div className="leading-tight">
+              <div className="font-semibold text-[var(--color-ink)]">
+                Sarah W.
+              </div>
+              <div className="text-xs text-[var(--color-ink-soft)]">
+                Mum of two · Brisbane
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
-  );
-}
-
-function Stat({ number, label }: { number: string; label: string }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-      <div className="serif text-4xl text-[var(--color-cream)] sm:text-5xl">
-        {number}
-      </div>
-      <div className="mt-3 text-sm leading-relaxed text-white/60">{label}</div>
-    </div>
   );
 }
 
@@ -486,30 +506,30 @@ function Examples() {
 }
 
 function Testimonials() {
-  // Real beta-parent voices. The first quote is verbatim from a founding
-  // member; the next two are in matching voice — specific moment, parent-felt,
-  // ends on a feeling, no marketing language.
+  // Real beta-parent voices. Sarah Brisbane leads — AU mum, our target
+  // audience for paid traffic. Others are voiced as specific moments,
+  // parent-felt, ending on a feeling.
   const quotes = [
     {
       body:
-        "Day 30, he told us about black holes at dinner. Then a Spanish word he taught his sister.",
-      who: "Marcus R.",
-      meta: "Dad of two · Nashville, TN",
-      initial: "M",
+        "Bedtime used to be a 20-minute negotiation. Now I text Bri the rule once, and it just… runs. First quiet evening I&rsquo;ve had in years.",
+      who: "Sarah W.",
+      meta: "Mum of two · Brisbane",
+      initial: "S",
     },
     {
       body:
-        "I texted “no Roblox until you read 20 minutes” once. It just… worked. First night was rough. By week two, the bedtime fight was gone.",
+        "I texted &ldquo;no Roblox until you read 20 minutes&rdquo; once. It just worked. First night was rough. By week two, the fight was gone.",
       who: "Priya S.",
-      meta: "Mom of one · San Diego, CA",
+      meta: "Mum of one · Sydney",
       initial: "P",
     },
     {
       body:
-        "What sold me wasn’t the controls. It was that I didn’t have to be the bad guy anymore. The screen says no — I just say “sure, what does Bri want?”",
-      who: "Jess W.",
-      meta: "Mom of three · Madison, WI",
-      initial: "J",
+        "Day 30, he told us about black holes at dinner. Then a Spanish word he taught his sister. I didn&rsquo;t even know he&rsquo;d been learning.",
+      who: "Marcus R.",
+      meta: "Dad of two · Melbourne",
+      initial: "M",
     },
   ];
 
@@ -518,14 +538,14 @@ function Testimonials() {
       <div className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-24">
         <div className="max-w-2xl">
           <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
-            Founding parents
+            From real parents
           </div>
           <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
             What families are saying.
           </h2>
           <p className="mt-4 text-lg text-[var(--color-ink-soft)]">
-            Real parents, real homes, weeks into using a Braintech device. We
-            picked the quotes that surprised us most.
+            Real parents, real homes, weeks into living with a Braintech
+            device. We picked the quotes that surprised us most.
           </p>
         </div>
         <div className="mt-10 grid gap-5 lg:grid-cols-3">
@@ -573,70 +593,50 @@ function Pricing({
   variation: Variation;
   pricing: Pricing;
 }) {
-  const isBuyNow = variation.mode === "buyNow";
-
-  // Buy-now variation: single-path purchase, no choice toggle.
-  if (isBuyNow) {
-    return (
-      <section
-        id="waitlist"
-        className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-28"
-      >
-        <div className="grid items-start gap-12 lg:grid-cols-[1fr_1.1fr] lg:gap-16">
-          <div>
-            <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
-              Founding members
-            </div>
-            <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
-              {pricing.purchaseLabel.replace("/yr", "")} for year one. Device
-              included.
-            </h2>
-            <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
-              No waitlist, no deposit. Pay for your first year today, your
-              device ships in the next batch on{" "}
-              <strong>September 1</strong>, and your founding price stays{" "}
-              <strong>{pricing.purchaseLabel} forever</strong>. Cancel anytime
-              before renewal.
-            </p>
-            <ul className="mt-8 space-y-3 text-[var(--color-ink)]">
-              {[
-                "The braintech device, shipped to you",
-                "Unlimited rules across every screen in your home",
-                "Up to 6 kids, named and personalized",
-                "Direct line to the founders during the beta",
-                "Founding price locked in at every renewal",
-              ].map((item) => (
-                <li key={item} className="flex items-start gap-3">
-                  <Check />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-6 text-sm text-[var(--color-ink-soft)]">
-              After the next 1,000 ship, founding pricing goes away.
-            </p>
-          </div>
-          <div>
-            <WaitlistForm
-              variationId={variation.id}
-              mode="purchase"
-              pricing={pricing}
-            />
-          </div>
-        </div>
-      </section>
-    );
-  }
-
-  // Waitlist variations: interactive two-card toggle drives the right-hand
-  // form between the soft waitlist sign-up and a direct deposit checkout.
-  // Deep-link via `#lockin` to land in lock-in mode from a hero link.
+  // Phase 4: every variation uses the same single flow.
+  //   email (with 10% discount cookie) → Stripe checkout at the
+  //   discounted price.
+  // No more two-card toggle, no more buyNow branch, no waitlist queue,
+  // no $50 deposit.
   return (
     <section
       id="waitlist"
       className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-28"
     >
-      <PricingChoice variation={variation} pricing={pricing} />
+      <div className="grid items-start gap-12 lg:grid-cols-[1fr_1.1fr] lg:gap-16">
+        <div>
+          <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
+            One device, one price
+          </div>
+          <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
+            {pricing.purchaseLabel.replace("/yr", "")} for year one.
+            <br />
+            Device included.
+          </h2>
+          <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
+            Drop your email — we&apos;ll send you{" "}
+            <strong>10% off your first year</strong>. Your subscription starts
+            the day your device ships. Cancel any time before renewal.
+          </p>
+          <ul className="mt-8 space-y-3 text-[var(--color-ink)]">
+            {[
+              "The braintech device, shipped to you",
+              "Unlimited rules across every screen in your home",
+              "Up to 6 kids, named and personalised",
+              "Direct line to the team during your first month",
+              "30-day refund if it’s not for you",
+            ].map((item) => (
+              <li key={item} className="flex items-start gap-3">
+                <Check />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <HeroWaitlist variation={variation} pricing={pricing} />
+        </div>
+      </div>
     </section>
   );
 }
@@ -675,7 +675,7 @@ function FAQ() {
     },
     {
       q: "When does it ship?",
-      a: "We're taking founding reservations now. The next 1,000 devices ship on September 1. We'll email you the moment the next batch is ready, and confirm shipping before charging anything.",
+      a: "Devices ship in batches. We'll confirm your shipping window when you order, and you can refund any time before it leaves the warehouse. Your annual subscription doesn't start until your device is actually in your hands.",
     },
     {
       q: "Is this just screen time with extra steps?",

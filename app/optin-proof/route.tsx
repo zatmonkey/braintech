@@ -37,7 +37,7 @@ export async function GET() {
           }}
         >
           <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: "-0.02em" }}>
-            Join the waitlist — next 1,000 ship September 1
+            Get 10% off your Braintech device
           </div>
 
           <div style={{ marginTop: 28, display: "flex", flexDirection: "column", gap: 6 }}>
@@ -75,7 +75,7 @@ export async function GET() {
           </div>
 
           <div style={{ marginTop: 28, display: "flex", background: "#1a1714", color: "#f5f1ea", borderRadius: 10, padding: "18px 28px", fontSize: 24, fontWeight: 600, justifyContent: "center" }}>
-            Claim a founding device →
+            Get 10% off →
           </div>
         </div>
       </div>

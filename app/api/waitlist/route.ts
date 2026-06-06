@@ -3,6 +3,10 @@ import { getSql, ensureSmsSchema } from "@/app/lib/db";
 import { twilioConfigured, sendSms } from "@/app/lib/twilio";
 import { generateOpener } from "@/app/lib/conversation";
 import { sendCapiLead, readMetaCookies } from "@/app/lib/meta-capi";
+import {
+  DISCOUNT_COOKIE,
+  DISCOUNT_COUPON_ID,
+} from "@/app/lib/stripe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -241,8 +245,23 @@ export async function POST(req: Request) {
     await startSmsConversation(phone, email);
   }
 
-  return NextResponse.json({
+  // Set the discount cookie so /api/checkout applies the Stripe coupon on
+  // the visitor's purchase. The cookie value is the coupon ID itself — if
+  // we ever rotate the promotion, the old cookie naturally stops applying
+  // anything when /api/checkout's allow-list no longer contains it.
+  const res = NextResponse.json({
     ok: true,
     position: id ?? undefined,
+    discount: { coupon: DISCOUNT_COUPON_ID, percentOff: 10 },
   });
+  res.cookies.set({
+    name: DISCOUNT_COOKIE,
+    value: DISCOUNT_COUPON_ID,
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
+    sameSite: "lax",
+    httpOnly: false, // readable client-side so the UI can show the code
+    secure: true,
+  });
+  return res;
 }

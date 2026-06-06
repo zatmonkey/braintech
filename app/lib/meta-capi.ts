@@ -196,7 +196,7 @@ export async function sendCapiCancel(p: CapiCancel): Promise<void> {
           value: p.value,
           currency: p.currency.toUpperCase(),
           content_ids: [
-            p.mode === "purchase" ? "founding-membership" : "deposit-spot",
+            p.mode === "purchase" ? "year-one" : "reservation",
           ],
           content_type: "product",
           mode: p.mode,
@@ -263,7 +263,7 @@ export async function sendCapiPurchase(p: CapiPurchase): Promise<void> {
           value: p.value,
           currency: p.currency.toUpperCase(),
           content_ids: [
-            p.mode === "purchase" ? "founding-membership" : "deposit-spot",
+            p.mode === "purchase" ? "year-one" : "reservation",
           ],
           content_type: "product",
           // Custom fields surface in Meta's "Custom Data" breakdown.

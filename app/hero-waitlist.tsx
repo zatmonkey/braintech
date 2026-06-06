@@ -1,27 +1,27 @@
 "use client";
 
 /**
- * Tight inline above-the-fold capture. Two flavours, selected by the
- * variation's `mode` field:
+ * Phase-4 single-flow hero form:
+ *   1. Visitor enters email.
+ *   2. POST /api/waitlist — captures the lead AND sets the bt_discount
+ *      cookie (so Stripe applies a 10% coupon on the next step).
+ *   3. Success state shows the discount applied + a one-click button to
+ *      Stripe Checkout at the discounted price.
  *
- *   - "waitlist" (default): email + "Join the waitlist — free" button. Same
- *      submit pathway as the larger <WaitlistForm>. Success state offers
- *      the $50 lock-in deposit as the upsell.
- *
- *   - "buyNow":  email + "Buy now — $249/yr →" button. POSTs straight to
- *      /api/checkout with mode=purchase and redirects to Stripe. No
- *      waitlist queue, no deposit; the visitor came here to buy.
- *
- * The deposit-upsell card lives down in the Pricing section for the
- * waitlist flavour, so cold paid traffic can convert above the fold without
- * being asked for $50.
+ * The old waitlist / deposit / buy-now branching is gone. Every variation
+ * uses this same flow — only the headline / CTA copy varies.
  */
 
 import { useEffect, useRef, useState } from "react";
 import { sendGAEvent } from "@next/third-parties/google";
 import type { Variation } from "./variations";
-import type { Pricing } from "./lib/pricing";
+import {
+  type Pricing,
+  discountedPurchase,
+} from "./lib/pricing";
 import { stashCheckout } from "./lib/checkout-stash";
+
+const DISCOUNT_PERCENT = 10;
 
 function fbqTrack(
   event: string,
@@ -42,9 +42,6 @@ function newEventId(prefix: string): string {
 type State =
   | { kind: "idle" }
   | { kind: "submitting" }
-  // waitlist only — buyNow redirects, never lands here. Carries the email
-  // so the in-success "Lock in" button can go straight to Stripe without
-  // asking for it again.
   | { kind: "success"; email: string }
   | { kind: "checkingOut" }
   | { kind: "error"; message: string };
@@ -58,11 +55,10 @@ export function HeroWaitlist({
 }) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [email, setEmail] = useState("");
-  const isBuyNow = variation.mode === "buyNow";
-  // Auto-focus the email field on mount — removes one tap on mobile, the
-  // exact ad-click → first-keystroke friction we'd otherwise pay. Skips
-  // on iOS-Safari (focusing programmatically triggers the keyboard which
-  // is jarring on landing) by checking userAgent.
+  const discounted = discountedPurchase(pricing, DISCOUNT_PERCENT);
+
+  // Auto-focus the email field on mount. Skips iOS Safari (the keyboard
+  // popping immediately on landing is jarring).
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (typeof navigator === "undefined") return;
@@ -80,63 +76,6 @@ export function HeroWaitlist({
     }
     setState({ kind: "submitting" });
 
-    if (isBuyNow) {
-      // Skip the waitlist; go straight to a $249/yr Stripe checkout.
-      sendGAEvent("event", "buy_now_click", {
-        variation: variation.id,
-        source: "hero",
-      });
-      fbqTrack("InitiateCheckout", {
-        value: pricing.purchaseMinor / (pricing.currency === "JPY" ? 1 : 100),
-        currency: pricing.currency,
-        variation: variation.id,
-        source: "hero",
-      });
-      try {
-        const res = await fetch("/api/checkout", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: trimmed,
-            mode: "purchase",
-            variation: variation.id,
-          }),
-        });
-        const data = (await res.json().catch(() => ({}))) as {
-          url?: string;
-          session_id?: string;
-          value?: number;
-          currency?: string;
-        };
-        if (data?.url) {
-          if (data.session_id) {
-            stashCheckout({
-              sessionId: data.session_id,
-              email: trimmed,
-              mode: "purchase",
-              valueMinor: data.value ?? pricing.purchaseMinor,
-              currency: data.currency ?? pricing.currency.toLowerCase(),
-              variation: variation.id,
-              startedAt: Math.floor(Date.now() / 1000),
-            });
-          }
-          window.location.href = data.url;
-          return;
-        }
-        setState({
-          kind: "error",
-          message: "Couldn't open checkout. Try again.",
-        });
-      } catch {
-        setState({
-          kind: "error",
-          message: "Network error. Try again.",
-        });
-      }
-      return;
-    }
-
-    // Waitlist flavour — soft email capture.
     // Generate a stable event_id so the browser fbq Lead and the server-side
     // CAPI Lead from /api/waitlist dedupe to one conversion in Meta.
     const eventId = newEventId("wl");
@@ -169,14 +108,14 @@ export function HeroWaitlist({
         });
         return;
       }
-      sendGAEvent("event", "waitlist_submit", {
+      sendGAEvent("event", "discount_claimed", {
         variation: variation.id,
         source: "hero",
       });
       sendGAEvent("event", "conversion", { variation: variation.id });
       fbqTrack(
         "Lead",
-        { content_name: "waitlist", source: "hero", variation: variation.id },
+        { content_name: "discount", source: "hero", variation: variation.id },
         { eventID: eventId },
       );
       setState({ kind: "success", email: trimmed });
@@ -193,32 +132,27 @@ export function HeroWaitlist({
     }
   }
 
-  // After a successful waitlist submission we hand the visitor a one-click
-  // path to Stripe — using the email they just gave us, so they don't have
-  // to re-enter it. Skipping the second-form friction is the whole point of
-  // the success-state CTA.
-  async function lockInWithCapturedEmail() {
+  // Success-state CTA: opens Stripe checkout pre-filled with the email
+  // the visitor just gave us, with the discount cookie already set so the
+  // coupon applies server-side.
+  async function orderWithCapturedEmail() {
     if (state.kind !== "success") return;
     const capturedEmail = state.email;
     setState({ kind: "checkingOut" });
-    sendGAEvent("event", "hero_lockin_click", { variation: variation.id });
-    fbqTrack(
-      "InitiateCheckout",
-      {
-        value: pricing.depositMinor / (pricing.currency === "JPY" ? 1 : 100),
-        currency: pricing.currency,
-        variation: variation.id,
-        source: "hero-success",
-        mode: "deposit",
-      },
-    );
+    sendGAEvent("event", "hero_order_click", { variation: variation.id });
+    fbqTrack("InitiateCheckout", {
+      value: discounted.minor / (pricing.currency === "JPY" ? 1 : 100),
+      currency: pricing.currency,
+      variation: variation.id,
+      source: "hero-success",
+    });
     try {
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: capturedEmail,
-          mode: "deposit",
+          mode: "purchase",
           variation: variation.id,
         }),
       });
@@ -233,8 +167,8 @@ export function HeroWaitlist({
           stashCheckout({
             sessionId: data.session_id,
             email: capturedEmail,
-            mode: "deposit",
-            valueMinor: data.value ?? pricing.depositMinor,
+            mode: "purchase",
+            valueMinor: data.value ?? discounted.minor,
             currency: data.currency ?? pricing.currency.toLowerCase(),
             variation: variation.id,
             startedAt: Math.floor(Date.now() / 1000),
@@ -256,7 +190,6 @@ export function HeroWaitlist({
   }
 
   if (state.kind === "success" || state.kind === "checkingOut") {
-    // buyNow never reaches this — it window.location's to Stripe.
     const checkingOut = state.kind === "checkingOut";
     return (
       <div className="mt-8 max-w-md rounded-2xl border border-[var(--color-rule)] bg-white p-5">
@@ -272,42 +205,38 @@ export function HeroWaitlist({
           </span>
           <div>
             <p className="font-medium text-[var(--color-ink)]">
-              You&apos;re on the waitlist.
+              Your 10% off is ready.
             </p>
             <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-              The waitlist is free but unordered — we email when the first
-              batch ships. Want a guaranteed device?
+              <span className="line-through opacity-60">
+                {pricing.purchaseLabel}
+              </span>{" "}
+              <strong className="text-[var(--color-ink)]">
+                {discounted.label}
+              </strong>{" "}
+              — applied at checkout. We&apos;ve also emailed it to you.
             </p>
           </div>
         </div>
         <button
           type="button"
-          onClick={lockInWithCapturedEmail}
+          onClick={orderWithCapturedEmail}
           disabled={checkingOut}
-          data-cta="hero-success-lockin"
+          data-cta="hero-success-order"
           data-variation={variation.id}
           className="mt-4 inline-flex w-full items-center justify-center rounded-lg bg-[var(--color-accent)] px-5 py-3 text-base font-medium text-white transition hover:brightness-95 disabled:opacity-60"
         >
           {checkingOut
             ? "Opening checkout…"
-            : `Lock in your device — ${pricing.depositLabel} deposit →`}
+            : `Order yours — ${discounted.label} →`}
         </button>
         <p className="mt-2 text-center text-xs text-[var(--color-ink-soft)]">
-          {pricing.depositLabel} refundable any time before your device ships.
-          Skips the queue. Credited toward your {pricing.purchaseLabel}{" "}
-          founding membership.
+          Your subscription starts the day your device ships. 30-day refund,
+          cancel any time.
         </p>
       </div>
     );
   }
-
-  const buttonLabel = isBuyNow
-    ? state.kind === "submitting"
-      ? "Opening checkout…"
-      : `Buy now — ${pricing.purchaseLabel} →`
-    : state.kind === "submitting"
-      ? "Joining…"
-      : variation.cta;
 
   return (
     <form onSubmit={onSubmit} className="mt-8 max-w-md">
@@ -328,11 +257,11 @@ export function HeroWaitlist({
         <button
           type="submit"
           disabled={state.kind === "submitting"}
-          data-cta={isBuyNow ? "hero-buy-now" : "hero-waitlist"}
+          data-cta="hero-discount"
           data-variation={variation.id}
           className="inline-flex items-center justify-center whitespace-nowrap rounded-lg bg-[var(--color-ink)] px-5 py-3.5 text-base font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)] disabled:opacity-60"
         >
-          {buttonLabel}
+          {state.kind === "submitting" ? "Sending…" : variation.cta}
         </button>
       </div>
       {state.kind === "error" ? (
@@ -341,25 +270,8 @@ export function HeroWaitlist({
         </p>
       ) : (
         <p className="mt-2.5 text-xs text-[var(--color-ink-soft)]">
-          {isBuyNow ? (
-            <>
-              Device included · ships Sept 1 · cancel any time.{" "}
-              <a
-                href="#how-it-works"
-                className="underline-offset-4 hover:text-[var(--color-ink)] hover:underline"
-              >
-                See how it works ↓
-              </a>
-            </>
-          ) : (
-            // Deliberately no price reference above the fold — cold paid
-            // traffic that sees "$50" before any value is built bounces.
-            // The deposit upsell lives below in the Pricing section.
-            <>
-              No charge today. We&apos;ll email you when the next batch is
-              ready.
-            </>
-          )}
+          10% off your {pricing.purchaseLabel} order. Subscription starts the
+          day your device ships. 30-day refund.
         </p>
       )}
     </form>
