@@ -172,7 +172,7 @@ function TrustStrip() {
         <Dot /> No app to install
       </li>
       <li className="inline-flex items-center gap-1.5">
-        <Dot /> Built by parents, in Australia
+        <Dot /> Cancel any time
       </li>
     </ul>
   );

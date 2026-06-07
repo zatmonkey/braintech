@@ -24,6 +24,10 @@ import { sendGAEvent } from "@next/third-parties/google";
 
 const SESSION_KEY = "bt_exit_intent_seen";
 const PASSIVE_TIMEOUT_MS = 30_000;
+// Don't fire the desktop mouseleave-top for the first N seconds. Without
+// this, just landing on the page and reaching for the URL bar or tab
+// strip fires the popup before the visitor has read anything.
+const MOUSELEAVE_GRACE_MS = 15_000;
 
 function fbqTrack(
   event: string,
@@ -61,7 +65,18 @@ export function ExitIntent() {
   const armedRef = useRef(false);
 
   const open = useCallback(() => {
-    setState((s) => (s.kind === "hidden" ? { kind: "open" } : s));
+    setState((s) => {
+      if (s.kind !== "hidden") return s;
+      // Lock-in the sessionStorage immediately on first open. Without this,
+      // a stray re-render / quick-dismiss / accidental fire could re-open
+      // later in the same session. Once it's been shown once, it's done.
+      try {
+        sessionStorage.setItem(SESSION_KEY, "shown");
+      } catch {
+        /* private mode */
+      }
+      return { kind: "open" };
+    });
   }, []);
 
   const dismiss = useCallback(() => {
@@ -82,39 +97,25 @@ export function ExitIntent() {
       /* ignore */
     }
 
+    // Desktop only — mobile passive trigger was firing on engaged
+    // visitors mid-read. Until we get a better mobile heuristic, only
+    // desktop visitors see this. Mobile bouncers we accept losing.
     const hasHover = window.matchMedia("(hover: hover)").matches;
-    let passiveTimer: ReturnType<typeof setTimeout> | null = null;
-    let scrolled = false;
+    if (!hasHover) return;
 
+    const startedAt = performance.now();
     const onMouseLeave = (e: MouseEvent) => {
-      // clientY <= 0 means cursor crossed the top of the viewport.
-      if (e.clientY <= 0) open();
+      if (e.clientY > 0) return; // not the top edge
+      if (performance.now() - startedAt < MOUSELEAVE_GRACE_MS) return; // too early
+      open();
     };
-    const resetPassive = () => {
-      scrolled = true;
-      if (passiveTimer) clearTimeout(passiveTimer);
-      passiveTimer = setTimeout(open, PASSIVE_TIMEOUT_MS);
-    };
-
-    if (hasHover) {
-      document.addEventListener("mouseleave", onMouseLeave);
-    } else {
-      // Mobile: arm a passive timer that's reset by interaction. Fires
-      // PASSIVE_TIMEOUT_MS after the last interaction (so an engaged
-      // visitor never sees it; a passive scroller gets one nudge).
-      passiveTimer = setTimeout(open, PASSIVE_TIMEOUT_MS);
-      window.addEventListener("scroll", resetPassive, { passive: true });
-      window.addEventListener("touchstart", resetPassive, { passive: true });
-    }
+    document.addEventListener("mouseleave", onMouseLeave);
 
     return () => {
       document.removeEventListener("mouseleave", onMouseLeave);
-      window.removeEventListener("scroll", resetPassive);
-      window.removeEventListener("touchstart", resetPassive);
-      if (passiveTimer) clearTimeout(passiveTimer);
-      // Re-arm-safe for hot reload / strict mode.
-      armedRef.current = false;
-      void scrolled; // keep the eslint-unused-vars happy
+      // Don't reset armedRef on cleanup — that would let it re-fire if React
+      // re-mounts the component (which Strict Mode does in dev). Once a
+      // session has armed the listeners, leave it armed.
     };
   }, [open]);
 

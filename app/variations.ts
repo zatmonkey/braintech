@@ -69,7 +69,7 @@ export const VARIATIONS: Variation[] = [
     // This is the variation paid social traffic should land on. proxy.ts
     // pins fbclid visitors here.
     id: "5",
-    eyebrow: "Built by parents, in Australia",
+    eyebrow: "Built by parents, for parents",
     headlineTop: "Screen time without the fight.",
     headlineAccent: "Peace of mind, by text.",
     subhead:

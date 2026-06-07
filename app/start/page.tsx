@@ -128,7 +128,7 @@ export default async function Start({
           </li>
           <li className="inline-flex items-center gap-2">
             <span aria-hidden className="size-1.5 rounded-full bg-[var(--color-accent)]" />
-            Built by parents, in Australia
+            Cancel any time
           </li>
         </ul>
 
