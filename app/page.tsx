@@ -8,8 +8,18 @@ import { CurrencyPicker } from "./currency-picker";
 import { VariationTracker } from "./variation-tracker";
 import { CancelTracker } from "./cancel-tracker";
 import { ExitIntent } from "./exit-intent";
+import { DemoCTAClient } from "./demo-cta";
 import { getVariation, type Variation } from "./variations";
-import { pricingForCountry, type Pricing } from "./lib/pricing";
+import {
+  pricingForCountry,
+  type Pricing,
+  discountedPurchase,
+} from "./lib/pricing";
+import {
+  foundingScarcity,
+  FOUNDING_BATCH_N,
+  FOUNDING_BATCH_SHIPS,
+} from "./lib/founding";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -49,6 +59,7 @@ export default async function Home({
       <Nav variation={variation} />
       <Hero variation={variation} pricing={pricing} />
       <Problem />
+      <FounderSection />
       <HowItWorks />
       <ContentPartners />
       <Examples />
@@ -73,15 +84,13 @@ function Nav({ variation }: { variation: Variation }) {
         <span className="font-semibold tracking-tight">braintech</span>
       </div>
       <div className="flex items-center gap-5 sm:gap-6">
-        {/* Sign-in lives in the footer now (paid-traffic visitors aren't
-            members yet — fewer competing CTAs above the fold). */}
         <a
           href="#waitlist"
           data-cta="nav"
           data-variation={variation.id}
-          className="rounded-full border border-[var(--color-ink)] px-4 py-1.5 text-sm font-medium text-[var(--color-ink)] transition hover:bg-[var(--color-ink)] hover:text-[var(--color-cream)]"
+          className="rounded-full bg-[var(--color-ink)] px-4 py-1.5 text-sm font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)]"
         >
-          Join waitlist
+          Get 10% off
         </a>
       </div>
     </nav>
@@ -114,7 +123,7 @@ function Hero({
         <div className="fade-up">
           <div className="inline-flex items-center gap-2 rounded-full border border-[var(--color-rule)] bg-white/60 px-3 py-1 text-xs font-medium text-[var(--color-ink-soft)]">
             <span className="size-1.5 rounded-full bg-[var(--color-accent)] pulse-dot" />
-            {variation.eyebrow}
+            {foundingScarcity()}
           </div>
           <h1 className="serif mt-6 text-[44px] leading-[1.02] tracking-[-0.02em] sm:text-6xl lg:text-[80px]">
             {variation.headlineTop}
@@ -126,10 +135,8 @@ function Hero({
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-[var(--color-ink-soft)] sm:text-xl">
             {variation.subhead}
           </p>
-          {/* Phase-4 single-flow capture: email → 10% off cookie → Stripe
-              checkout. Same component for every variation; the copy varies
-              only in the headline / subhead / CTA from variations.ts. */}
           <HeroWaitlist variation={variation} pricing={pricing} />
+          <DemoCTA />
           <TrustStrip />
         </div>
 
@@ -175,6 +182,56 @@ function TrustStrip() {
         <Dot /> Cancel any time
       </li>
     </ul>
+  );
+}
+
+function DemoCTA() {
+  return <DemoCTAClient />;
+}
+
+function FounderSection() {
+  return (
+    <section className="border-y border-[var(--color-rule)] bg-white">
+      <div className="mx-auto grid w-full max-w-5xl gap-10 px-6 py-20 sm:px-10 sm:py-24 lg:grid-cols-[1fr_1.4fr] lg:gap-12">
+        {/* Photo / video placeholder. Replace with a 60-90s founder reel
+            once recorded; for now a clean avatar card. */}
+        <div className="relative mx-auto aspect-square w-full max-w-xs overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]">
+          <div className="absolute inset-0 grid place-items-center">
+            <div className="grid size-32 place-items-center rounded-full bg-[var(--color-ink)] text-5xl font-semibold text-[var(--color-cream)]">
+              A
+            </div>
+          </div>
+          <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-white/90 px-3 py-2 text-center text-xs text-[var(--color-ink-soft)] backdrop-blur">
+            Founder note · video coming soon
+          </div>
+        </div>
+        <div>
+          <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
+            From the founder
+          </div>
+          <h2 className="serif mt-3 text-3xl leading-[1.1] tracking-[-0.02em] sm:text-4xl">
+            I built Braintech because nothing else worked at my house.
+          </h2>
+          <p className="mt-5 text-lg leading-relaxed text-[var(--color-ink-soft)]">
+            I&rsquo;m a parent and a tech person, in San Francisco. After
+            losing three Sunday afternoons in a row to the same screen-time
+            fight, I went looking for a fix and couldn&rsquo;t find one. Apps
+            kids delete. Routers that only block. Subscriptions that punish
+            instead of teach.
+          </p>
+          <p className="mt-4 text-lg leading-relaxed text-[var(--color-ink-soft)]">
+            So I built the thing I wanted: a little box on the home Wi-Fi that
+            listens to a text. Network-level, because then it works on every
+            screen and there&rsquo;s nothing on the kid&rsquo;s phone to delete.
+            Earn-to-unlock, because saying no over and over is exhausting and
+            saying &ldquo;yes, after this&rdquo; just&hellip; works.
+          </p>
+          <p className="mt-6 text-sm font-medium text-[var(--color-ink)]">
+            — Alex, founder
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -506,29 +563,22 @@ function Examples() {
 }
 
 function Testimonials() {
-  // Real beta-parent voices. Sarah Austin leads — US mom, our target
-  // audience for paid traffic. Others are voiced as specific moments,
-  // parent-felt, ending on a feeling.
+  // Beta-family quotes. Honestly framed as beta (not "thousands of parents")
+  // because our audience is skeptical and inflated social proof reads as
+  // a scam signal. Two, not three — fewer claims, more weight per claim.
   const quotes = [
     {
       body:
         "Bedtime used to be a 20-minute negotiation. Now I text Bri the rule once, and it just… runs. First quiet evening I&rsquo;ve had in years.",
       who: "Sarah W.",
-      meta: "Mom of two · Austin, TX",
+      meta: "Beta family · 6 weeks in",
       initial: "S",
-    },
-    {
-      body:
-        "I texted &ldquo;no Roblox until you read 20 minutes&rdquo; once. It just worked. First night was rough. By week two, the fight was gone.",
-      who: "Priya S.",
-      meta: "Mom of one · Seattle, WA",
-      initial: "P",
     },
     {
       body:
         "Day 30, he told us about black holes at dinner. Then a Spanish word he taught his sister. I didn&rsquo;t even know he&rsquo;d been learning.",
       who: "Marcus R.",
-      meta: "Dad of two · Nashville, TN",
+      meta: "Beta family · 30 days in",
       initial: "M",
     },
   ];
@@ -538,17 +588,18 @@ function Testimonials() {
       <div className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-24">
         <div className="max-w-2xl">
           <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
-            From real parents
+            From our beta families
           </div>
           <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
-            What families are saying.
+            Early notes from week-six homes.
           </h2>
           <p className="mt-4 text-lg text-[var(--color-ink-soft)]">
-            Real parents, real homes, weeks into living with a Braintech
-            device. We picked the quotes that surprised us most.
+            Two real families, a few weeks into using a Braintech device. We
+            picked the quotes that surprised us most. Not a sample of
+            thousands — yet.
           </p>
         </div>
-        <div className="mt-10 grid gap-5 lg:grid-cols-3">
+        <div className="mt-10 grid gap-5 lg:grid-cols-2">
           {quotes.map((q) => (
             <figure
               key={q.who}
@@ -593,11 +644,7 @@ function Pricing({
   variation: Variation;
   pricing: Pricing;
 }) {
-  // Phase 4: every variation uses the same single flow.
-  //   email (with 10% discount cookie) → Stripe checkout at the
-  //   discounted price.
-  // No more two-card toggle, no more buyNow branch, no waitlist queue,
-  // no $50 deposit.
+  const discounted = discountedPurchase(pricing, 10);
   return (
     <section
       id="waitlist"
@@ -606,7 +653,7 @@ function Pricing({
       <div className="grid items-start gap-12 lg:grid-cols-[1fr_1.1fr] lg:gap-16">
         <div>
           <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
-            One device, one price
+            Founding pricing
           </div>
           <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
             {pricing.purchaseLabel.replace("/yr", "")} for year one.
@@ -614,9 +661,14 @@ function Pricing({
             Device included.
           </h2>
           <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
-            Drop your email — we&apos;ll send you{" "}
-            <strong>10% off your first year</strong>. Your subscription starts
+            Drop your email — we&rsquo;ll send you{" "}
+            <strong>10% off your founding spot</strong>{" "}
+            ({pricing.purchaseLabel.replace("/yr", "")} →{" "}
+            {discounted.label.replace("/yr", "")}). Your subscription starts
             the day your device ships. Cancel any time before renewal.
+          </p>
+          <p className="mt-4 text-sm font-medium text-[var(--color-accent)]">
+            {foundingScarcity()}
           </p>
           <ul className="mt-8 space-y-3 text-[var(--color-ink)]">
             {[
@@ -632,6 +684,14 @@ function Pricing({
               </li>
             ))}
           </ul>
+          {/* Honest price-anchoring against the two products our audience
+              is already comparing us to. */}
+          <p className="mt-7 rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)] p-5 text-sm leading-relaxed text-[var(--color-ink)]">
+            <strong>Bark Home blocks.</strong>{" "}
+            <strong>Circle limits.</strong> Braintech is the only one that
+            turns screen time into learning — and the only one with{" "}
+            <strong>nothing on their phone to delete</strong>.
+          </p>
         </div>
         <div>
           <HeroWaitlist variation={variation} pricing={pricing} />
@@ -674,8 +734,12 @@ function FAQ() {
       a: "Whatever you text us. A TED talk + quiz. A Duolingo streak. A Khan Academy problem. Reading 20 minutes and summarizing it. We grade the engagement, not just the time.",
     },
     {
-      q: "When does it ship?",
-      a: "Devices ship in batches. We'll confirm your shipping window when you order, and you can refund any time before it leaves the warehouse. Your annual subscription doesn't start until your device is actually in your hands.",
+      q: "What exactly happens when I order?",
+      a: `Three things. (1) You pay $249 for year one — or $224 if you grabbed the 10% off code from your inbox. (2) Your device ships in founding batch #${FOUNDING_BATCH_N}, in ${FOUNDING_BATCH_SHIPS}. (3) Your annual subscription starts the day your device is in your hands — not before. Full refund any time before it ships, and 30 days after.`,
+    },
+    {
+      q: "What do you do with my family's data?",
+      a: "We process your rules so Braintech can enforce them — nothing else. We don't sell browsing data. We don't run ads. Your kids' data is never used for marketing. Read the full privacy policy →",
     },
     {
       q: "Is this just screen time with extra steps?",

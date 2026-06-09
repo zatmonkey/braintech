@@ -65,16 +65,17 @@ export const VARIATIONS: Variation[] = [
     cta: "Get 10% off →",
   },
   {
-    // Mirrors the IG ad copy ("Simplify parental controls / peace of mind").
-    // This is the variation paid social traffic should land on. proxy.ts
-    // pins fbclid visitors here.
+    // Continues the UGC ad story: "For two years, I was losing him to a
+    // screen..." → "Stop losing them to the screen." This is the variation
+    // paid social traffic should land on. proxy.ts pins fbclid visitors
+    // here AND /start hard-pins to it.
     id: "5",
-    eyebrow: "Built by parents, for parents",
-    headlineTop: "Screen time without the fight.",
-    headlineAccent: "Peace of mind, by text.",
+    eyebrow: "For parents who'd rather not fight",
+    headlineTop: "Stop losing them",
+    headlineAccent: "to the screen.",
     subhead:
-      "Plug it in. Text it the rules. Get dinner back. One little box looks after every screen in your home — no apps to install, no dashboards to mind. Drop your email and we'll send you 10% off your device.",
-    cta: "Get 10% off →",
+      "One small box. Text it your rules. Your kid earns TikTok, YouTube and Roblox by learning — a Khan Academy lesson, a TED talk, 20 minutes of reading. No app on their phone to delete.",
+    cta: "Get 10% off your founding spot →",
   },
   {
     id: "6",

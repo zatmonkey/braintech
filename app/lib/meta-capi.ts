@@ -90,6 +90,9 @@ export type CapiLead = {
   // Optional content_name lets you split waitlist vs. demo vs. anything else
   // in Meta reports. Defaults to "waitlist".
   contentName?: string;
+  // UTM tags from the lead's URL at capture time. Forwarded into CAPI
+  // custom_data so Meta Events Manager can break leads down by ad creative.
+  utms?: Record<string, string>;
 };
 
 export async function sendCapiLead(p: CapiLead): Promise<void> {
@@ -120,6 +123,7 @@ export async function sendCapiLead(p: CapiLead): Promise<void> {
           content_name: p.contentName ?? "waitlist",
           source: p.source,
           variation: p.variation ?? "unknown",
+          ...(p.utms ?? {}),
         },
       },
     ],

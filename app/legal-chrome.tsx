@@ -31,9 +31,9 @@ export function LegalChrome({
         </Link>
         <Link
           href="/#waitlist"
-          className="rounded-full border border-[var(--color-ink)] px-4 py-1.5 text-sm font-medium transition hover:bg-[var(--color-ink)] hover:text-[var(--color-cream)]"
+          className="rounded-full bg-[var(--color-ink)] px-4 py-1.5 text-sm font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)]"
         >
-          Join waitlist
+          Get 10% off
         </Link>
       </nav>
 

@@ -1,15 +1,22 @@
 "use client";
 
 /**
- * Phase-4 single-flow hero form:
- *   1. Visitor enters email.
- *   2. POST /api/waitlist — captures the lead AND sets the bt_discount
- *      cookie (so Stripe applies a 10% coupon on the next step).
- *   3. Success state shows the discount applied + a one-click button to
- *      Stripe Checkout at the discounted price.
+ * Single-flow hero form. Two presentation modes:
  *
- * The old waitlist / deposit / buy-now branching is gone. Every variation
- * uses this same flow — only the headline / CTA copy varies.
+ *   pageContext="home"   → success swaps to "Your 10% off is ready" with a
+ *                          one-click Stripe-checkout button (existing buy
+ *                          flow on /).
+ *   pageContext="start"  → success swaps to a calm "Check your inbox" block
+ *                          + a Try-the-live-demo CTA + the founding-batch
+ *                          ship line. The /start landing page is optimized
+ *                          for Lead conversion; we don't push to Stripe on
+ *                          the first commit.
+ *
+ * Tracking: fbq Lead fires ONLY on successful submit, with
+ *  - advanced matching (hashed em re-init of the pixel)
+ *  - eventID matched to the server-side CAPI fire from /api/waitlist
+ *  - UTM params from the URL threaded through the lead payload so the
+ *    backend can attribute leads per ad creative.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -20,17 +27,14 @@ import {
   discountedPurchase,
 } from "./lib/pricing";
 import { stashCheckout } from "./lib/checkout-stash";
+import {
+  readUtms,
+  setAdvancedMatching,
+  trackEvent,
+} from "./lib/meta-pixel";
+import { foundingShipMonth } from "./lib/founding";
 
 const DISCOUNT_PERCENT = 10;
-
-function fbqTrack(
-  event: string,
-  params?: Record<string, unknown>,
-  options?: { eventID?: string },
-) {
-  const w = window as typeof window & { fbq?: (...a: unknown[]) => void };
-  if (typeof w.fbq === "function") w.fbq("track", event, params, options);
-}
 
 function newEventId(prefix: string): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -49,9 +53,11 @@ type State =
 export function HeroWaitlist({
   variation,
   pricing,
+  pageContext = "home",
 }: {
   variation: Variation;
   pricing: Pricing;
+  pageContext?: "home" | "start";
 }) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const [email, setEmail] = useState("");
@@ -79,6 +85,7 @@ export function HeroWaitlist({
     // Generate a stable event_id so the browser fbq Lead and the server-side
     // CAPI Lead from /api/waitlist dedupe to one conversion in Meta.
     const eventId = newEventId("wl");
+    const utms = readUtms();
     const payload = {
       email: trimmed,
       variation: variation.id,
@@ -87,6 +94,7 @@ export function HeroWaitlist({
           ? window.location.pathname + window.location.search + "#hero"
           : "/#hero",
       eventId,
+      utms,
     };
 
     try {
@@ -111,11 +119,21 @@ export function HeroWaitlist({
       sendGAEvent("event", "discount_claimed", {
         variation: variation.id,
         source: "hero",
+        ...utms,
       });
       sendGAEvent("event", "conversion", { variation: variation.id });
-      fbqTrack(
+      // Advanced matching: re-init the pixel with the hashed email so the
+      // Lead event carries user_data Meta can match to a user even if
+      // cookies are blocked. Awaited so the matching is set before track().
+      await setAdvancedMatching({ email: trimmed });
+      trackEvent(
         "Lead",
-        { content_name: "discount", source: "hero", variation: variation.id },
+        {
+          content_name: "discount",
+          source: "hero",
+          variation: variation.id,
+          ...utms,
+        },
         { eventID: eventId },
       );
       setState({ kind: "success", email: trimmed });
@@ -132,15 +150,14 @@ export function HeroWaitlist({
     }
   }
 
-  // Success-state CTA: opens Stripe checkout pre-filled with the email
-  // the visitor just gave us, with the discount cookie already set so the
-  // coupon applies server-side.
+  // Success-state CTA (home only): opens Stripe checkout pre-filled with
+  // the email we just captured.
   async function orderWithCapturedEmail() {
     if (state.kind !== "success") return;
     const capturedEmail = state.email;
     setState({ kind: "checkingOut" });
     sendGAEvent("event", "hero_order_click", { variation: variation.id });
-    fbqTrack("InitiateCheckout", {
+    trackEvent("InitiateCheckout", {
       value: discounted.minor / (pricing.currency === "JPY" ? 1 : 100),
       currency: pricing.currency,
       variation: variation.id,
@@ -189,8 +206,57 @@ export function HeroWaitlist({
     }
   }
 
+  function openDemo() {
+    sendGAEvent("event", "demo_open_from_hero_success", {
+      variation: variation.id,
+    });
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("braintech:open-demo"));
+    }
+  }
+
   if (state.kind === "success" || state.kind === "checkingOut") {
     const checkingOut = state.kind === "checkingOut";
+    // /start: calm "check your inbox" confirmation + demo CTA + ship line.
+    if (pageContext === "start") {
+      return (
+        <div className="mt-8 max-w-md rounded-2xl border border-[var(--color-rule)] bg-white p-6">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-[var(--color-accent)]/15 text-[var(--color-accent)]">
+              <svg viewBox="0 0 20 20" fill="currentColor" className="size-4">
+                <path
+                  fillRule="evenodd"
+                  d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0L3.3 9.7a1 1 0 1 1 1.4-1.4L8.5 12l6.8-6.7a1 1 0 0 1 1.4 0Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </span>
+            <div>
+              <p className="serif text-xl leading-snug text-[var(--color-ink)]">
+                Check your inbox — your 10% code is on the way.
+              </p>
+              <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
+                {foundingShipMonth()}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={openDemo}
+            data-cta="hero-success-demo"
+            data-variation={variation.id}
+            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-accent)] px-5 py-3 text-base font-medium text-white transition hover:brightness-95"
+          >
+            ▶ See exactly how it works — try the live demo
+          </button>
+          <p className="mt-3 text-center text-xs text-[var(--color-ink-soft)]">
+            Text Bri a real screen-time rule. Watch what Braintech would do.
+          </p>
+        </div>
+      );
+    }
+
+    // / (home): the Stripe upsell.
     return (
       <div className="mt-8 max-w-md rounded-2xl border border-[var(--color-rule)] bg-white p-5">
         <div className="flex items-start gap-3">
@@ -241,8 +307,7 @@ export function HeroWaitlist({
   return (
     <div className="mt-8 max-w-md">
       {/* Value-prop chip above the form: the discounted price has to land
-          BEFORE we ask for an email. Earlier version only revealed the
-          savings in the success state — by then most visitors had bounced. */}
+          BEFORE we ask for an email. */}
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="text-sm text-[var(--color-ink-soft)] line-through">
           {pricing.purchaseLabel}
@@ -285,8 +350,7 @@ export function HeroWaitlist({
           </p>
         ) : (
           <p className="mt-2.5 text-xs text-[var(--color-ink-soft)]">
-            Device included. Subscription starts the day your device ships.
-            30-day refund.
+            Device included · 30-day refund · cancel anytime.
           </p>
         )}
       </form>

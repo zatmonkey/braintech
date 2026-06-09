@@ -20,6 +20,9 @@ type Payload = {
   // Client-generated UUID; same id is passed to fbq("track", "Lead", …,
   // {eventID}) on the browser. Meta dedupes the pair.
   eventId?: string;
+  // UTM params from the URL at the time of capture. Forwarded into CAPI
+  // custom_data so Meta Events Manager can break leads down by ad creative.
+  utms?: Record<string, string>;
 };
 
 function normalizeEmail(raw: string) {
@@ -237,6 +240,7 @@ export async function POST(req: Request) {
       source: source || "/",
       variation: variation || null,
       contentName: "waitlist",
+      utms: body.utms,
     });
   }
 

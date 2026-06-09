@@ -62,6 +62,17 @@ export function ChatWidget() {
     if (open) setTimeout(() => inputRef.current?.focus(), 100);
   }, [open]);
 
+  // Any other component on the page can trigger the demo chat to open
+  // by dispatching a "braintech:open-demo" event on window. Used by the
+  // hero secondary CTA and the post-Lead confirmation block.
+  useEffect(() => {
+    function onOpen() {
+      setOpen(true);
+    }
+    window.addEventListener("braintech:open-demo", onOpen);
+    return () => window.removeEventListener("braintech:open-demo", onOpen);
+  }, []);
+
   async function send() {
     const text = input.trim();
     if (!text || sending) return;

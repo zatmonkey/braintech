@@ -26,20 +26,20 @@ const siteUrl =
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "Braintech — Your kid wants TikTok. Make them earn it.",
+  title: "Braintech — Stop losing them to the screen.",
   description:
-    "Text-message parental control for every screen in your house. Turn screen time into earned learning time. Founding members: $249/year, 1,000 devices.",
+    "One small box. Text it your rules. Your kid earns TikTok, YouTube and Roblox by learning. Network-level — nothing on their phone to delete. Founding price $249/yr.",
   openGraph: {
-    title: "Your kid wants TikTok. Make them earn it.",
+    title: "Stop losing them to the screen.",
     description:
-      "Text-message parental control that turns screen time into earned learning time. Founding members: $249/year.",
+      "Text-message parental control that turns screen time into earned learning time. Nothing on their phone to delete.",
     url: siteUrl,
     siteName: "Braintech",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Your kid wants TikTok. Make them earn it.",
+    title: "Stop losing them to the screen.",
     description:
       "Text-message parental control that turns screen time into earned learning time.",
   },

@@ -1,30 +1,29 @@
-// Dedicated paid-traffic landing. Stripped to ONE message + ONE action:
-// match the IG ad copy verbatim ("Simplify parental controls / peace of
-// mind") and capture an email. No nav, no chat widget, no testimonials
-// grid, no FAQ — every distraction is a bounce risk.
+// Dedicated paid-traffic landing for the Meta Leads campaign.
+// Continues the UGC ad story ("For two years, I was losing him to a
+// screen...") with a message-matched hero. ONE CTA only: email capture.
+// Trust row below the fold: founder block + beta testimonial +
+// Bark/Circle comparison table.
 //
-// Variation pinning: this page renders variation 5 unconditionally.
-// proxy.ts still tracks views into variation_views; the bt_var cookie is
-// re-pinned to 5 here so any subsequent visit to / stays consistent.
-// ?variation=N still overrides for previewing other variations on this
-// page during dev.
+// Variation pinning: this page renders variation 5 unconditionally and
+// re-pins bt_var=5 via proxy.ts. ?variation=N still allows dev preview.
 
 import { cookies, headers } from "next/headers";
 import { HeroWaitlist } from "../hero-waitlist";
-import { FoundingToasts } from "../founding-stats";
 import { VariationTracker } from "../variation-tracker";
 import { CancelTracker } from "../cancel-tracker";
 import { ExitIntent } from "../exit-intent";
+import { ChatWidget } from "../chat-widget";
 import { getVariation } from "../variations";
-import { pricingForCountry } from "../lib/pricing";
+import { pricingForCountry, discountedPurchase } from "../lib/pricing";
+import { foundingScarcity } from "../lib/founding";
 import type { Metadata } from "next";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export const metadata: Metadata = {
-  title: "Simplify parental controls — Braintech",
+  title: "Stop losing them to the screen — Braintech",
   description:
-    "Manage every screen in your home with simple text commands. Drop your email — we'll let you know when the next batch is ready.",
+    "One small box. Text it your rules. Your kid earns TikTok, YouTube and Roblox by learning. Drop your email — save 10% on your founding spot.",
   // Paid landing pages should not be indexed; they only exist for the ad.
   robots: { index: false, follow: false },
 };
@@ -35,7 +34,6 @@ export default async function Start({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
-  // Always render variation 5 by default; allow override for dev preview.
   const variationKey = params.variation ?? "5";
   const variation = getVariation(variationKey);
 
@@ -50,6 +48,7 @@ export default async function Start({
     hdrs.get("x-vercel-ip-country") ??
     "US";
   const pricing = pricingForCountry(country);
+  const discounted = discountedPurchase(pricing, 10);
 
   return (
     <main
@@ -57,14 +56,13 @@ export default async function Start({
       data-variation={variation.id}
       data-page="start"
     >
-      {/* Minimal header — just the logo so visitors trust the brand exists
-          without nav competing for attention. */}
+      {/* Minimal header — logo only; no nav competing with the form. */}
       <header className="mx-auto flex w-full max-w-3xl items-center justify-between px-6 py-6">
-        <a href="/" className="flex items-center gap-2">
+        <a href="/" className="flex items-center gap-2" aria-label="Braintech">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/logo.png"
-            alt="Braintech"
+            alt=""
             width={28}
             height={28}
             className="size-7 rounded-md"
@@ -73,12 +71,14 @@ export default async function Start({
         </a>
       </header>
 
-      <section className="mx-auto w-full max-w-3xl px-6 pb-16 sm:pb-24">
+      {/* HERO. Single column on mobile; form above the fold on a 390px
+          viewport (image pushed below). */}
+      <section className="mx-auto w-full max-w-3xl px-6 pb-12 sm:pb-16">
         <div className="grid items-start gap-10 lg:grid-cols-[1.1fr_1fr] lg:gap-14">
           <div className="fade-up">
             <div className="inline-flex items-center gap-2 rounded-full border border-[var(--color-rule)] bg-white/60 px-3 py-1 text-xs font-medium text-[var(--color-ink-soft)]">
               <span className="size-1.5 rounded-full bg-[var(--color-accent)] pulse-dot" />
-              {variation.eyebrow}
+              {foundingScarcity()}
             </div>
             <h1 className="serif mt-6 text-[40px] leading-[1.02] tracking-[-0.02em] sm:text-6xl">
               {variation.headlineTop}
@@ -90,77 +90,47 @@ export default async function Start({
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-[var(--color-ink-soft)]">
               {variation.subhead}
             </p>
-            <HeroWaitlist variation={variation} pricing={pricing} />
+            <HeroWaitlist
+              variation={variation}
+              pricing={pricing}
+              pageContext="start"
+            />
           </div>
 
-          {/* Product photo — anchors trust without pulling the visitor
-              into a long scrolling story. */}
+          {/* Hero photo lazy-loaded below the fold on mobile. Reserved
+              aspect-ratio box prevents CLS. */}
           <div
             className="relative mx-auto w-full max-w-sm fade-up"
             style={{ animationDelay: "120ms" }}
           >
             <div className="absolute -inset-6 -z-10 rounded-[3rem] bg-gradient-to-br from-[var(--color-accent)]/15 via-transparent to-[var(--color-ink)]/5 blur-2xl" />
-            <div className="overflow-hidden rounded-[2rem] border border-[var(--color-rule)] bg-white shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)]">
+            <div
+              className="overflow-hidden rounded-[2rem] border border-[var(--color-rule)] bg-white shadow-[0_20px_60px_-20px_rgba(0,0,0,0.25)]"
+              style={{ aspectRatio: "16/9" }}
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/hero-mum-kitchen.webp"
                 alt="A parent in a warm sunlit kitchen smiling as she reads her phone; her child reads a book in the soft-focus background; the Braintech device sits on a shelf behind her with a small glowing orange brain icon."
                 width={1600}
                 height={904}
-                loading="eager"
-                fetchPriority="high"
-                className="block h-full w-full"
+                loading="lazy"
+                decoding="async"
+                className="block h-full w-full object-cover"
               />
             </div>
           </div>
         </div>
+      </section>
 
-        {/* Trust strip — calms the techy intimidation of cold paid traffic
-            before they scroll past the form. */}
-        <ul className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-[var(--color-ink-soft)]">
-          <li className="inline-flex items-center gap-2">
-            <span aria-hidden className="size-1.5 rounded-full bg-[var(--color-accent)]" />
-            30-day refund
-          </li>
-          <li className="inline-flex items-center gap-2">
-            <span aria-hidden className="size-1.5 rounded-full bg-[var(--color-accent)]" />
-            No app for your kid to delete
-          </li>
-          <li className="inline-flex items-center gap-2">
-            <span aria-hidden className="size-1.5 rounded-full bg-[var(--color-accent)]" />
-            Cancel any time
-          </li>
-        </ul>
-
-        {/* One testimonial — US mom, our paid-traffic audience. */}
-        <figure className="mt-10 rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)] p-6 sm:p-7">
-          <svg
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            aria-hidden
-            className="size-5 text-[var(--color-accent)]/70"
-          >
-            <path d="M7 4c-2 0-3.5 1.6-3.5 3.7v8.6c0 .9.7 1.7 1.7 1.7H10c.9 0 1.7-.7 1.7-1.7v-4.6c0-1-.7-1.7-1.7-1.7H7C7 6.9 8.2 6 9.4 6V4H7Zm10 0c-2 0-3.5 1.6-3.5 3.7v8.6c0 .9.7 1.7 1.7 1.7H20c.9 0 1.7-.7 1.7-1.7v-4.6c0-1-.7-1.7-1.7-1.7h-3c0-3.1 1.2-4 2.4-4V4h-2.4Z" />
-          </svg>
-          <blockquote className="mt-3 text-[17px] leading-relaxed text-[var(--color-ink)]">
-            &ldquo;Bedtime used to be a 20-minute negotiation. Now I text Bri
-            the rule once, and it just&hellip; runs. First quiet evening
-            I&rsquo;ve had in years.&rdquo;
-          </blockquote>
-          <figcaption className="mt-4 flex items-center gap-3 border-t border-[var(--color-rule)] pt-4 text-sm">
-            <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--color-ink)] text-sm font-semibold text-[var(--color-cream)]">
-              S
-            </div>
-            <div className="leading-tight">
-              <div className="font-semibold text-[var(--color-ink)]">
-                Sarah W.
-              </div>
-              <div className="text-xs text-[var(--color-ink-soft)]">
-                Mom of two · Austin, TX
-              </div>
-            </div>
-          </figcaption>
-        </figure>
+      {/* TRUST ROW — founder + beta testimonial + comparison. Single
+          column stack on mobile; 1+2 grid on desktop. */}
+      <section className="mx-auto w-full max-w-3xl px-6 pb-16 sm:pb-24">
+        <FounderBlock />
+        <BetaTestimonial />
+        <ComparisonTable
+          braintechPrice={`${discounted.label.replace("/yr", "")}/yr`}
+        />
       </section>
 
       <footer className="mt-auto bg-[var(--color-night)] text-[var(--color-cream)]/70">
@@ -182,10 +152,214 @@ export default async function Start({
         </div>
       </footer>
 
-      <FoundingToasts />
       <VariationTracker variationId={variation.id} />
       <CancelTracker />
       <ExitIntent />
+      <ChatWidget />
     </main>
   );
+}
+
+/* ──────────────────────── Trust row sub-components ─────────────────────── */
+
+function FounderBlock() {
+  return (
+    <div className="mt-10 grid items-start gap-6 rounded-2xl border border-[var(--color-rule)] bg-white p-6 sm:grid-cols-[88px_1fr] sm:gap-7 sm:p-7">
+      {/* Photo placeholder — replace with /alex.jpg or a Higgsfield gen. */}
+      <div
+        aria-hidden
+        className="grid size-22 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--color-cream)] text-3xl font-semibold text-[var(--color-ink-soft)] sm:size-22"
+        style={{ width: 88, height: 88 }}
+      >
+        A
+      </div>
+      <div>
+        <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-accent)]">
+          From the founder
+        </div>
+        <p className="mt-2 text-[15px] leading-relaxed text-[var(--color-ink)]">
+          Hi, I&rsquo;m Alex. I built Braintech after losing three Sunday
+          afternoons to the same screen-time fight with my kid. I&rsquo;m a
+          parent and a tech person, so I built the thing I needed: a small box
+          that sits on your home Wi-Fi, listens to your text rules, and turns
+          screen time into earned learning time. It works on every device
+          without an app — so there&rsquo;s nothing on their phone to delete.
+        </p>
+        <p className="mt-3 text-sm font-medium text-[var(--color-ink)]">
+          — Alex, founder · San Francisco
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function BetaTestimonial() {
+  return (
+    <figure className="mt-6 rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)] p-6 sm:p-7">
+      <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-accent)]">
+        From our beta families
+      </div>
+      <blockquote className="mt-3 text-[17px] leading-relaxed text-[var(--color-ink)]">
+        &ldquo;Bedtime used to be a 20-minute negotiation. Now I text Bri the
+        rule once, and it just&hellip; runs. First quiet evening I&rsquo;ve had
+        in years.&rdquo;
+      </blockquote>
+      <figcaption className="mt-4 flex items-center gap-3 border-t border-[var(--color-rule)] pt-4 text-sm">
+        <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--color-ink)] text-sm font-semibold text-[var(--color-cream)]">
+          S
+        </div>
+        <div className="leading-tight">
+          <div className="font-semibold text-[var(--color-ink)]">
+            Sarah W., beta family
+          </div>
+          <div className="text-xs text-[var(--color-ink-soft)]">
+            6 weeks in · two kids · Austin, TX
+          </div>
+        </div>
+      </figcaption>
+    </figure>
+  );
+}
+
+function ComparisonTable({ braintechPrice }: { braintechPrice: string }) {
+  type Row = {
+    label: string;
+    braintech: "yes" | "no" | string;
+    bark: "yes" | "no" | string;
+    circle: "yes" | "no" | string;
+  };
+  const rows: Row[] = [
+    {
+      label: "Works on every device with NO apps to install",
+      braintech: "yes",
+      bark: "no",
+      circle: "no",
+    },
+    {
+      label: "Nothing on their phone for the kid to delete",
+      braintech: "yes",
+      bark: "no",
+      circle: "no",
+    },
+    {
+      label: "Earn-to-unlock learning (TED, Khan, reading)",
+      braintech: "yes",
+      bark: "no",
+      circle: "no",
+    },
+    {
+      label: "Year-one price (device + service)",
+      braintech: braintechPrice,
+      bark: "~$129 + $14/mo",
+      circle: "~$129 + $129/yr",
+    },
+  ];
+  return (
+    <div className="mt-6 overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-white">
+      <div className="border-b border-[var(--color-rule)] px-6 py-5">
+        <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-accent)]">
+          How it compares
+        </div>
+        <h3 className="serif mt-2 text-2xl leading-snug">
+          The other boxes block. Braintech teaches.
+        </h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[480px] text-sm">
+          <thead>
+            <tr className="border-b border-[var(--color-rule)] bg-[var(--color-cream)]/60 text-left text-xs uppercase tracking-wider text-[var(--color-ink-soft)]">
+              <th scope="col" className="px-4 py-3 sm:px-6">
+                {" "}
+              </th>
+              <th
+                scope="col"
+                className="px-4 py-3 text-center font-semibold text-[var(--color-ink)] sm:px-6"
+              >
+                Braintech
+              </th>
+              <th scope="col" className="px-4 py-3 text-center sm:px-6">
+                Bark Home
+              </th>
+              <th scope="col" className="px-4 py-3 text-center sm:px-6">
+                Circle
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr
+                key={r.label}
+                className={i < rows.length - 1 ? "border-b border-[var(--color-rule)]" : ""}
+              >
+                <th
+                  scope="row"
+                  className="px-4 py-3 text-left text-[var(--color-ink)] sm:px-6 sm:py-4"
+                >
+                  {r.label}
+                </th>
+                <td className="px-4 py-3 text-center font-medium text-[var(--color-ink)] sm:px-6 sm:py-4">
+                  <Cell value={r.braintech} accent />
+                </td>
+                <td className="px-4 py-3 text-center text-[var(--color-ink-soft)] sm:px-6 sm:py-4">
+                  <Cell value={r.bark} />
+                </td>
+                <td className="px-4 py-3 text-center text-[var(--color-ink-soft)] sm:px-6 sm:py-4">
+                  <Cell value={r.circle} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function Cell({
+  value,
+  accent = false,
+}: {
+  value: "yes" | "no" | string;
+  accent?: boolean;
+}) {
+  if (value === "yes") {
+    return (
+      <span
+        className={`inline-flex size-6 items-center justify-center rounded-full ${
+          accent
+            ? "bg-[var(--color-accent)] text-white"
+            : "bg-[var(--color-ink)]/10 text-[var(--color-ink)]"
+        }`}
+        aria-label="Yes"
+      >
+        <svg viewBox="0 0 20 20" fill="currentColor" className="size-3.5">
+          <path
+            fillRule="evenodd"
+            d="M16.7 5.3a1 1 0 0 1 0 1.4l-7.5 7.5a1 1 0 0 1-1.4 0L3.3 9.7a1 1 0 1 1 1.4-1.4L8.5 12l6.8-6.7a1 1 0 0 1 1.4 0Z"
+            clipRule="evenodd"
+          />
+        </svg>
+      </span>
+    );
+  }
+  if (value === "no") {
+    return (
+      <span
+        className="inline-flex size-6 items-center justify-center rounded-full bg-[var(--color-ink-soft)]/15 text-[var(--color-ink-soft)]"
+        aria-label="No"
+      >
+        <svg
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.5}
+          strokeLinecap="round"
+          className="size-3.5"
+        >
+          <path d="M5 5l10 10M15 5L5 15" />
+        </svg>
+      </span>
+    );
+  }
+  return <span className="text-xs sm:text-sm">{value}</span>;
 }
