@@ -34,10 +34,24 @@ function parseRule(caption: string | null): {
   body: string;
 } {
   if (!caption) return { rule: null, body: "" };
-  const m = caption.match(/^[^"\n]*"([^"]+)"/);
+  // Find the first quoted string anywhere in the caption (regular OR curly
+  // quotes). The Tuesday caption shape is:
+  //   🟠 Rule of the Week #N:
+  //
+  //   "<the rule>"
+  //
+  //   <body paragraphs>
+  const m = caption.match(/[""]([^""]{8,})[""]/) ?? caption.match(/"([^"]{8,})"/);
   const rule = m ? m[1].trim() : null;
-  const idx = caption.indexOf("\n\n");
-  const body = idx > -1 ? caption.slice(idx + 2).trim() : caption;
+  // Body = everything after the rule line. Find the line with the rule and
+  // start from the next double-newline.
+  let body = caption;
+  if (rule) {
+    const idx = caption.indexOf(rule);
+    const afterRule = caption.slice(idx + rule.length);
+    const para = afterRule.indexOf("\n\n");
+    body = para > -1 ? afterRule.slice(para + 2).trim() : afterRule.trim();
+  }
   return { rule, body };
 }
 
