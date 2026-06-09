@@ -150,7 +150,7 @@ function HeroPhoto() {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/hero-mum-kitchen.webp"
-          alt="A mum in a warm sunlit kitchen smiling as she reads her phone; her child reads a book in the soft-focus background; the Braintech device sits on a shelf behind her with a small glowing orange brain icon."
+          alt="A parent in a warm sunlit kitchen smiling as she reads her phone; her child reads a book in the soft-focus background; the Braintech device sits on a shelf behind her with a small glowing orange brain icon."
           width={1600}
           height={904}
           loading="eager"
@@ -224,7 +224,7 @@ function Problem() {
                 Sarah W.
               </div>
               <div className="text-xs text-[var(--color-ink-soft)]">
-                Mum of two · Brisbane
+                Mom of two · Austin, TX
               </div>
             </div>
           </div>
@@ -506,7 +506,7 @@ function Examples() {
 }
 
 function Testimonials() {
-  // Real beta-parent voices. Sarah Brisbane leads — AU mum, our target
+  // Real beta-parent voices. Sarah Austin leads — US mom, our target
   // audience for paid traffic. Others are voiced as specific moments,
   // parent-felt, ending on a feeling.
   const quotes = [
@@ -514,21 +514,21 @@ function Testimonials() {
       body:
         "Bedtime used to be a 20-minute negotiation. Now I text Bri the rule once, and it just… runs. First quiet evening I&rsquo;ve had in years.",
       who: "Sarah W.",
-      meta: "Mum of two · Brisbane",
+      meta: "Mom of two · Austin, TX",
       initial: "S",
     },
     {
       body:
         "I texted &ldquo;no Roblox until you read 20 minutes&rdquo; once. It just worked. First night was rough. By week two, the fight was gone.",
       who: "Priya S.",
-      meta: "Mum of one · Sydney",
+      meta: "Mom of one · Seattle, WA",
       initial: "P",
     },
     {
       body:
         "Day 30, he told us about black holes at dinner. Then a Spanish word he taught his sister. I didn&rsquo;t even know he&rsquo;d been learning.",
       who: "Marcus R.",
-      meta: "Dad of two · Melbourne",
+      meta: "Dad of two · Nashville, TN",
       initial: "M",
     },
   ];

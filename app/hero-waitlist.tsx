@@ -239,41 +239,57 @@ export function HeroWaitlist({
   }
 
   return (
-    <form onSubmit={onSubmit} className="mt-8 max-w-md">
-      <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
-        <label className="flex-1">
-          <span className="sr-only">Email</span>
-          <input
-            ref={inputRef}
-            type="email"
-            required
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            className="w-full rounded-lg border border-[var(--color-rule)] bg-white px-4 py-3.5 text-base outline-none transition focus:border-[var(--color-ink)]"
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={state.kind === "submitting"}
-          data-cta="hero-discount"
-          data-variation={variation.id}
-          className="inline-flex items-center justify-center whitespace-nowrap rounded-lg bg-[var(--color-ink)] px-5 py-3.5 text-base font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)] disabled:opacity-60"
-        >
-          {state.kind === "submitting" ? "Sending…" : variation.cta}
-        </button>
+    <div className="mt-8 max-w-md">
+      {/* Value-prop chip above the form: the discounted price has to land
+          BEFORE we ask for an email. Earlier version only revealed the
+          savings in the success state — by then most visitors had bounced. */}
+      <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-sm text-[var(--color-ink-soft)] line-through">
+          {pricing.purchaseLabel}
+        </span>
+        <span className="serif text-2xl leading-none text-[var(--color-ink)]">
+          {discounted.label}
+        </span>
+        <span className="rounded-full bg-[var(--color-accent)]/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-accent)]">
+          10% off · one email
+        </span>
       </div>
-      {state.kind === "error" ? (
-        <p className="mt-2 text-sm text-[var(--color-accent)]">
-          {state.message}
-        </p>
-      ) : (
-        <p className="mt-2.5 text-xs text-[var(--color-ink-soft)]">
-          10% off your {pricing.purchaseLabel} order. Subscription starts the
-          day your device ships. 30-day refund.
-        </p>
-      )}
-    </form>
+      <form onSubmit={onSubmit}>
+        <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
+          <label className="flex-1">
+            <span className="sr-only">Email</span>
+            <input
+              ref={inputRef}
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full rounded-lg border border-[var(--color-rule)] bg-white px-4 py-3.5 text-base outline-none transition focus:border-[var(--color-ink)]"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={state.kind === "submitting"}
+            data-cta="hero-discount"
+            data-variation={variation.id}
+            className="inline-flex items-center justify-center whitespace-nowrap rounded-lg bg-[var(--color-ink)] px-5 py-3.5 text-base font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)] disabled:opacity-60"
+          >
+            {state.kind === "submitting" ? "Sending…" : variation.cta}
+          </button>
+        </div>
+        {state.kind === "error" ? (
+          <p className="mt-2 text-sm text-[var(--color-accent)]">
+            {state.message}
+          </p>
+        ) : (
+          <p className="mt-2.5 text-xs text-[var(--color-ink-soft)]">
+            Device included. Subscription starts the day your device ships.
+            30-day refund.
+          </p>
+        )}
+      </form>
+    </div>
   );
 }

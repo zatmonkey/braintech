@@ -104,7 +104,7 @@ export default async function Start({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/hero-mum-kitchen.webp"
-                alt="A mum in a warm sunlit kitchen smiling as she reads her phone; her child reads a book in the soft-focus background; the Braintech device sits on a shelf behind her with a small glowing orange brain icon."
+                alt="A parent in a warm sunlit kitchen smiling as she reads her phone; her child reads a book in the soft-focus background; the Braintech device sits on a shelf behind her with a small glowing orange brain icon."
                 width={1600}
                 height={904}
                 loading="eager"
@@ -132,7 +132,7 @@ export default async function Start({
           </li>
         </ul>
 
-        {/* One testimonial — AU mum, our paid-traffic audience. */}
+        {/* One testimonial — US mom, our paid-traffic audience. */}
         <figure className="mt-10 rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)] p-6 sm:p-7">
           <svg
             viewBox="0 0 24 24"
@@ -156,7 +156,7 @@ export default async function Start({
                 Sarah W.
               </div>
               <div className="text-xs text-[var(--color-ink-soft)]">
-                Mum of two · Brisbane
+                Mom of two · Austin, TX
               </div>
             </div>
           </figcaption>
