@@ -193,8 +193,8 @@ function FounderSection() {
   return (
     <section className="border-y border-[var(--color-rule)] bg-white">
       <div className="mx-auto grid w-full max-w-5xl gap-10 px-6 py-20 sm:px-10 sm:py-24 lg:grid-cols-[1fr_1.4fr] lg:gap-12">
-        {/* Founder photo. Replace with a 60-90s founder reel once recorded. */}
-        <div className="relative mx-auto aspect-square w-full max-w-xs overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]">
+        {/* Founder photo. Swap for a 60-90s founder reel if/when one's recorded. */}
+        <div className="mx-auto aspect-square w-full max-w-xs overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/founder-alex.jpg"
@@ -205,9 +205,6 @@ function FounderSection() {
             decoding="async"
             className="h-full w-full object-cover"
           />
-          <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-white/90 px-3 py-2 text-center text-xs text-[var(--color-ink-soft)] backdrop-blur">
-            Founder note · video coming soon
-          </div>
         </div>
         <div>
           <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
