@@ -144,6 +144,46 @@ export async function ensureVariationSchema(
   variationSchemaReady = true;
 }
 
+let contentSchemaReady = false;
+
+/**
+ * Organic-content calendar. One row per scheduled date — the daily cron
+ * routine reads CURRENT_DATE, posts the asset to IG, then marks
+ * posted_at + permalink. Two ways to provide the asset:
+ *   - asset_url: already-hosted image (e.g. /ig/ig-asset-N.jpg). Used as-is.
+ *   - prompt:    Higgsfield generation prompt. Cron generates at post time.
+ * Caption is required for FEED posts; ignored for STORIES (IG drops captions
+ * on stories).
+ */
+export async function ensureContentSchema(
+  sql: NeonQueryFunction<false, false>,
+): Promise<void> {
+  if (contentSchemaReady) return;
+  await sql`
+    CREATE TABLE IF NOT EXISTS content_calendar (
+      scheduled_for DATE PRIMARY KEY,
+      theme         TEXT,
+      prompt        TEXT,
+      asset_url     TEXT,
+      caption       TEXT,
+      media_type    TEXT NOT NULL DEFAULT 'IMAGE',
+      aspect_ratio  TEXT,
+      posted_at     TIMESTAMPTZ,
+      permalink     TEXT,
+      ig_media_id   TEXT,
+      error_message TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS content_calendar_unposted_idx
+      ON content_calendar (scheduled_for)
+      WHERE posted_at IS NULL;
+  `;
+  contentSchemaReady = true;
+}
+
 let deviceSchemaReady = false;
 
 /**
