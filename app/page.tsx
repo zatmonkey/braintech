@@ -193,14 +193,18 @@ function FounderSection() {
   return (
     <section className="border-y border-[var(--color-rule)] bg-white">
       <div className="mx-auto grid w-full max-w-5xl gap-10 px-6 py-20 sm:px-10 sm:py-24 lg:grid-cols-[1fr_1.4fr] lg:gap-12">
-        {/* Photo / video placeholder. Replace with a 60-90s founder reel
-            once recorded; for now a clean avatar card. */}
+        {/* Founder photo. Replace with a 60-90s founder reel once recorded. */}
         <div className="relative mx-auto aspect-square w-full max-w-xs overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]">
-          <div className="absolute inset-0 grid place-items-center">
-            <div className="grid size-32 place-items-center rounded-full bg-[var(--color-ink)] text-5xl font-semibold text-[var(--color-cream)]">
-              A
-            </div>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/founder-alex.jpg"
+            alt="Alex, founder of Braintech, at his kitchen counter texting a rule into the device."
+            width={400}
+            height={400}
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover"
+          />
           <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-white/90 px-3 py-2 text-center text-xs text-[var(--color-ink-soft)] backdrop-blur">
             Founder note · video coming soon
           </div>

@@ -65,11 +65,17 @@ export function ExitIntent() {
   const armedRef = useRef(false);
 
   const open = useCallback(() => {
+    // Bail if we've already shown / dismissed / submitted in this session.
+    // The mouseleave listener fires on EVERY URL-bar/tab-strip reach, so
+    // without this check the popup re-opens after dismiss. SessionStorage
+    // is the source of truth for "have we used our one shot this session?"
+    try {
+      if (sessionStorage.getItem(SESSION_KEY)) return;
+    } catch {
+      /* private mode — fall through */
+    }
     setState((s) => {
       if (s.kind !== "hidden") return s;
-      // Lock-in the sessionStorage immediately on first open. Without this,
-      // a stray re-render / quick-dismiss / accidental fire could re-open
-      // later in the same session. Once it's been shown once, it's done.
       try {
         sessionStorage.setItem(SESSION_KEY, "shown");
       } catch {
@@ -104,9 +110,13 @@ export function ExitIntent() {
     if (!hasHover) return;
 
     const startedAt = performance.now();
+    let fired = false;
     const onMouseLeave = (e: MouseEvent) => {
       if (e.clientY > 0) return; // not the top edge
       if (performance.now() - startedAt < MOUSELEAVE_GRACE_MS) return; // too early
+      if (fired) return; // belt + suspenders — only ever once per mount
+      fired = true;
+      document.removeEventListener("mouseleave", onMouseLeave);
       open();
     };
     document.addEventListener("mouseleave", onMouseLeave);

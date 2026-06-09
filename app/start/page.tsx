@@ -164,14 +164,21 @@ export default async function Start({
 
 function FounderBlock() {
   return (
-    <div className="mt-10 grid items-start gap-6 rounded-2xl border border-[var(--color-rule)] bg-white p-6 sm:grid-cols-[88px_1fr] sm:gap-7 sm:p-7">
-      {/* Photo placeholder — replace with /alex.jpg or a Higgsfield gen. */}
+    <div className="mt-10 grid items-start gap-6 rounded-2xl border border-[var(--color-rule)] bg-white p-6 sm:grid-cols-[120px_1fr] sm:gap-7 sm:p-7">
       <div
-        aria-hidden
-        className="grid size-22 shrink-0 place-items-center overflow-hidden rounded-full bg-[var(--color-cream)] text-3xl font-semibold text-[var(--color-ink-soft)] sm:size-22"
-        style={{ width: 88, height: 88 }}
+        className="shrink-0 overflow-hidden rounded-2xl border border-[var(--color-rule)]"
+        style={{ width: 120, height: 120 }}
       >
-        A
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/founder-alex.jpg"
+          alt="Alex, founder of Braintech, at his kitchen counter texting a rule into the device."
+          width={120}
+          height={120}
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-cover"
+        />
       </div>
       <div>
         <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-accent)]">
