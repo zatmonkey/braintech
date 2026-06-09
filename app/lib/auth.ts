@@ -3,6 +3,21 @@ import { createHmac, timingSafeEqual, randomInt } from "node:crypto";
 const COOKIE = "bt_session";
 const MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
+// Hard-coded admin allowlist. These emails get access to /app/calendar
+// and any other admin-only surface. Source from env if it ever needs to
+// grow beyond one founder.
+const ADMIN_EMAILS = new Set(
+  (process.env.ADMIN_EMAILS ?? "alex@ksso.net")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean),
+);
+
+export function isAdmin(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return ADMIN_EMAILS.has(email.toLowerCase());
+}
+
 function secret(): string {
   return process.env.SESSION_SECRET ?? "dev-insecure-secret-change-me";
 }
