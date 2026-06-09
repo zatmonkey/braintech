@@ -181,6 +181,18 @@ export async function ensureContentSchema(
       ON content_calendar (scheduled_for)
       WHERE posted_at IS NULL;
   `;
+  // Carousel slides — array of publicly-fetchable image URLs. When media_type
+  // is CAROUSEL_ALBUM the cron routine builds N child containers + 1
+  // carousel container. Used by Monday stat posts (5-8 slide carousels
+  // perform much better than single-image stat cards per Buffer benchmarks).
+  await sql`
+    ALTER TABLE content_calendar ADD COLUMN IF NOT EXISTS children_urls JSONB;
+  `;
+  // Cross-post toggle: when TRUE the cron also publishes to the connected
+  // FB Page after the IG post lands. Default FALSE for opt-in cross-posting.
+  await sql`
+    ALTER TABLE content_calendar ADD COLUMN IF NOT EXISTS cross_post_fb BOOLEAN NOT NULL DEFAULT FALSE;
+  `;
   contentSchemaReady = true;
 }
 

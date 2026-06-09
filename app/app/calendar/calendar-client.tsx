@@ -14,6 +14,8 @@ export type CalendarRow = {
   permalink: string | null;
   ig_media_id: string | null;
   error_message: string | null;
+  children_urls: string[] | null;
+  cross_post_fb: boolean;
 };
 
 const THEME_OPTIONS = [
@@ -27,7 +29,12 @@ const THEME_OPTIONS = [
   "other",
 ];
 
-const MEDIA_TYPE_OPTIONS = ["IMAGE", "STORIES", "REELS"] as const;
+const MEDIA_TYPE_OPTIONS = [
+  "IMAGE",
+  "STORIES",
+  "REELS",
+  "CAROUSEL_ALBUM",
+] as const;
 
 type Status = "idle" | "saving" | "saved" | "error";
 
@@ -123,6 +130,8 @@ function NewRowForm({ onCreated }: { onCreated: (row: CalendarRow) => void }) {
       permalink: null,
       ig_media_id: null,
       error_message: null,
+      children_urls: null,
+      cross_post_fb: false,
     });
   }
 
@@ -205,6 +214,8 @@ function RowCard({
         caption: draft.caption || null,
         media_type: draft.media_type,
         aspect_ratio: draft.aspect_ratio || null,
+        children_urls: draft.children_urls,
+        cross_post_fb: draft.cross_post_fb,
       }),
     });
     if (!res.ok) {
@@ -338,6 +349,39 @@ function RowCard({
               className="w-full rounded border border-[var(--color-rule)] px-2 py-1.5 text-sm leading-snug"
             />
           </Field>
+
+          {draft.media_type === "CAROUSEL_ALBUM" && (
+            <Field label="Carousel slides (one image URL per line — 2–10 slides)">
+              <textarea
+                value={(draft.children_urls ?? []).join("\n")}
+                onChange={(e) =>
+                  setDraft({
+                    ...draft,
+                    children_urls: e.target.value
+                      .split("\n")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  })
+                }
+                rows={4}
+                placeholder="https://getbraintech.com/ig/slide-1.jpg&#10;https://getbraintech.com/ig/slide-2.jpg&#10;..."
+                className="w-full rounded border border-[var(--color-rule)] px-2 py-1.5 text-sm leading-snug font-mono"
+              />
+            </Field>
+          )}
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={draft.cross_post_fb}
+              onChange={(e) =>
+                setDraft({ ...draft, cross_post_fb: e.target.checked })
+              }
+            />
+            <span>
+              Cross-post to Facebook Page after IG (IMAGE only)
+            </span>
+          </label>
 
           {posted && (
             <div className="rounded-lg bg-[var(--color-cream)] p-3 text-xs">

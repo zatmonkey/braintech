@@ -37,14 +37,16 @@ export async function GET(req: Request) {
   const rows = (await (targetDate
     ? sql`
         SELECT scheduled_for, theme, prompt, asset_url, caption,
-               media_type, aspect_ratio, posted_at, permalink
+               media_type, aspect_ratio, posted_at, permalink,
+               children_urls, cross_post_fb
         FROM content_calendar
         WHERE scheduled_for = ${targetDate}::date
         LIMIT 1;
       `
     : sql`
         SELECT scheduled_for, theme, prompt, asset_url, caption,
-               media_type, aspect_ratio, posted_at, permalink
+               media_type, aspect_ratio, posted_at, permalink,
+               children_urls, cross_post_fb
         FROM content_calendar
         WHERE scheduled_for = CURRENT_DATE
         LIMIT 1;
@@ -58,6 +60,8 @@ export async function GET(req: Request) {
     aspect_ratio: string | null;
     posted_at: string | null;
     permalink: string | null;
+    children_urls: string[] | null;
+    cross_post_fb: boolean;
   }>;
 
   if (rows.length === 0) {

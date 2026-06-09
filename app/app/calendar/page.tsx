@@ -31,7 +31,7 @@ export default async function CalendarPage() {
   const rows = (await sql`
     SELECT scheduled_for::text AS scheduled_for, theme, asset_url, prompt,
            caption, media_type, aspect_ratio, posted_at, permalink, ig_media_id,
-           error_message
+           error_message, children_urls, cross_post_fb
     FROM content_calendar
     WHERE scheduled_for BETWEEN CURRENT_DATE - INTERVAL '7 days'
                             AND CURRENT_DATE + INTERVAL '30 days'

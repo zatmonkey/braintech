@@ -61,6 +61,8 @@ export async function POST(req: Request) {
     caption?: string | null;
     media_type?: string | null;
     aspect_ratio?: string | null;
+    children_urls?: string[] | null;
+    cross_post_fb?: boolean;
     delete?: boolean;
   };
   try {
@@ -87,27 +89,36 @@ export async function POST(req: Request) {
   }
 
   const mediaType =
-    body.media_type === "STORIES" || body.media_type === "REELS"
+    body.media_type === "STORIES" ||
+    body.media_type === "REELS" ||
+    body.media_type === "CAROUSEL_ALBUM"
       ? body.media_type
       : "IMAGE";
+  const childrenUrls = Array.isArray(body.children_urls)
+    ? JSON.stringify(body.children_urls.filter((u) => typeof u === "string" && u.length))
+    : null;
 
   // Upsert by scheduled_for (the primary key).
   await sql`
     INSERT INTO content_calendar (
-      scheduled_for, theme, asset_url, prompt, caption, media_type, aspect_ratio
+      scheduled_for, theme, asset_url, prompt, caption, media_type,
+      aspect_ratio, children_urls, cross_post_fb
     ) VALUES (
       ${date}::date, ${body.theme ?? null}, ${body.asset_url ?? null},
       ${body.prompt ?? null}, ${body.caption ?? null}, ${mediaType},
-      ${body.aspect_ratio ?? null}
+      ${body.aspect_ratio ?? null}, ${childrenUrls}::jsonb,
+      ${body.cross_post_fb ?? false}
     )
     ON CONFLICT (scheduled_for) DO UPDATE SET
-      theme        = EXCLUDED.theme,
-      asset_url    = EXCLUDED.asset_url,
-      prompt       = EXCLUDED.prompt,
-      caption      = EXCLUDED.caption,
-      media_type   = EXCLUDED.media_type,
-      aspect_ratio = EXCLUDED.aspect_ratio,
-      updated_at   = NOW();
+      theme         = EXCLUDED.theme,
+      asset_url     = EXCLUDED.asset_url,
+      prompt        = EXCLUDED.prompt,
+      caption       = EXCLUDED.caption,
+      media_type    = EXCLUDED.media_type,
+      aspect_ratio  = EXCLUDED.aspect_ratio,
+      children_urls = EXCLUDED.children_urls,
+      cross_post_fb = EXCLUDED.cross_post_fb,
+      updated_at    = NOW();
   `;
   return NextResponse.json({ ok: true });
 }
