@@ -38,10 +38,33 @@ export function AccountChat() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, sending]);
+
+  // Any other component can prefill + focus the chat by dispatching
+  // `braintech:prefill-chat` on window with `detail` = the seed text.
+  // Used by the "+ Add rule" buttons on group tabs — they prefill
+  // "For <Maya>, " so the parent just types the rule and hits enter.
+  useEffect(() => {
+    function onPrefill(e: Event) {
+      const seed = (e as CustomEvent<string>).detail ?? "";
+      setInput(seed);
+      rootRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => {
+        inputRef.current?.focus();
+        // Place cursor at end of seed text.
+        const len = seed.length;
+        inputRef.current?.setSelectionRange(len, len);
+      }, 220);
+    }
+    window.addEventListener("braintech:prefill-chat", onPrefill);
+    return () =>
+      window.removeEventListener("braintech:prefill-chat", onPrefill);
+  }, []);
 
   async function send() {
     const text = input.trim();
@@ -68,7 +91,7 @@ export function AccountChat() {
   }
 
   return (
-    <div className="flex h-[420px] flex-col overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]">
+    <div ref={rootRef} className="flex h-[420px] flex-col overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]">
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -98,6 +121,7 @@ export function AccountChat() {
       </div>
       <div className="flex items-center gap-2 border-t border-[var(--color-rule)] bg-white p-3">
         <input
+          ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
@@ -121,17 +145,17 @@ export function AccountChat() {
 }
 
 /* ────────────────────────────────────────────────────────────────────────
- * AllDevicesSection — the canonical device list.
+ * AllDevicesSection — the canonical device list + tabs + group management.
  *
- * One row per MAC seen in the last 7 days, joined with friendly names
- * (client_labels) and groups (client_group_memberships). Status badge:
- * green "Connected" if last_seen < 2 min, otherwise "Last seen <rel>".
- * Filter chips above the list scope it to a single group; "All" resets.
- *
- * Renaming a device hits the same /api/account/clients endpoint as the
- * old ClientRow. We optimistically update local state so the user sees
- * the new name immediately without a reload.
+ * One unified surface. Tabs = groups, "+" tab creates a new group inline,
+ * tab dropdown lets you rename/delete a group. Selecting a group scopes
+ * the list to its members and reveals "Add device" + "Add rule" + the
+ * group's active rules. The standalone Groups section is gone — everything
+ * lives here.
  * ──────────────────────────────────────────────────────────────────── */
+
+import { BrainrotMeter } from "./brainrot-meter";
+import { StatsModal } from "./stats-modal";
 
 type AllDeviceRow = {
   mac: string;
@@ -143,6 +167,21 @@ type AllDeviceRow = {
   first_seen: string;
   connected: boolean;
   group_ids: string[];
+  brainrot_minutes: number | null;
+};
+
+type TabGroup = {
+  group_id: string;
+  name: string;
+  is_default: boolean;
+  rule_count: number;
+  rules: Array<{
+    rule_id: string;
+    name: string;
+    rule_type: string;
+    summary: string | null;
+  }>;
+  brainrot_minutes: number | null;
 };
 
 function relativeTime(iso: string): string {
@@ -159,18 +198,42 @@ function relativeTime(iso: string): string {
 
 export function AllDevicesSection({
   rows,
-  groups,
+  groups: initialGroups,
 }: {
   rows: AllDeviceRow[];
-  groups: { group_id: string; name: string }[];
+  groups: TabGroup[];
 }) {
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [items, setItems] = useState(rows);
+  const [groups, setGroups] = useState(initialGroups);
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [stats, setStats] = useState<{
+    open: boolean;
+    title: string;
+    subtitle?: string;
+    minutes: number | null;
+  }>({ open: false, title: "", minutes: null });
 
   const filtered = selectedGroup
     ? items.filter((r) => r.group_ids.includes(selectedGroup))
     : items;
   const connectedCount = items.filter((r) => r.connected).length;
+  const groupNamesById = Object.fromEntries(
+    groups.map((g) => [g.group_id, g.name] as const),
+  );
+  const activeGroup = selectedGroup
+    ? groups.find((g) => g.group_id === selectedGroup) ?? null
+    : null;
+  // For the household-level meter on the "All" tab, sum per-device brainrot
+  // (treat null as 0 so missing data doesn't poison the total). If every
+  // value is null, show null instead.
+  const householdMinutes =
+    items.length === 0
+      ? null
+      : items.every((r) => r.brainrot_minutes === null)
+        ? null
+        : items.reduce((acc, r) => acc + (r.brainrot_minutes ?? 0), 0);
 
   function renameLocal(mac: string, name: string) {
     setItems((rs) =>
@@ -182,7 +245,116 @@ export function AllDevicesSection({
     );
   }
 
-  if (items.length === 0) {
+  async function createGroup() {
+    const name = newGroupName.trim().slice(0, 48);
+    if (!name) {
+      setNewGroupOpen(false);
+      return;
+    }
+    try {
+      const res = await fetch("/api/account/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const gid =
+          data?.group_id ??
+          data?.id ??
+          `g_${Date.now().toString(36)}`;
+        setGroups((gs) => [
+          ...gs,
+          {
+            group_id: gid,
+            name,
+            is_default: false,
+            rule_count: 0,
+            rules: [],
+            brainrot_minutes: null,
+          },
+        ]);
+        setNewGroupName("");
+        setNewGroupOpen(false);
+        setSelectedGroup(gid);
+      }
+    } catch {
+      // swallow; user can retry
+    }
+  }
+
+  async function deleteGroup(gid: string) {
+    if (!confirm("Delete this group?")) return;
+    try {
+      await fetch(`/api/account/groups/${gid}`, { method: "DELETE" });
+      setGroups((gs) => gs.filter((g) => g.group_id !== gid));
+      setItems((rs) =>
+        rs.map((r) => ({
+          ...r,
+          group_ids: r.group_ids.filter((x) => x !== gid),
+        })),
+      );
+      if (selectedGroup === gid) setSelectedGroup(null);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function addDeviceToGroup(gid: string, mac: string) {
+    try {
+      const res = await fetch(`/api/account/groups/${gid}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mac }),
+      });
+      if (res.ok) {
+        setItems((rs) =>
+          rs.map((r) =>
+            r.mac === mac
+              ? {
+                  ...r,
+                  group_ids: r.group_ids.includes(gid)
+                    ? r.group_ids
+                    : [...r.group_ids, gid],
+                }
+              : r,
+          ),
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function removeDeviceFromGroup(gid: string, mac: string) {
+    try {
+      await fetch(
+        `/api/account/groups/${gid}/members?mac=${encodeURIComponent(mac)}`,
+        { method: "DELETE" },
+      );
+      setItems((rs) =>
+        rs.map((r) =>
+          r.mac === mac
+            ? { ...r, group_ids: r.group_ids.filter((x) => x !== gid) }
+            : r,
+        ),
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function addRuleFor(group: TabGroup) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("braintech:prefill-chat", {
+          detail: `For ${group.name}, `,
+        }),
+      );
+    }
+  }
+
+  if (items.length === 0 && groups.length === 0) {
     return (
       <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5 text-[var(--color-ink-soft)]">
         No devices reported yet — your Braintech device updates this every
@@ -191,64 +363,297 @@ export function AllDevicesSection({
     );
   }
 
+  // Devices NOT yet in the active group (for the "+ Add device" picker).
+  const candidatesForActive = activeGroup
+    ? items.filter((r) => !r.group_ids.includes(activeGroup.group_id))
+    : [];
+
   return (
     <div className="mt-3 space-y-3">
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-[var(--color-ink-soft)]">
-          {connectedCount} connected · {items.length} seen last 7 days
-        </span>
-        <span className="text-[var(--color-rule)]">·</span>
-        <button
-          type="button"
+      {/* Tab rail */}
+      <div className="flex flex-wrap items-center gap-2">
+        <TabButton
+          active={selectedGroup === null}
           onClick={() => setSelectedGroup(null)}
-          className={`rounded-full px-2.5 py-1 font-medium transition ${
-            selectedGroup === null
-              ? "bg-[var(--color-ink)] text-[var(--color-cream)]"
-              : "border border-[var(--color-rule)] text-[var(--color-ink-soft)] hover:border-[var(--color-ink)]"
-          }`}
         >
           All
-        </button>
+          <TabCount>{`${connectedCount}/${items.length}`}</TabCount>
+        </TabButton>
         {groups.map((g) => (
-          <button
+          <TabButton
             key={g.group_id}
-            type="button"
-            onClick={() =>
-              setSelectedGroup((curr) =>
-                curr === g.group_id ? null : g.group_id,
-              )
-            }
-            className={`rounded-full px-2.5 py-1 font-medium transition ${
-              selectedGroup === g.group_id
-                ? "bg-[var(--color-ink)] text-[var(--color-cream)]"
-                : "border border-[var(--color-rule)] text-[var(--color-ink-soft)] hover:border-[var(--color-ink)]"
-            }`}
+            active={selectedGroup === g.group_id}
+            onClick={() => setSelectedGroup(g.group_id)}
           >
             {g.name}
-          </button>
+            <TabCount>{g.rule_count}</TabCount>
+          </TabButton>
         ))}
+        {newGroupOpen ? (
+          <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-ink)] bg-white px-2 py-0.5">
+            <input
+              autoFocus
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+              onBlur={createGroup}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") createGroup();
+                if (e.key === "Escape") {
+                  setNewGroupName("");
+                  setNewGroupOpen(false);
+                }
+              }}
+              maxLength={32}
+              placeholder="Group name"
+              className="w-28 rounded bg-transparent px-1 py-0.5 text-sm outline-none"
+            />
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setNewGroupOpen(true)}
+            aria-label="Add group"
+            className="grid size-7 place-items-center rounded-full border border-dashed border-[var(--color-ink-soft)] text-sm text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]"
+          >
+            +
+          </button>
+        )}
       </div>
 
+      {/* Group-level toolbar shown when a group is active. */}
+      {activeGroup && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--color-rule)] bg-white p-4">
+          <div className="flex items-center gap-3">
+            <BrainrotMeter
+              minutes={activeGroup.brainrot_minutes}
+              size="sm"
+              withLabel={false}
+            />
+            <div>
+              <div className="text-sm font-semibold">{activeGroup.name}</div>
+              <div className="text-xs text-[var(--color-ink-soft)]">
+                {filtered.length} device{filtered.length === 1 ? "" : "s"} ·{" "}
+                {activeGroup.rule_count} rule
+                {activeGroup.rule_count === 1 ? "" : "s"}
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => addRuleFor(activeGroup)}
+              className="rounded-full bg-[var(--color-ink)] px-3 py-1.5 text-xs font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)]"
+            >
+              + Add rule
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setStats({
+                  open: true,
+                  title: activeGroup.name,
+                  subtitle: "Group · last 24h",
+                  minutes: activeGroup.brainrot_minutes,
+                })
+              }
+              className="rounded-full border border-[var(--color-rule)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]"
+            >
+              Stats
+            </button>
+            {!activeGroup.is_default && (
+              <button
+                type="button"
+                onClick={() => deleteGroup(activeGroup.group_id)}
+                className="text-xs text-[var(--color-ink-soft)] underline hover:text-[var(--color-accent)]"
+              >
+                delete group
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Active rules for the group (when filtered to a group). */}
+      {activeGroup && activeGroup.rules.length > 0 && (
+        <div className="rounded-2xl border border-[var(--color-rule)] bg-white p-4">
+          <div className="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
+            Active rules
+          </div>
+          <ul className="divide-y divide-[var(--color-rule)]">
+            {activeGroup.rules.map((r) => (
+              <RuleRow
+                key={r.rule_id}
+                ruleId={r.rule_id}
+                name={r.name}
+                ruleType={r.rule_type}
+                summary={r.summary}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* The device list. */}
       <div className="rounded-2xl border border-[var(--color-rule)] bg-white">
+        {!activeGroup && (
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--color-rule)] bg-[var(--color-cream)]/40 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <BrainrotMeter
+                minutes={householdMinutes}
+                size="sm"
+                withLabel={false}
+              />
+              <div>
+                <div className="text-sm font-semibold">Whole house</div>
+                <div className="text-xs text-[var(--color-ink-soft)]">
+                  {connectedCount} connected · {items.length} seen last 7 days
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                setStats({
+                  open: true,
+                  title: "Whole house",
+                  subtitle: "Aggregate · last 24h",
+                  minutes: householdMinutes,
+                })
+              }
+              className="rounded-full border border-[var(--color-rule)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]"
+            >
+              Stats
+            </button>
+          </div>
+        )}
+
         <ul className="divide-y divide-[var(--color-rule)]">
           {filtered.map((r) => (
             <AllDeviceListItem
               key={r.mac}
               row={r}
-              groupNamesById={Object.fromEntries(
-                groups.map((g) => [g.group_id, g.name] as const),
-              )}
+              groupNamesById={groupNamesById}
+              activeGroupId={activeGroup?.group_id ?? null}
               onRenamed={renameLocal}
+              onRemoveFromGroup={removeDeviceFromGroup}
+              onOpenStats={() =>
+                setStats({
+                  open: true,
+                  title: r.display_name,
+                  subtitle: r.hostname && r.hostname !== r.display_name
+                    ? r.hostname
+                    : r.mac,
+                  minutes: r.brainrot_minutes,
+                })
+              }
             />
           ))}
           {filtered.length === 0 && (
             <li className="p-5 text-sm text-[var(--color-ink-soft)]">
-              No devices in this group yet. Assign devices from a row&rsquo;s
-              context menu, or in the Groups section below.
+              {activeGroup
+                ? "No devices in this group yet. Add one below."
+                : "No devices match this filter."}
             </li>
           )}
         </ul>
+
+        {activeGroup && candidatesForActive.length > 0 && (
+          <div className="border-t border-[var(--color-rule)] bg-[var(--color-cream)]/40 p-3">
+            <AddDeviceMenu
+              groupName={activeGroup.name}
+              candidates={candidatesForActive.map((c) => ({
+                mac: c.mac,
+                name: c.display_name,
+              }))}
+              onAdd={(mac) => addDeviceToGroup(activeGroup.group_id, mac)}
+            />
+          </div>
+        )}
       </div>
+
+      <StatsModal
+        open={stats.open}
+        onClose={() => setStats((s) => ({ ...s, open: false }))}
+        title={stats.title}
+        subtitle={stats.subtitle}
+        brainrotMinutes={stats.minutes}
+      />
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
+        active
+          ? "bg-[var(--color-ink)] text-[var(--color-cream)]"
+          : "border border-[var(--color-rule)] text-[var(--color-ink-soft)] hover:border-[var(--color-ink)]"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TabCount({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded-full bg-white/15 px-1.5 py-0.5 font-mono text-[10px] leading-none">
+      {children}
+    </span>
+  );
+}
+
+function AddDeviceMenu({
+  groupName,
+  candidates,
+  onAdd,
+}: {
+  groupName: string;
+  candidates: { mac: string; name: string }[];
+  onAdd: (mac: string) => void;
+}) {
+  const [pick, setPick] = useState("");
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-[var(--color-ink-soft)]">
+        Add device to {groupName}:
+      </span>
+      <select
+        value={pick}
+        onChange={(e) => setPick(e.target.value)}
+        className="rounded border border-[var(--color-rule)] bg-white px-2 py-1"
+      >
+        <option value="">Pick a device…</option>
+        {candidates.map((c) => (
+          <option key={c.mac} value={c.mac}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        disabled={!pick}
+        onClick={() => {
+          if (pick) {
+            onAdd(pick);
+            setPick("");
+          }
+        }}
+        className="rounded-full bg-[var(--color-ink)] px-2.5 py-1 text-xs font-medium text-[var(--color-cream)] disabled:opacity-40"
+      >
+        Add
+      </button>
     </div>
   );
 }
@@ -256,11 +661,17 @@ export function AllDevicesSection({
 function AllDeviceListItem({
   row,
   groupNamesById,
+  activeGroupId,
   onRenamed,
+  onRemoveFromGroup,
+  onOpenStats,
 }: {
   row: AllDeviceRow;
   groupNamesById: Record<string, string>;
+  activeGroupId: string | null;
   onRenamed: (mac: string, name: string) => void;
+  onRemoveFromGroup: (gid: string, mac: string) => void;
+  onOpenStats: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(row.has_label ? row.display_name : "");
@@ -289,53 +700,59 @@ function AllDeviceListItem({
     }
   }
 
-  const sub = row.hostname && row.hostname !== row.display_name
-    ? row.hostname
-    : row.mac;
+  const sub =
+    row.hostname && row.hostname !== row.display_name ? row.hostname : row.mac;
 
   return (
     <li className="flex items-start justify-between gap-3 px-4 py-3">
       <div className="flex min-w-0 items-start gap-3">
-        <span
-          aria-label={row.connected ? "Connected" : "Offline"}
-          className={`mt-1.5 size-2 shrink-0 rounded-full ${
-            row.connected ? "bg-emerald-500" : "bg-zinc-300"
-          }`}
+        <BrainrotMeter
+          minutes={row.brainrot_minutes}
+          size="sm"
+          withLabel={false}
         />
         <div className="min-w-0">
-          {editing ? (
-            <input
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => save(draft)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") save(draft);
-                if (e.key === "Escape") {
-                  setDraft(row.has_label ? row.display_name : "");
-                  setEditing(false);
-                }
-              }}
-              disabled={saving}
-              maxLength={32}
-              placeholder="Maya's iPad…"
-              className="w-44 rounded border border-[var(--color-rule)] bg-white px-2 py-0.5 text-sm focus:border-[var(--color-ink)] focus:outline-none"
+          <div className="flex items-center gap-2">
+            <span
+              aria-label={row.connected ? "Connected" : "Offline"}
+              className={`size-2 shrink-0 rounded-full ${
+                row.connected ? "bg-emerald-500" : "bg-zinc-300"
+              }`}
             />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="block max-w-full truncate text-left text-sm font-medium hover:underline"
-              title="Click to rename"
-            >
-              {row.display_name}
-            </button>
-          )}
-          <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-ink-soft)]">
+            {editing ? (
+              <input
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={() => save(draft)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") save(draft);
+                  if (e.key === "Escape") {
+                    setDraft(row.has_label ? row.display_name : "");
+                    setEditing(false);
+                  }
+                }}
+                disabled={saving}
+                maxLength={32}
+                placeholder="Maya's iPad…"
+                className="w-44 rounded border border-[var(--color-rule)] bg-white px-2 py-0.5 text-sm focus:border-[var(--color-ink)] focus:outline-none"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="block max-w-full truncate text-left text-sm font-medium hover:underline"
+                title="Click to rename"
+              >
+                {row.display_name}
+              </button>
+            )}
+          </div>
+          <div className="mt-0.5 truncate pl-4 font-mono text-[11px] text-[var(--color-ink-soft)]">
             {sub}
           </div>
-          {row.group_ids.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {row.group_ids.length > 0 && !activeGroupId && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5 pl-4">
               {row.group_ids.map((gid) => (
                 <span
                   key={gid}
@@ -348,7 +765,7 @@ function AllDeviceListItem({
           )}
         </div>
       </div>
-      <div className="shrink-0 text-right">
+      <div className="flex shrink-0 flex-col items-end gap-1.5 text-right">
         {row.connected ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
             Connected
@@ -361,6 +778,25 @@ function AllDeviceListItem({
             Last seen {relativeTime(row.last_seen)}
           </span>
         )}
+        <div className="flex items-center gap-2 text-[11px]">
+          <button
+            type="button"
+            onClick={onOpenStats}
+            className="text-[var(--color-ink-soft)] underline hover:text-[var(--color-ink)]"
+          >
+            Stats
+          </button>
+          {activeGroupId && (
+            <button
+              type="button"
+              onClick={() => onRemoveFromGroup(activeGroupId, row.mac)}
+              className="text-[var(--color-ink-soft)] underline hover:text-[var(--color-accent)]"
+              title="Remove from this group"
+            >
+              Remove
+            </button>
+          )}
+        </div>
       </div>
     </li>
   );

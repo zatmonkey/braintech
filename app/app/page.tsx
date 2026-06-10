@@ -13,10 +13,9 @@ import {
   SWRegister,
   LogoutButton,
   AccountChat,
-  RuleRow,
-  GroupsSection,
   AllDevicesSection,
 } from "./dashboard-client";
+import { BrainrotMeter } from "./brainrot-meter";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -126,33 +125,29 @@ export default async function Dashboard() {
     rulesByGroup.set(gid, list);
   }
 
-  // Render-time helpers for the Groups section
-  const allClients = devices.flatMap((d) => realClients(d.telemetry));
-  const knownDevices = allClients
-    .filter((c) => c.mac)
-    .map((c) => {
-      const mac = c.mac!.toLowerCase();
-      return { mac, name: labels.get(mac) ?? c.hostname ?? mac };
-    });
+  // Shape for the new tab system. brainrot_minutes is null until
+  // /api/account/usage starts returning real category data.
+  const allDevicesUI = allDevices.map((d) => ({ ...d, brainrot_minutes: null }));
   const groupsForUi = groups.map((g) => {
-    const memberMacs: string[] = [];
-    for (const [mac, gids] of macGroups.entries()) {
-      if (gids.includes(g.group_id)) memberMacs.push(mac);
-    }
+    const rules = (rulesByGroup.get(g.group_id) ?? []).map((r) => ({
+      rule_id: r.rule_id,
+      rule_type: r.rule_type,
+      name: r.name,
+      summary: r.summary,
+    }));
     return {
-      ...g,
-      members: memberMacs.map((mac) => ({
-        mac,
-        name: labels.get(mac) ?? mac,
-      })),
-      rules: (rulesByGroup.get(g.group_id) ?? []).map((r) => ({
-        rule_id: r.rule_id,
-        rule_type: r.rule_type,
-        name: r.name,
-        summary: r.summary,
-      })),
+      group_id: g.group_id,
+      name: g.name,
+      is_default: g.is_default,
+      rule_count: rules.length,
+      rules,
+      brainrot_minutes: null,
     };
   });
+  // Unused references retained intentionally — proxy.ts cookies + macGroups
+  // are still set above for future use (e.g. usage attribution).
+  void macGroups;
+  void labels;
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-5 px-5 py-6 sm:py-10">
@@ -208,87 +203,68 @@ export default async function Dashboard() {
         )}
       </section>
 
-      {/* All devices — canonical registry. Every MAC seen in the last 7
-          days, joined with friendly names + group memberships. Connected
-          ones show a green pill + IP; offline ones show "Last seen <rel>".
-          Group chips above the list scope it as a filter — groups are
-          subsets of the same canonical list, not a parallel render. */}
-      {devices.length > 0 && (
-        <section>
-          <h2 className="serif text-2xl tracking-[-0.01em]">All devices</h2>
-          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-            Every screen seen on your network in the last 7 days. Filter by
-            group below.
-          </p>
-          <AllDevicesSection
-            rows={allDevices}
-            groups={groups.map((g) => ({ group_id: g.group_id, name: g.name }))}
-          />
-        </section>
-      )}
-
-      {/* Groups */}
-      {devices.length > 0 && (
-        <section>
-          <h2 className="serif text-2xl tracking-[-0.01em]">Groups</h2>
-          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-            Bundle devices so rules can target them as a unit. A device can be in multiple groups.
-          </p>
-          <GroupsSection groups={groupsForUi} knownDevices={knownDevices} />
-        </section>
-      )}
-
-      {/* Rules summary */}
-      <section>
-        <h2 className="serif text-2xl tracking-[-0.01em]">Rules</h2>
-        <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
-          {activeRules.length === 0 ? (
-            <p className="text-[var(--color-ink-soft)]">
-              No rules yet. Tell Bri below what you&apos;d like — e.g. “block TikTok for Maya
-              until she reads 20 minutes” — and it&apos;ll set it up on your device.
-            </p>
-          ) : (
-            <ul className="divide-y divide-[var(--color-rule)]">
-              {activeRules.map((r) => (
-                <RuleRow
-                  key={r.rule_id}
-                  ruleId={r.rule_id}
-                  name={r.name}
-                  ruleType={r.rule_type}
-                  summary={r.summary}
-                />
-              ))}
-            </ul>
-          )}
-          {memory && (
-            <p className="mt-4 border-t border-[var(--color-rule)] pt-3 text-sm text-[var(--color-ink-soft)]">
-              <span className="font-medium text-[var(--color-ink)]">What Bri knows: </span>
-              {memory}
-            </p>
-          )}
-        </div>
-      </section>
-
-      {/* Usage */}
+      {/* USAGE — dashboard headline. Brainrot meter + category placeholders.
+          Real category data turns this on once /api/account/usage exists. */}
       <section>
         <h2 className="serif text-2xl tracking-[-0.01em]">Usage</h2>
-        <div className="mt-3 rounded-2xl border border-dashed border-[var(--color-rule)] bg-white p-5">
-          <p className="text-[var(--color-ink-soft)]">
-            Per-device and per-category usage reporting turns on once your device starts streaming
-            telemetry. We&apos;ll show screen time by kid, by device, and by category
-            (social, video, games, learning) here.
-          </p>
-          <div className="mt-4 grid grid-cols-2 gap-2 opacity-50 sm:grid-cols-4">
-            {["Social", "Video", "Games", "Learning"].map((c) => (
-              <div key={c} className="rounded-lg bg-[var(--color-cream)] p-3 text-center text-xs">
-                <div className="text-[var(--color-ink-soft)]">{c}</div>
-                <div className="mt-1 font-mono text-base">—</div>
-              </div>
-            ))}
+        <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
+          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-6">
+            <BrainrotMeter minutes={null} size="lg" />
+            <div className="flex-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[
+                { k: "Social", warm: true },
+                { k: "Video", warm: true },
+                { k: "Games", warm: true },
+                { k: "Learning", warm: false },
+              ].map((c) => (
+                <div
+                  key={c.k}
+                  className="rounded-lg bg-[var(--color-cream)] p-3 text-center"
+                >
+                  <div
+                    className={`text-[10px] font-medium uppercase tracking-wider ${
+                      c.warm
+                        ? "text-[var(--color-accent)]"
+                        : "text-emerald-700"
+                    }`}
+                  >
+                    {c.k}
+                  </div>
+                  <div className="mt-1 font-mono text-base">—</div>
+                </div>
+              ))}
+            </div>
           </div>
-          <p className="mt-3 text-xs text-[var(--color-ink-soft)]/70">Coming soon</p>
+          <p className="mt-4 text-xs text-[var(--color-ink-soft)]">
+            Last 24h. Brain mark goes green when the household stays under
+            10 minutes a day of short-form video / social. Per-category data
+            turns on once your Braintech device streams telemetry.
+          </p>
         </div>
       </section>
+
+      {/* DEVICES — one unified table. Tabs = groups, "+" creates one,
+          selecting a group reveals its rules + add device + add rule. */}
+      {devices.length > 0 && (
+        <section>
+          <h2 className="serif text-2xl tracking-[-0.01em]">Devices</h2>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+            Every screen seen on your network in the last 7 days. Groups
+            are subsets — tap a tab to filter, manage members and rules
+            inside the group.
+          </p>
+          <AllDevicesSection rows={allDevicesUI} groups={groupsForUi} />
+        </section>
+      )}
+
+      {memory && (
+        <section>
+          <div className="rounded-2xl border border-[var(--color-rule)] bg-white p-4 text-sm text-[var(--color-ink-soft)]">
+            <span className="font-medium text-[var(--color-ink)]">What Bri knows: </span>
+            {memory}
+          </div>
+        </section>
+      )}
 
       {/* Bri */}
       <section className="pb-4">
