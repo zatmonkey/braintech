@@ -344,6 +344,13 @@ type policyDoc struct {
 	AllowWindows []timeWindow  `json:"allow_windows"`
 	AllowQuotas  []quotaWindow `json:"allow_quotas"`
 	UpdatedAt    string        `json:"updated_at"`
+	// BaselineByDay seeds the on-device quota counter with per-MAC
+	// minutes already used today (from the server's client_usage_minute
+	// table at rule-apply time). Lets the engine make decisions against
+	// the FULL day's usage, not just what it observed since deploy.
+	// Format: { "YYYY-MM-DD": { "mac": minutes_used } }. Only the apply
+	// day is populated; subsequent days fall back to the live counter.
+	BaselineByDay map[string]map[string]int `json:"baseline_by_day,omitempty"`
 }
 
 type timeWindow struct {
@@ -431,10 +438,12 @@ const (
 // reason — which window/quota matched, current minutes used, etc. —
 // so the dashboard can show parents what's actually deciding the state.
 func evaluate(doc *policyDoc, now time.Time) (decision, PolicyDecision) {
+	dayKeys := periodDayKeys("day", now)
 	report := PolicyDecision{
-		RuleID:         doc.RuleID,
-		EvaluatedAt:    now.Format(time.RFC3339),
-		MinutesUsedDay: globalQuotaCounter.countPeriod(doc.RuleID, doc.MACs, periodDayKeys("day", now)),
+		RuleID:      doc.RuleID,
+		EvaluatedAt: now.Format(time.RFC3339),
+		MinutesUsedDay: globalQuotaCounter.countPeriod(doc.RuleID, doc.MACs, dayKeys) +
+			baselineFor(doc, doc.MACs, dayKeys),
 	}
 	if doc.Kind != "block_unless" {
 		report.Decision = string(decisionEnforce)
@@ -457,7 +466,8 @@ func evaluate(doc *policyDoc, now time.Time) (decision, PolicyDecision) {
 	}
 	for _, q := range doc.AllowQuotas {
 		days := periodDayKeys(q.Period, now)
-		used := globalQuotaCounter.countPeriod(doc.RuleID, doc.MACs, days)
+		used := globalQuotaCounter.countPeriod(doc.RuleID, doc.MACs, days) +
+			baselineFor(doc, doc.MACs, days)
 		if used < q.MinutesMax {
 			report.Decision = string(decisionAllow)
 			report.ActiveQuota = &DecisionQuota{
@@ -474,7 +484,8 @@ func evaluate(doc *policyDoc, now time.Time) (decision, PolicyDecision) {
 	var closest *DecisionQuota
 	for _, q := range doc.AllowQuotas {
 		days := periodDayKeys(q.Period, now)
-		used := globalQuotaCounter.countPeriod(doc.RuleID, doc.MACs, days)
+		used := globalQuotaCounter.countPeriod(doc.RuleID, doc.MACs, days) +
+			baselineFor(doc, doc.MACs, days)
 		if closest == nil || used > closest.MinutesUsed {
 			closest = &DecisionQuota{
 				Period:      q.Period,
@@ -561,14 +572,39 @@ func windowMatches(w timeWindow, now time.Time) bool {
 }
 
 // quotaAllows reads globalQuotaCounter and returns true while the group
-// is still under their budget for the requested period.
+// is still under their budget for the requested period. Server-seeded
+// baseline minutes (today's pre-rule usage) are added on top of the
+// agent's live counter for any days that intersect the period — no
+// double-counting because the agent's counter only sees queries since
+// rule deploy, while the baseline captures everything before.
 func quotaAllows(doc *policyDoc, q quotaWindow, now time.Time) bool {
 	days := periodDayKeys(q.Period, now)
 	if len(days) == 0 {
 		return false // unknown period → fail closed
 	}
 	used := globalQuotaCounter.countPeriod(doc.RuleID, doc.MACs, days)
+	used += baselineFor(doc, doc.MACs, days)
 	return used < q.MinutesMax
+}
+
+// baselineFor sums seeded per-MAC minutes across the days that intersect
+// the requested period. Lowercase MAC compare matches the rest of the
+// counter's plumbing.
+func baselineFor(doc *policyDoc, macs []string, days []string) int {
+	if doc == nil || len(doc.BaselineByDay) == 0 {
+		return 0
+	}
+	total := 0
+	for _, day := range days {
+		perMac, ok := doc.BaselineByDay[day]
+		if !ok {
+			continue
+		}
+		for _, mac := range macs {
+			total += perMac[strings.ToLower(mac)]
+		}
+	}
+	return total
 }
 
 // applyDecision flips the nft MAC set to match the engine's decision.

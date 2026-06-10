@@ -860,8 +860,27 @@ export function policyBlockUnlessJson(
   macs: string[],
   allowWindows: TimeWindow[],
   allowQuotas: QuotaWindow[],
+  /**
+   * Per-MAC minutes-already-used today, from the server's client_usage_minute
+   * table. Lets the on-device quota counter "inherit" today's pre-rule
+   * usage instead of starting from zero. Without this, "105 min/day"
+   * would mean "105 min from deploy", which surprises parents who set
+   * the rule mid-day after the kid has already watched a lot.
+   *
+   * Only the day the rule was applied is seeded; subsequent days start
+   * fresh in the agent's local counter (which is what the parent
+   * expects — yesterday's minutes don't roll over).
+   */
+  baselineByMacToday: Record<string, number> = {},
 ): string {
-  const doc: BlockUnlessPolicy = {
+  const today = new Date().toISOString().slice(0, 10);
+  const baselineByDay: Record<string, Record<string, number>> = {};
+  if (Object.keys(baselineByMacToday).length > 0) {
+    baselineByDay[today] = baselineByMacToday;
+  }
+  const doc: BlockUnlessPolicy & {
+    baseline_by_day?: Record<string, Record<string, number>>;
+  } = {
     kind: "block_unless",
     rule_id: ruleId,
     app_label: appLabel,
@@ -871,6 +890,7 @@ export function policyBlockUnlessJson(
     allow_windows: allowWindows,
     allow_quotas: allowQuotas,
     updated_at: new Date().toISOString(),
+    ...(Object.keys(baselineByDay).length > 0 ? { baseline_by_day: baselineByDay } : {}),
   };
   return JSON.stringify(doc, null, 2) + "\n";
 }
@@ -930,6 +950,14 @@ export function nftPauseGroupFile(ruleId: string, macs: string[]): string {
  */
 export type MaterializeContext = {
   groupMacs?: Map<string, string[]>;
+  /**
+   * Per-schedule-rule baseline (today's minutes already used per MAC,
+   * keyed by rule_id then MAC). Caller pre-fetches from
+   * client_usage_minute. Used to seed the agent's on-device quota
+   * counter so a "105 min today" rule applied at 22:00 honours the
+   * minutes the kid burned earlier in the day.
+   */
+  scheduleBaselines?: Map<string, Record<string, number>>;
 };
 
 /**
@@ -1001,6 +1029,7 @@ export async function materializeOps(
     // it when the schedule says "enforce" and clears it when "allow".
     const nftContent = nftBrainrotFile(rule.rule_id, []);
     const brainrotContent = brainrotStateJson(rule.rule_id, domains, macs);
+    const baseline = ctx.scheduleBaselines?.get(rule.rule_id) ?? {};
     const policyContent = policyBlockUnlessJson(
       rule.rule_id,
       p.app_label,
@@ -1008,6 +1037,7 @@ export async function materializeOps(
       macs,
       p.allow_windows ?? [],
       p.allow_quotas ?? [],
+      baseline,
     );
     const nftPath = brainrotNftPath(rule.rule_id);
     const brainrotPath = brainrotJsonPath(rule.rule_id);

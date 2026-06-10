@@ -501,6 +501,31 @@ export async function POST(req: Request) {
           FROM account_rules WHERE owner_email = ${email} AND device_id = ${primary.device_id};
         `) as RuleRow[];
         const groupMacs = await loadGroupMacs(sql, email);
+        // Pre-fetch baseline minutes used today for each active schedule
+        // rule, keyed by rule_id then MAC. Seeds the agent's on-device
+        // quota counter so a "105 min/day" rule applied at 22:00 respects
+        // minutes already burned earlier in the day.
+        const scheduleBaselines = new Map<string, Record<string, number>>();
+        for (const r of allRows) {
+          if (r.rule_type !== "block_schedule_group" || !r.active) continue;
+          const sp = r.params as BlockScheduleGroupParams;
+          const macsForRule = groupMacs.get(sp.group_id) ?? [];
+          if (macsForRule.length === 0) continue;
+          const usage = (await sql`
+            SELECT mac::text AS mac, COUNT(DISTINCT bucket_start)::int AS minutes
+            FROM client_usage_minute
+            WHERE owner_email = ${email}
+              AND mac = ANY(${macsForRule}::text[])
+              AND app = ${sp.app_label}
+              AND bucket_start >= DATE_TRUNC('day', NOW())
+            GROUP BY mac;
+          `) as { mac: string; minutes: number }[];
+          const perMac: Record<string, number> = {};
+          for (const u of usage) {
+            perMac[u.mac.toLowerCase()] = Number(u.minutes);
+          }
+          scheduleBaselines.set(r.rule_id, perMac);
+        }
         const allRules: AccountRule[] = await Promise.all(
           allRows.map(async (r) => {
             const base: AccountRule = {
@@ -512,7 +537,7 @@ export async function POST(req: Request) {
               summary: r.summary ?? undefined,
               active: r.active,
             };
-            if (r.active) base.ops = await materializeOps(base, { groupMacs });
+            if (r.active) base.ops = await materializeOps(base, { groupMacs, scheduleBaselines });
             return base;
           }),
         );
