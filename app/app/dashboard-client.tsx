@@ -27,7 +27,7 @@ export function LogoutButton() {
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-export function AccountChat() {
+export function AccountChat({ compact = false }: { compact?: boolean } = {}) {
   const [messages, setMessages] = useState<Msg[]>([
     {
       role: "assistant",
@@ -91,7 +91,7 @@ export function AccountChat() {
   }
 
   return (
-    <div ref={rootRef} className="flex h-[420px] flex-col overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]">
+    <div ref={rootRef} className={`flex ${compact ? "h-[260px]" : "h-[420px]"} flex-col overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]`}>
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>

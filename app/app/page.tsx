@@ -192,43 +192,6 @@ export default async function Dashboard() {
         </div>
       </header>
 
-      {/* Devices & network status */}
-      <section>
-        <h2 className="serif text-2xl tracking-[-0.01em]">Your network</h2>
-        {devices.length === 0 ? (
-          <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5 text-[var(--color-ink-soft)]">
-            No device linked to {email} yet. Once your Braintech device is registered to your
-            account, its status appears here.
-          </div>
-        ) : (
-          <div className="mt-3 grid gap-3">
-            {devices.map((d) => {
-              const isOnline = online(d.last_seen);
-              const inSync = d.reported_version === d.desired_version;
-              return (
-                <div key={d.device_id} className="rounded-2xl border border-[var(--color-rule)] bg-white p-5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 font-medium">
-                      <span className={`size-2.5 rounded-full ${isOnline ? "bg-emerald-500" : "bg-zinc-300"}`} />
-                      {d.label ?? d.device_id}
-                    </div>
-                    <span className="text-xs text-[var(--color-ink-soft)]">{isOnline ? "Online" : "Offline"}</span>
-                  </div>
-                  <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                    <Stat label="Config" value={inSync ? "In sync ✓" : "Updating…"} />
-                    <Stat label="WAN" value={d.telemetry?.wan_up ? "Up" : "Down"} />
-                    <Stat label="Firmware" value={d.telemetry?.firmware ?? "—"} />
-                    <Stat label="Uptime" value={fmtUptime(d.telemetry?.uptime_sec)} />
-                    <Stat label="Connected" value={`${realClients(d.telemetry).length} devices`} />
-                    <Stat label="Rules active" value={String(activeRules.length)} />
-                  </dl>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
       {/* USAGE — dashboard headline. Brainrot meter + category placeholders.
           Real category data turns this on once /api/account/usage exists. */}
       <section>
@@ -269,6 +232,17 @@ export default async function Dashboard() {
         </div>
       </section>
 
+      {/* BRI (compact). Lives high so a quick rule is one prompt away. */}
+      <section>
+        <h2 className="serif text-2xl tracking-[-0.01em]">Bri</h2>
+        <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+          Tell her a rule in plain English. She handles the rest.
+        </p>
+        <div className="mt-3">
+          <AccountChat compact />
+        </div>
+      </section>
+
       {/* DEVICES — one unified table. Tabs = groups, "+" creates one,
           selecting a group reveals its rules + add device + add rule. */}
       {devices.length > 0 && (
@@ -292,12 +266,64 @@ export default async function Dashboard() {
         </section>
       )}
 
-      {/* Bri */}
+      {/* NETWORK STATUS — moved to the bottom. The status card is useful
+          for debugging but ranks lower than usage / chat / devices for the
+          day-to-day parent flow. */}
       <section className="pb-4">
-        <h2 className="serif text-2xl tracking-[-0.01em]">Chat with Bri</h2>
-        <div className="mt-3">
-          <AccountChat />
-        </div>
+        <h2 className="serif text-2xl tracking-[-0.01em]">Network status</h2>
+        {devices.length === 0 ? (
+          <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5 text-[var(--color-ink-soft)]">
+            No device linked to {email} yet. Once your Braintech device is
+            registered to your account, its status appears here.
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-3">
+            {devices.map((d) => {
+              const isOnline = online(d.last_seen);
+              const inSync = d.reported_version === d.desired_version;
+              return (
+                <div
+                  key={d.device_id}
+                  className="rounded-2xl border border-[var(--color-rule)] bg-white p-5"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-medium">
+                      <span
+                        className={`size-2.5 rounded-full ${
+                          isOnline ? "bg-emerald-500" : "bg-zinc-300"
+                        }`}
+                      />
+                      {d.label ?? d.device_id}
+                    </div>
+                    <span className="text-xs text-[var(--color-ink-soft)]">
+                      {isOnline ? "Online" : "Offline"}
+                    </span>
+                  </div>
+                  <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <Stat
+                      label="Config"
+                      value={inSync ? "In sync ✓" : "Updating…"}
+                    />
+                    <Stat label="WAN" value={d.telemetry?.wan_up ? "Up" : "Down"} />
+                    <Stat label="Firmware" value={d.telemetry?.firmware ?? "—"} />
+                    <Stat
+                      label="Uptime"
+                      value={fmtUptime(d.telemetry?.uptime_sec)}
+                    />
+                    <Stat
+                      label="Connected"
+                      value={`${realClients(d.telemetry).length} devices`}
+                    />
+                    <Stat
+                      label="Rules active"
+                      value={String(activeRules.length)}
+                    />
+                  </dl>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     </main>
   );
