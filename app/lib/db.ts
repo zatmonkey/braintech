@@ -460,6 +460,32 @@ export async function ensureAccountSchema(
       PRIMARY KEY (owner_email, mac, rule_id, day)
     );
   `;
+
+  // Earn claims — every kid-initiated request to convert a learning
+  // activity into brain credits. One row per claim, regardless of pass/
+  // fail; the scoring decision lives on the row. The quiz questions +
+  // raw answers are stored too so a parent can audit "what did Claude
+  // actually ask, and what did the kid say".
+  //
+  // The claim_id is the cheap-to-generate prefix-coded id (claim_<hex>).
+  await sql`
+    CREATE TABLE IF NOT EXISTS earn_claims (
+      claim_id        TEXT PRIMARY KEY,
+      owner_email     TEXT NOT NULL,
+      mac             TEXT NOT NULL,
+      activity_type   TEXT NOT NULL,   -- "khan" | "reading" | "ted" | "coding"
+      subject         TEXT NOT NULL,
+      questions       JSONB NOT NULL,
+      answers         JSONB,
+      score           INTEGER,
+      max_score       INTEGER,
+      passed          BOOLEAN,
+      credit_granted  INTEGER NOT NULL DEFAULT 0,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      scored_at       TIMESTAMPTZ
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS earn_claims_owner_mac_idx ON earn_claims (owner_email, mac, created_at DESC);`;
   accountSchemaReady = true;
 }
 

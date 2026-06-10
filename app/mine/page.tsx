@@ -232,6 +232,39 @@ export default async function MinePage({
               )}
             </div>
 
+            {/* Earn-credits CTA — only visible to the kid, on the device
+                that just hit /mine. Tap to start the quiz flow. */}
+            <Link
+              href={`/mine/earn?mac=${data.mac}`}
+              className="mt-4 flex items-center justify-between gap-4 rounded-2xl border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/5 p-5 transition hover:border-[var(--color-accent)] hover:bg-[var(--color-accent)]/10"
+            >
+              <div className="min-w-0">
+                <div className="font-semibold text-[var(--color-ink)]">
+                  🧠 Earn brain credits
+                </div>
+                <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                  Show what you learned — Khan, reading, TED, coding. Pass
+                  the quiz, credits get spent automatically when you hit
+                  your daily limit on YouTube / TikTok / Roblox.
+                </p>
+              </div>
+              <div
+                aria-hidden
+                className="grid size-10 shrink-0 place-items-center rounded-full bg-[var(--color-ink)] text-[var(--color-cream)]"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  className="size-5"
+                >
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </div>
+            </Link>
+
             {/* Rules affecting this device */}
             <div className="mt-6">
               <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
