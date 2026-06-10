@@ -54,6 +54,9 @@ export function LegalChrome({
             <Link href="/" className="hover:text-[var(--color-ink)]">
               Home
             </Link>
+            <Link href="/compare" className="hover:text-[var(--color-ink)]">
+              Compare
+            </Link>
             <Link href="/privacy" className="hover:text-[var(--color-ink)]">
               Privacy
             </Link>

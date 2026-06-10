@@ -87,7 +87,14 @@ function Nav({ variation }: { variation: Variation }) {
         <Logo />
         <span className="font-semibold tracking-tight">braintech</span>
       </div>
-      <div className="flex items-center gap-5 sm:gap-6">
+      <div className="flex items-center gap-4 sm:gap-6">
+        <a
+          href="/compare"
+          data-cta="nav-compare"
+          className="hidden text-sm text-[var(--color-ink-soft)] transition hover:text-[var(--color-ink)] sm:inline"
+        >
+          vs Bark & Circle
+        </a>
         <a
           href="#waitlist"
           data-cta="nav"
@@ -729,6 +736,9 @@ function Footer({ country }: { country: string }) {
           </div>
           <div className="text-sm text-[var(--color-cream)]/60">
             <div className="mb-3 flex gap-5 sm:justify-end">
+              <a href="/compare" className="hover:text-[var(--color-cream)]">
+                Compare
+              </a>
               <a href="/privacy" className="hover:text-[var(--color-cream)]">
                 Privacy
               </a>

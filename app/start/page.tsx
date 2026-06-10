@@ -300,6 +300,14 @@ function ComparisonTable({ braintechPrice }: { braintechPrice: string }) {
           </tbody>
         </table>
       </div>
+      <div className="border-t border-[var(--color-rule)] bg-[var(--color-cream)]/40 px-6 py-3 text-center text-xs">
+        <a
+          href="/compare"
+          className="font-medium text-[var(--color-ink)] underline-offset-2 hover:underline"
+        >
+          See the full breakdown — architecture, enforcement, pricing →
+        </a>
+      </div>
     </div>
   );
 }
