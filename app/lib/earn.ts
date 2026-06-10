@@ -21,7 +21,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 
-export type ActivityType = "khan" | "reading" | "ted" | "coding";
+export type ActivityType = "khan" | "reading" | "ted" | "coding" | "video";
 
 export type EarnConfig = {
   label: string;
@@ -63,6 +63,15 @@ export const ACTIVITIES: Record<ActivityType, EarnConfig> = {
     credit_pass: 25,
     credit_partial: 15,
   },
+  // "video" subject_prompt is unused — the kid picks from the catalog
+  // and the subject is the video's title. Per-video credit values
+  // override the type-level defaults; these are just safety floors.
+  video: {
+    label: "Watch a video",
+    subject_prompt: "(catalog pick — no prompt)",
+    credit_pass: 20,
+    credit_partial: 10,
+  },
 };
 
 function client(): Anthropic {
@@ -76,24 +85,51 @@ export type Question = { q: string };
 export async function generateQuiz(
   activity: ActivityType,
   subject: string,
+  /**
+   * For activity="video": pass the video's title + speaker. The kid
+   * just watched it embedded; the quiz should probe SPECIFIC moments
+   * to verify they actually watched (not just hit play in another tab).
+   */
+  videoMeta?: { title: string; speaker: string; source: string },
 ): Promise<Question[]> {
   const cfg = ACTIVITIES[activity];
   if (!cfg) throw new Error(`unknown activity: ${activity}`);
-  const system = [
-    `You are an even-handed evaluator helping a child claim "brain credits" toward screen time by proving they engaged with a learning activity.`,
-    ``,
-    `The child says they did: ${cfg.label} — "${subject}".`,
-    ``,
-    `Write EXACTLY THREE short, level-appropriate, OPEN-ENDED comprehension questions about that specific subject. Rules:`,
-    `  - No multiple choice (too easy to fake).`,
-    `  - Questions must be answerable in 1–3 sentences by a kid who actually engaged.`,
-    `  - Pitch the level appropriately (early-elementary if the subject suggests it, middle-school if it's algebra/TED, etc.).`,
-    `  - Avoid questions the kid could answer from the title alone — probe a concept, an example, a feeling, a step.`,
-    `  - For reading: ask about a specific event, character motivation, or detail — not "what's it about?".`,
-    `  - For Khan / coding: ask about the *idea* not the exact UI ("what does a loop do?" not "what colour was the button?").`,
-    ``,
-    `Output JSON. No prose, no markdown. Schema: {"questions":[{"q":"..."},{"q":"..."},{"q":"..."}]}`,
-  ].join("\n");
+  let system: string;
+  if (activity === "video" && videoMeta) {
+    system = [
+      `You are an even-handed evaluator helping a child claim "brain credits" toward screen time by proving they actually watched a video (not just hit play in another tab).`,
+      ``,
+      `The child just finished watching:`,
+      `  Title: ${videoMeta.title}`,
+      `  Speaker: ${videoMeta.speaker}`,
+      `  Source: ${videoMeta.source}`,
+      ``,
+      `Write EXACTLY THREE short, OPEN-ENDED questions about SPECIFIC moments / claims / examples from THIS video. Rules:`,
+      `  - No multiple choice (too easy to fake).`,
+      `  - Each question should probe a moment from a different part of the video (early, middle, late) so skipping ahead fails the quiz.`,
+      `  - Anchor on something concrete: an example the speaker gave, a number they cited, a story they told, a turn in the argument.`,
+      `  - A kid who watched can answer in 1–3 sentences. A kid who didn't watch will give vague answers and fail.`,
+      `  - DON'T ask "what's the video about?" — that's answerable from the title.`,
+      ``,
+      `Output JSON. No prose, no markdown. Schema: {"questions":[{"q":"..."},{"q":"..."},{"q":"..."}]}`,
+    ].join("\n");
+  } else {
+    system = [
+      `You are an even-handed evaluator helping a child claim "brain credits" toward screen time by proving they engaged with a learning activity.`,
+      ``,
+      `The child says they did: ${cfg.label} — "${subject}".`,
+      ``,
+      `Write EXACTLY THREE short, level-appropriate, OPEN-ENDED comprehension questions about that specific subject. Rules:`,
+      `  - No multiple choice (too easy to fake).`,
+      `  - Questions must be answerable in 1–3 sentences by a kid who actually engaged.`,
+      `  - Pitch the level appropriately (early-elementary if the subject suggests it, middle-school if it's algebra/TED, etc.).`,
+      `  - Avoid questions the kid could answer from the title alone — probe a concept, an example, a feeling, a step.`,
+      `  - For reading: ask about a specific event, character motivation, or detail — not "what's it about?".`,
+      `  - For Khan / coding: ask about the *idea* not the exact UI ("what does a loop do?" not "what colour was the button?").`,
+      ``,
+      `Output JSON. No prose, no markdown. Schema: {"questions":[{"q":"..."},{"q":"..."},{"q":"..."}]}`,
+    ].join("\n");
+  }
 
   const resp = await client().messages.create({
     model: MODEL,

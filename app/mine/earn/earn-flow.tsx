@@ -1,9 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
-type ActivityKey = "khan" | "reading" | "ted" | "coding";
+type ActivityKey = "khan" | "reading" | "ted" | "coding" | "video";
+
+type CatalogVideoUI = {
+  id: string;
+  title: string;
+  speaker: string;
+  source: string;
+  youtube_id: string;
+  duration_seconds: number;
+  blurb: string;
+  credit_pass: number;
+};
 
 const ACTIVITIES: Array<{
   key: ActivityKey;
@@ -13,6 +24,14 @@ const ACTIVITIES: Array<{
   example: string;
   pass: number;
 }> = [
+  {
+    key: "video",
+    label: "Watch a video",
+    emoji: "🎥",
+    prompt: "Pick a video to watch.",
+    example: "TED-Ed videos, classic TED talks",
+    pass: 25,
+  },
   {
     key: "khan",
     label: "Khan Academy",
@@ -31,7 +50,7 @@ const ACTIVITIES: Array<{
   },
   {
     key: "ted",
-    label: "TED talk",
+    label: "TED talk (other)",
     emoji: "🎤",
     prompt: "Which TED talk?",
     example: "the talk title, or the speaker's name",
@@ -50,6 +69,8 @@ const ACTIVITIES: Array<{
 type Step =
   | { kind: "pick" }
   | { kind: "describe"; activity: ActivityKey }
+  | { kind: "video-catalog" }
+  | { kind: "video-watch"; video: CatalogVideoUI }
   | { kind: "generating"; activity: ActivityKey; subject: string }
   | {
       kind: "quiz";
@@ -73,10 +94,56 @@ type Step =
     }
   | { kind: "error"; message: string };
 
+function formatDuration(s: number): string {
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r === 0 ? `${m} min` : `${m}m ${r}s`;
+}
+
 export function EarnFlow({ mac }: { mac: string }) {
   const [step, setStep] = useState<Step>({ kind: "pick" });
   const [subject, setSubject] = useState("");
   const [answers, setAnswers] = useState<string[]>(["", "", ""]);
+
+  async function startVideoQuiz(video: CatalogVideoUI) {
+    setStep({ kind: "generating", activity: "video", subject: video.title });
+    try {
+      const res = await fetch("/api/account/earn/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mac, activity: "video", video_id: video.id }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        claim_id?: string;
+        questions?: { q: string }[];
+        activity_label?: string;
+        credit_pass?: number;
+        credit_partial?: number;
+        message?: string;
+        reason?: string;
+      };
+      if (!data.ok || !data.claim_id || !data.questions) {
+        setStep({
+          kind: "error",
+          message: data.message ?? data.reason ?? "Couldn't generate the quiz — try again.",
+        });
+        return;
+      }
+      setAnswers(["", "", ""]);
+      setStep({
+        kind: "quiz",
+        claim_id: data.claim_id,
+        activity: "video",
+        questions: data.questions,
+        activity_label: data.activity_label ?? "Video",
+        credit_pass: data.credit_pass ?? 0,
+        credit_partial: data.credit_partial ?? 0,
+      });
+    } catch {
+      setStep({ kind: "error", message: "Network hiccup — try again." });
+    }
+  }
 
   async function startQuiz(activity: ActivityKey, s: string) {
     setStep({ kind: "generating", activity, subject: s });
@@ -175,7 +242,11 @@ export function EarnFlow({ mac }: { mac: string }) {
               type="button"
               onClick={() => {
                 setSubject("");
-                setStep({ kind: "describe", activity: a.key });
+                if (a.key === "video") {
+                  setStep({ kind: "video-catalog" });
+                } else {
+                  setStep({ kind: "describe", activity: a.key });
+                }
               }}
               className="rounded-2xl border border-[var(--color-rule)] bg-white p-4 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-accent)]/5"
             >
@@ -234,11 +305,34 @@ export function EarnFlow({ mac }: { mac: string }) {
     );
   }
 
+  if (step.kind === "video-catalog") {
+    return (
+      <VideoCatalog
+        onBack={() => setStep({ kind: "pick" })}
+        onPick={(v) => setStep({ kind: "video-watch", video: v })}
+      />
+    );
+  }
+
+  if (step.kind === "video-watch") {
+    return (
+      <VideoWatch
+        video={step.video}
+        onBack={() => setStep({ kind: "video-catalog" })}
+        onFinished={() => startVideoQuiz(step.video)}
+      />
+    );
+  }
+
   if (step.kind === "generating") {
     return (
       <Loading
-        label="Building your quiz…"
-        sub="3 short questions about what you learned."
+        label={
+          step.activity === "video"
+            ? "Writing 3 questions about what you just watched…"
+            : "Building your quiz…"
+        }
+        sub="Should take a few seconds."
       />
     );
   }
@@ -375,6 +469,191 @@ function Loading({ label, sub }: { label: string; sub?: string }) {
       {sub && (
         <div className="mt-1 text-xs text-[var(--color-ink-soft)]">{sub}</div>
       )}
+    </div>
+  );
+}
+
+/* Video catalog — fetches once, renders 6 hand-picked videos as Netflix-
+ * style cards. Kid taps one to start watching. */
+function VideoCatalog({
+  onBack,
+  onPick,
+}: {
+  onBack: () => void;
+  onPick: (v: CatalogVideoUI) => void;
+}) {
+  const [videos, setVideos] = useState<CatalogVideoUI[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/account/earn/start", { method: "GET" })
+      .then((r) => r.json())
+      .then((data: { ok: boolean; videos?: CatalogVideoUI[] }) => {
+        if (data.ok && data.videos) setVideos(data.videos);
+        else setError("Couldn't load the video list — try again.");
+      })
+      .catch(() => setError("Network hiccup — try again."));
+  }, []);
+
+  return (
+    <div className="mt-8">
+      <button
+        type="button"
+        onClick={onBack}
+        className="text-xs text-[var(--color-ink-soft)] underline hover:text-[var(--color-ink)]"
+      >
+        ← back
+      </button>
+      <h2 className="serif mt-3 text-2xl leading-snug tracking-[-0.01em]">
+        Pick a video.
+      </h2>
+      <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
+        Watch it all the way through, then answer 3 short questions about it.
+      </p>
+      {error && (
+        <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+      {videos === null && !error && <Loading label="Loading videos…" />}
+      {videos && (
+        <ul className="mt-6 space-y-3">
+          {videos.map((v) => (
+            <li key={v.id}>
+              <button
+                type="button"
+                onClick={() => onPick(v)}
+                className="flex w-full items-center gap-4 rounded-2xl border border-[var(--color-rule)] bg-white p-3 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-accent)]/5 sm:p-4"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`https://i.ytimg.com/vi/${v.youtube_id}/mqdefault.jpg`}
+                  alt=""
+                  width={160}
+                  height={90}
+                  className="aspect-video w-24 shrink-0 rounded-lg bg-[var(--color-cream)] object-cover sm:w-32"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold leading-snug text-[var(--color-ink)]">
+                    {v.title}
+                  </div>
+                  <div className="mt-0.5 truncate text-xs text-[var(--color-ink-soft)]">
+                    {v.speaker} · {v.source === "ted-ed" ? "TED-Ed" : "TED"} · {formatDuration(v.duration_seconds)}
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-xs text-[var(--color-ink-soft)]">
+                    {v.blurb}
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-full bg-[var(--color-accent)]/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent)]">
+                  +{v.credit_pass}m
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* Video watch — embedded YouTube iframe. Uses the IFrame API to detect
+ * when the kid finishes the video, at which point the quiz can start.
+ * Skipping ahead doesn't fire the "ended" event, so the quiz won't
+ * launch — and even if they could trigger it, the questions probe
+ * specific moments so a skipped watch fails. */
+function VideoWatch({
+  video,
+  onBack,
+  onFinished,
+}: {
+  video: CatalogVideoUI;
+  onBack: () => void;
+  onFinished: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [ended, setEnded] = useState(false);
+
+  useEffect(() => {
+    // Lazy-load YouTube IFrame API once per page.
+    if (!document.getElementById("yt-iframe-api")) {
+      const tag = document.createElement("script");
+      tag.id = "yt-iframe-api";
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(tag);
+    }
+    let player: { destroy: () => void } | null = null;
+    function build() {
+      if (!containerRef.current) return;
+      // Clear any prior render so re-mounts don't stack iframes.
+      containerRef.current.innerHTML = "<div id='yt-player'></div>";
+      const w = window as unknown as {
+        YT?: {
+          Player: new (
+            id: string,
+            opts: Record<string, unknown>,
+          ) => { destroy: () => void };
+          PlayerState: { ENDED: number };
+        };
+      };
+      if (!w.YT?.Player) {
+        setTimeout(build, 250);
+        return;
+      }
+      player = new w.YT.Player("yt-player", {
+        videoId: video.youtube_id,
+        playerVars: {
+          rel: 0,
+          modestbranding: 1,
+          playsinline: 1,
+        },
+        events: {
+          onStateChange: (e: { data: number }) => {
+            if (e.data === w.YT!.PlayerState.ENDED) setEnded(true);
+          },
+        },
+      });
+    }
+    build();
+    return () => {
+      try {
+        player?.destroy();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [video.youtube_id]);
+
+  return (
+    <div className="mt-8">
+      <button
+        type="button"
+        onClick={onBack}
+        className="text-xs text-[var(--color-ink-soft)] underline hover:text-[var(--color-ink)]"
+      >
+        ← back
+      </button>
+      <h2 className="serif mt-3 text-2xl leading-snug tracking-[-0.01em]">
+        {video.title}
+      </h2>
+      <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+        {video.speaker} · {formatDuration(video.duration_seconds)} · up to +{video.credit_pass}m credit
+      </p>
+      <div
+        ref={containerRef}
+        className="mt-4 aspect-video w-full overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-black"
+      />
+      <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
+        Watch all the way to the end — the questions ask about specific
+        moments. Skipping ahead won&rsquo;t work.
+      </p>
+      <button
+        type="button"
+        disabled={!ended}
+        onClick={onFinished}
+        className="mt-4 w-full rounded-full bg-[var(--color-ink)] py-3 font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)] disabled:opacity-40"
+      >
+        {ended ? "Done watching — start the quiz →" : "Finish watching to unlock"}
+      </button>
     </div>
   );
 }

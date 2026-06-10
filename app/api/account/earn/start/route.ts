@@ -17,6 +17,7 @@ import {
   ensureAccountSchema,
 } from "@/app/lib/db";
 import { generateQuiz, ACTIVITIES, type ActivityType } from "@/app/lib/earn";
+import { videoById, VIDEO_CATALOG } from "@/app/lib/video-catalog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ export const maxDuration = 60;
 const MAX_CLAIMS_PER_DAY = 6;
 
 export async function POST(req: NextRequest) {
-  let body: { mac?: string; activity?: string; subject?: string };
+  let body: { mac?: string; activity?: string; subject?: string; video_id?: string };
   try {
     body = await req.json();
   } catch {
@@ -39,9 +40,21 @@ export async function POST(req: NextRequest) {
   if (!(activity in ACTIVITIES)) {
     return NextResponse.json({ ok: false, reason: "bad activity" }, { status: 400 });
   }
-  const subject = String(body.subject ?? "").trim().slice(0, 200);
-  if (subject.length < 2) {
-    return NextResponse.json({ ok: false, reason: "subject too short" }, { status: 400 });
+  // For video activity: the catalog video supplies the subject + credit
+  // amounts. For everything else: the kid types a subject.
+  let subject: string;
+  let video: ReturnType<typeof videoById> = undefined;
+  if (activity === "video") {
+    video = videoById(String(body.video_id ?? ""));
+    if (!video) {
+      return NextResponse.json({ ok: false, reason: "video not in catalog" }, { status: 400 });
+    }
+    subject = `${video.title} — ${video.speaker}`;
+  } else {
+    subject = String(body.subject ?? "").trim().slice(0, 200);
+    if (subject.length < 2) {
+      return NextResponse.json({ ok: false, reason: "subject too short" }, { status: 400 });
+    }
   }
 
   const sql = getSql();
@@ -75,7 +88,13 @@ export async function POST(req: NextRequest) {
 
   let questions;
   try {
-    questions = await generateQuiz(activity, subject);
+    questions = await generateQuiz(
+      activity,
+      subject,
+      video
+        ? { title: video.title, speaker: video.speaker, source: video.source }
+        : undefined,
+    );
   } catch (e) {
     return NextResponse.json(
       { ok: false, reason: "generator failed", message: (e as Error).message },
@@ -95,7 +114,30 @@ export async function POST(req: NextRequest) {
     questions,
     activity,
     activity_label: ACTIVITIES[activity].label,
-    credit_pass: ACTIVITIES[activity].credit_pass,
-    credit_partial: ACTIVITIES[activity].credit_partial,
+    // For video activity: use the per-video values (longer talks earn more).
+    credit_pass: video?.credit_pass ?? ACTIVITIES[activity].credit_pass,
+    credit_partial: video?.credit_partial ?? ACTIVITIES[activity].credit_partial,
+  });
+}
+
+// GET: kid hits this on /mine/earn → returns the curated catalog so the
+// picker can render thumbnails + durations + credit amounts. Public; no
+// auth required (the catalog isn't sensitive).
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    videos: VIDEO_CATALOG.map((v) => ({
+      id: v.id,
+      title: v.title,
+      speaker: v.speaker,
+      source: v.source,
+      youtube_id: v.youtube_id,
+      duration_seconds: v.duration_seconds,
+      blurb: v.blurb,
+      topics: v.topics,
+      age_min: v.age_min,
+      credit_pass: v.credit_pass,
+      credit_partial: v.credit_partial,
+    })),
   });
 }
