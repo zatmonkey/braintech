@@ -177,7 +177,7 @@ type AllDeviceRow = {
   apps: AppMinutes[];
 };
 
-type RuleStatus = "propagating" | "active";
+type RuleStatus = "propagating" | "active" | "removing";
 
 type TabGroup = {
   group_id: string;
@@ -261,6 +261,7 @@ export function AllDevicesSection({
             name: string;
             rule_type: string;
             summary: string | null;
+            status: RuleStatus;
           }>;
         }>;
         usage?: {
@@ -271,19 +272,11 @@ export function AllDevicesSection({
           per_mac_apps: Record<string, AppMinutes[]>;
         };
       };
-      const primary = data.devices?.[0];
-      const inSync = primary
-        ? primary.desired_version === primary.reported_version
-        : true;
-      const status: RuleStatus = inSync ? "active" : "propagating";
       if (Array.isArray(data.groups)) {
         setGroups((prev) => {
           const byId = new Map(prev.map((g) => [g.group_id, g] as const));
           return (data.groups ?? []).map((g) => {
             const old = byId.get(g.group_id);
-            // Brainrot + apps: take from `usage` when applyUsage, else
-            // preserve previous value so the rule poll doesn't reset
-            // meters mid-minute.
             const memberMacs = g.members.map((m) => m.mac.toLowerCase());
             const newGroupMinutes = applyUsage && data.usage
               ? data.usage.per_group_minutes[g.group_id] ?? null
@@ -300,8 +293,12 @@ export function AllDevicesSection({
               group_id: g.group_id,
               name: g.name,
               is_default: g.is_default,
-              rule_count: g.rules.length,
-              rules: g.rules.map((r) => ({ ...r, status })),
+              // rule_count: only count rules that are "live" or "going live"
+              // — removing-in-flight isn't a real rule for counting purposes.
+              rule_count: g.rules.filter((r) => r.status !== "removing").length,
+              // Status comes from the server now — it knows active vs
+              // propagating vs removing based on device sync + rule active.
+              rules: g.rules,
               brainrot_minutes: newGroupMinutes,
               apps: newGroupApps,
             };
@@ -1047,20 +1044,24 @@ export function RuleRow({
   name: string;
   ruleType: string;
   summary: string | null;
-  /** "propagating" while the device hasn't reported the desired_version
-   *  containing this rule yet; "active" once it has — the rule is live
-   *  on the router and enforcing. */
-  status?: "propagating" | "active";
+  /** "propagating" while the device hasn't reported the new desired_version
+   *  yet (in-flight add). "active" once enforced. "removing" while the
+   *  parent has clicked remove and the agent hasn't yet picked up the
+   *  cleanup — the rule is still on the router until the next sync. */
+  status?: "propagating" | "active" | "removing";
 }) {
   const [removing, setRemoving] = useState(false);
+  const isRemovingState = status === "removing";
   const dotCls =
-    status === "propagating"
-      ? "bg-amber-500 animate-pulse"
-      : "bg-red-500";
+    status === "active"
+      ? "bg-red-500"
+      : "bg-amber-500 animate-pulse";
   const dotTitle =
-    status === "propagating"
-      ? "Propagating — device picking it up"
-      : "Active — enforcing on the router";
+    status === "active"
+      ? "Active — enforcing on the router"
+      : status === "removing"
+        ? "Removing — device cleaning up"
+        : "Propagating — device picking it up";
   return (
     <li className="flex items-start justify-between gap-3 py-2.5">
       <div className="min-w-0">
@@ -1070,10 +1071,18 @@ export function RuleRow({
             title={dotTitle}
             aria-label={dotTitle}
           />
-          <span className="font-medium">{name}</span>
-          <span className="text-xs text-[var(--color-ink-soft)]">{ruleType.replace(/_/g, " ")}</span>
+          <span
+            className={`font-medium ${
+              isRemovingState ? "line-through text-[var(--color-ink-soft)]" : ""
+            }`}
+          >
+            {name}
+          </span>
+          <span className="text-xs text-[var(--color-ink-soft)]">
+            {isRemovingState ? "removing…" : ruleType.replace(/_/g, " ")}
+          </span>
         </div>
-        {summary && (
+        {summary && !isRemovingState && (
           <p className="ml-4 mt-1 text-xs text-[var(--color-ink-soft)]">{summary}</p>
         )}
       </div>
@@ -1090,10 +1099,10 @@ export function RuleRow({
             setRemoving(false);
           }
         }}
-        disabled={removing}
+        disabled={removing || isRemovingState}
         className="shrink-0 text-xs text-[var(--color-ink-soft)] underline hover:text-[var(--color-accent)] disabled:opacity-50"
       >
-        {removing ? "removing…" : "remove"}
+        {isRemovingState ? "removing" : removing ? "removing…" : "remove"}
       </button>
     </li>
   );

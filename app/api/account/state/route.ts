@@ -83,21 +83,46 @@ export async function GET() {
     FROM account_rules WHERE owner_email = ${email} ORDER BY created_at;
   `) as RuleRow[];
 
-  // Bucket rules by the group they target. Any group-scoped rule_type
-  // counts: pause_group + block_brainrot_group. Network-wide types
+  // Device sync drives the active/propagating/removing decision:
+  //   - device synced + rule active  → "active"
+  //   - device behind + rule active  → "propagating"  (in-flight add)
+  //   - device behind + rule inactive recently
+  //                                  → "removing"     (in-flight delete)
+  //   - device synced + rule inactive→ tombstone, hide
+  const primary = devices[0];
+  const inSync = primary
+    ? primary.desired_version === primary.reported_version
+    : true;
+  // 5 minutes is a generous safety window — usually the agent picks up
+  // a delete within 25s. The cap stops ancient deactivated rules from
+  // resurfacing on the dashboard if someone leaves it open for days.
+  const FIVE_MIN = 5 * 60 * 1000;
+  function ruleStatus(r: RuleRow): "active" | "propagating" | "removing" | "hide" {
+    if (r.active) return inSync ? "active" : "propagating";
+    const updated = new Date(r.updated_at).getTime();
+    if (!inSync && Date.now() - updated < FIVE_MIN) return "removing";
+    return "hide";
+  }
+
+  // Bucket rules by the group they target. Group-scoped rule_types:
+  // pause_group + block_brainrot_group. Network-wide types
   // (block_domains_network, force_router_dns, block_managed_list,
-  // block_ip_set) intentionally don't bucket here — they're rendered
-  // elsewhere as house-wide rules.
-  const rulesByGroup = new Map<string, RuleRow[]>();
+  // block_ip_set) don't bucket here — rendered elsewhere as house-wide.
+  // We include "removing" rules so the parent sees the in-flight delete.
+  const rulesByGroup = new Map<
+    string,
+    Array<RuleRow & { status: "active" | "propagating" | "removing" }>
+  >();
   for (const r of rules) {
-    if (!r.active) continue;
     if (r.rule_type !== "pause_group" && r.rule_type !== "block_brainrot_group") {
       continue;
     }
+    const s = ruleStatus(r);
+    if (s === "hide") continue;
     const gid = (r.params as { group_id?: string }).group_id;
     if (!gid) continue;
     const list = rulesByGroup.get(gid) ?? [];
-    list.push(r);
+    list.push({ ...r, status: s });
     rulesByGroup.set(gid, list);
   }
 
@@ -183,6 +208,7 @@ export async function GET() {
           rule_type: r.rule_type,
           name: r.name,
           summary: r.summary,
+          status: r.status,
         })),
       };
     }),
