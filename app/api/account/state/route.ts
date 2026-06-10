@@ -131,12 +131,11 @@ export async function GET() {
       : mins.reduce((a, m) => a + (m ?? 0), 0);
   }
   const allMacs = [...appsByMac.keys()];
-  const householdMinutes: number | null =
-    allMacs.length === 0
-      ? null
-      : allMacs.every((m) => !brainrotByMac.has(m))
-        ? null
-        : allMacs.reduce((a: number, m) => a + (brainrotByMac.get(m) ?? 0), 0);
+  let householdMinutes: number | null = null;
+  if (allMacs.length > 0 && allMacs.some((m) => brainrotByMac.has(m))) {
+    householdMinutes = 0;
+    for (const m of allMacs) householdMinutes += brainrotByMac.get(m) ?? 0;
+  }
   const householdApps = sumAppMinutes(...allMacs.map((m) => appsByMac.get(m) ?? []));
   const appsByMacObj = Object.fromEntries(appsByMac);
 
