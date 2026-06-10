@@ -24,6 +24,7 @@ import {
   NetworkStatusCard,
   UsagePanel,
 } from "./dashboard-client";
+import { InstallPrompt } from "./install-prompt";
 import { BrainrotMeter } from "./brainrot-meter";
 
 export const dynamic = "force-dynamic";
@@ -228,6 +229,10 @@ export default async function Dashboard() {
           <LogoutButton />
         </div>
       </header>
+
+      {/* Install hint — only renders for mobile visitors not already in
+          standalone PWA mode. Dismissible + remembers the choice. */}
+      <InstallPrompt />
 
       {/* USAGE — dashboard headline. Now a live client component: polls
           /api/account/state on the 60s usage cadence and refreshes

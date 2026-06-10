@@ -47,7 +47,10 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: "Braintech",
-    statusBarStyle: "black-translucent",
+    // "default" = light status bar with dark text. Fits the cream
+    // background of /app (the install target). "black-translucent"
+    // would render white text over our cream bg → invisible.
+    statusBarStyle: "default",
   },
 };
 
