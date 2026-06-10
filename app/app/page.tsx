@@ -22,6 +22,7 @@ import {
   AccountChat,
   AllDevicesSection,
   NetworkStatusCard,
+  UsagePanel,
 } from "./dashboard-client";
 import { BrainrotMeter } from "./brainrot-meter";
 
@@ -228,23 +229,15 @@ export default async function Dashboard() {
         </div>
       </header>
 
-      {/* USAGE — dashboard headline. Brainrot meter + category placeholders.
-          Real category data turns this on once /api/account/usage exists. */}
+      {/* USAGE — dashboard headline. Now a live client component: polls
+          /api/account/state on the 60s usage cadence and refreshes
+          immediately on Bri's "state-changed" event. */}
       <section>
         <h2 className="serif text-2xl tracking-[-0.01em]">Usage</h2>
-        <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-6">
-            <BrainrotMeter minutes={householdMinutes} size="lg" />
-            <div className="flex-1">
-              <TopApps apps={householdApps} />
-            </div>
-          </div>
-          <p className="mt-4 text-xs text-[var(--color-ink-soft)]">
-            Last 24h. Brain mark goes green when the house stays under
-            10 minutes a day of brainrot apps (TikTok, YouTube, Instagram,
-            Roblox, &hellip;). Learning apps don&rsquo;t count.
-          </p>
-        </div>
+        <UsagePanel
+          initialMinutes={householdMinutes}
+          initialApps={householdApps}
+        />
       </section>
 
       {/* BRI (compact). Lives high so a quick rule is one prompt away. */}

@@ -174,6 +174,104 @@ function NSStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+ * UsagePanel — the headline "Usage" block at the top of /app.
+ *
+ * Was server-rendered once and frozen. Now polls /api/account/state on
+ * the 60s usage cadence + responds to braintech:state-changed events so
+ * brainrot meter + Top Apps stay current. Renders the same shape the
+ * page used to inline.
+ * ──────────────────────────────────────────────────────────────────── */
+export function UsagePanel({
+  initialMinutes,
+  initialApps,
+}: {
+  initialMinutes: number | null;
+  initialApps: AppMinutes[];
+}) {
+  const [minutes, setMinutes] = useState<number | null>(initialMinutes);
+  const [apps, setApps] = useState<AppMinutes[]>(initialApps);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/account/state", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        usage?: {
+          household_minutes: number | null;
+          household_apps: AppMinutes[];
+        };
+      };
+      if (data.usage) {
+        setMinutes(data.usage.household_minutes);
+        setApps(data.usage.household_apps);
+      }
+    } catch {
+      /* silent */
+    }
+  }, []);
+
+  useEffect(() => {
+    // Usage data moves on the minute (brainrot meter rounds to whole
+    // minutes), so 60s polling is fine. Bri-triggered state-changed
+    // event still triggers an immediate refetch so applying a rule
+    // doesn't leave the meter stale until the next minute tick.
+    const id = setInterval(refresh, 60_000);
+    const onEvt = () => refresh();
+    window.addEventListener("braintech:state-changed", onEvt);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("braintech:state-changed", onEvt);
+    };
+  }, [refresh]);
+
+  return (
+    <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
+      <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-6">
+        <BrainrotMeter minutes={minutes} size="lg" />
+        <div className="flex-1">
+          <UsageTopApps apps={apps} />
+        </div>
+      </div>
+      <p className="mt-4 text-xs text-[var(--color-ink-soft)]">
+        Last 24h. Brain mark goes green when the house stays under
+        10 minutes a day of brainrot apps (TikTok, YouTube, Instagram,
+        Roblox, &hellip;). Learning apps don&rsquo;t count.
+      </p>
+    </div>
+  );
+}
+
+function UsageTopApps({ apps }: { apps: AppMinutes[] }) {
+  if (apps.length === 0) {
+    return (
+      <div className="rounded-lg bg-[var(--color-cream)] p-3 text-center text-sm text-[var(--color-ink-soft)]">
+        No app traffic in the last 24h yet.
+      </div>
+    );
+  }
+  const top = apps.slice(0, 5);
+  return (
+    <ul className="space-y-1.5">
+      {top.map((a) => (
+        <li key={a.app} className="flex items-center justify-between gap-3">
+          <span className="text-sm font-medium text-[var(--color-ink)]">
+            {a.app}
+          </span>
+          <span className="font-mono text-sm text-[var(--color-ink-soft)]">
+            {a.minutes}m
+          </span>
+        </li>
+      ))}
+      {apps.length > top.length && (
+        <li className="text-xs text-[var(--color-ink-soft)]">
+          + {apps.length - top.length} more
+        </li>
+      )}
+    </ul>
+  );
+}
+
 type Msg = { role: "user" | "assistant"; content: string };
 
 export function AccountChat({ compact = false }: { compact?: boolean } = {}) {
