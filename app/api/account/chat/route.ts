@@ -285,37 +285,28 @@ export async function POST(req: Request) {
 
   await sql`INSERT INTO chat_messages (session_id, role, content) VALUES (${sessionId}, 'user', ${message});`;
 
-  // Keep history TIGHT (last 1 exchange = 2 messages). Every assistant
-  // message older than that is past — and past assistant messages are
-  // exactly what makes Bri say "already blocked" when the parent just
-  // removed a rule. Past user messages aren't load-bearing for tool
-  // routing either; the live CONTEXT carries the durable state. The
-  // narrower this window, the less room for anchoring.
-  const histRows = (await sql`
-    SELECT role, content FROM chat_messages WHERE session_id = ${sessionId}
-    ORDER BY created_at DESC, id DESC LIMIT 2;
-  `) as { role: string; content: string }[];
-  const historyOnly = histRows
-    .reverse()
-    .slice(0, -1) // drop the new user message we just inserted — it gets re-attached below with the LIVE STATE header
-    .map((r) => ({ role: r.role === "user" ? "user" : "assistant", content: r.content }));
-
+  // No chat history. Every turn is stateless: CONTEXT (in system) +
+  // LIVE STATE (in this turn) + the user's actual message. The two
+  // things history WAS being kept for — multi-turn confirmation
+  // ("yes") and clarifier follow-ups — both work without it:
+  //   - "yes" + PENDING PROPOSAL in CONTEXT → apply_pending_rule.
+  //   - A short clarifier reply that needs prior context to interpret
+  //     is rare in practice; if it happens, Bri asks the parent to
+  //     re-state the full request.
+  // History anchoring was the source of "I apologise, I made a
+  // mistake" preambles and "already blocked" hallucinations — and
+  // both were costing apply turns where Bri talked instead of tool-
+  // calling. Cleanest fix is to delete the rope.
   const context = buildContext(devices, labels, groupRows, membership, activeRules, pendingInitial, memory);
 
-  // Re-inject the LIVE STATE at the very end of the conversation, attached
-  // to the user's actual message. This puts the freshest truth AFTER any
-  // remaining "✅ Done" assistant message — Bri can't read past it. If
-  // the rule the parent is asking about isn't in the live block here,
-  // she's looking right at the proof it's gone.
   const userTurn = [
-    `>>> LIVE STATE (from the database this second — overrides anything earlier in this chat):`,
+    `>>> LIVE STATE (from the database this second — single source of truth, overrides anything you remember):`,
     context,
     ``,
     `>>> Parent just said:`,
     message,
   ].join("\n");
   const history: Anthropic.MessageParam[] = [
-    ...(historyOnly as Anthropic.MessageParam[]),
     { role: "user", content: userTurn },
   ];
 
