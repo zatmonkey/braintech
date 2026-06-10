@@ -285,19 +285,39 @@ export async function POST(req: Request) {
 
   await sql`INSERT INTO chat_messages (session_id, role, content) VALUES (${sessionId}, 'user', ${message});`;
 
-  // Keep history short (last 2 exchanges = 4 messages). The transcript is
-  // for conversational flow only — durable state lives in CONTEXT. The
-  // shorter the history, the less room there is for Bri to anchor on her
-  // own past "Done" claims and contradict the freshly-fetched CONTEXT.
+  // Keep history TIGHT (last 1 exchange = 2 messages). Every assistant
+  // message older than that is past — and past assistant messages are
+  // exactly what makes Bri say "already blocked" when the parent just
+  // removed a rule. Past user messages aren't load-bearing for tool
+  // routing either; the live CONTEXT carries the durable state. The
+  // narrower this window, the less room for anchoring.
   const histRows = (await sql`
     SELECT role, content FROM chat_messages WHERE session_id = ${sessionId}
-    ORDER BY created_at DESC, id DESC LIMIT 4;
+    ORDER BY created_at DESC, id DESC LIMIT 2;
   `) as { role: string; content: string }[];
-  const history: Anthropic.MessageParam[] = histRows
+  const historyOnly = histRows
     .reverse()
+    .slice(0, -1) // drop the new user message we just inserted — it gets re-attached below with the LIVE STATE header
     .map((r) => ({ role: r.role === "user" ? "user" : "assistant", content: r.content }));
 
   const context = buildContext(devices, labels, groupRows, membership, activeRules, pendingInitial, memory);
+
+  // Re-inject the LIVE STATE at the very end of the conversation, attached
+  // to the user's actual message. This puts the freshest truth AFTER any
+  // remaining "✅ Done" assistant message — Bri can't read past it. If
+  // the rule the parent is asking about isn't in the live block here,
+  // she's looking right at the proof it's gone.
+  const userTurn = [
+    `>>> LIVE STATE (from the database this second — overrides anything earlier in this chat):`,
+    context,
+    ``,
+    `>>> Parent just said:`,
+    message,
+  ].join("\n");
+  const history: Anthropic.MessageParam[] = [
+    ...(historyOnly as Anthropic.MessageParam[]),
+    { role: "user", content: userTurn },
+  ];
 
   const onTool = async (name: string, input: unknown): Promise<string> => {
     try {
