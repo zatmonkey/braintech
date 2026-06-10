@@ -11,7 +11,12 @@ import {
   ensureChatSchema,
   ensureDefaultGroup,
 } from "@/app/lib/db";
-import { loadMacGroups } from "@/app/lib/groups";
+import {
+  loadMacGroups,
+  loadBrainrotMinutes,
+  loadTopAppsByMac,
+  sumAppMinutes,
+} from "@/app/lib/groups";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -105,8 +110,45 @@ export async function GET() {
     SELECT humans, notes, updated_at FROM account_memory WHERE owner_email = ${email};
   `) as { humans: unknown; notes: string; updated_at: string }[];
 
+  // Usage / brainrot — heavier queries, but lightweight enough to ship
+  // alongside the state poll. The dashboard hits this endpoint every 5s
+  // for rule status and every 60s for usage; we always recompute usage
+  // here and let the client decide what to merge.
+  const brainrotByMac = await loadBrainrotMinutes(sql, email);
+  const appsByMac = await loadTopAppsByMac(sql, email);
+  const macGroupsForUsage = macGroups;
+  const usagePerMac = Object.fromEntries(
+    [...brainrotByMac.entries()].map(([mac, minutes]) => [mac, minutes]),
+  );
+  const usagePerGroup: Record<string, number | null> = {};
+  for (const g of groups) {
+    const memberMacs = [...macGroupsForUsage.entries()]
+      .filter(([, gids]) => gids.includes(g.group_id))
+      .map(([m]) => m);
+    const mins = memberMacs.map((m) => brainrotByMac.get(m) ?? null);
+    usagePerGroup[g.group_id] = mins.every((m) => m === null)
+      ? null
+      : mins.reduce((a, m) => a + (m ?? 0), 0);
+  }
+  const allMacs = [...appsByMac.keys()];
+  const householdMinutes: number | null =
+    allMacs.length === 0
+      ? null
+      : allMacs.every((m) => !brainrotByMac.has(m))
+        ? null
+        : allMacs.reduce((a: number, m) => a + (brainrotByMac.get(m) ?? 0), 0);
+  const householdApps = sumAppMinutes(...allMacs.map((m) => appsByMac.get(m) ?? []));
+  const appsByMacObj = Object.fromEntries(appsByMac);
+
   return NextResponse.json({
     email,
+    usage: {
+      household_minutes: householdMinutes,
+      household_apps: householdApps,
+      per_mac_minutes: usagePerMac,
+      per_group_minutes: usagePerGroup,
+      per_mac_apps: appsByMacObj,
+    },
     devices: devices.map((d) => ({
       device_id: d.device_id,
       label: d.label,

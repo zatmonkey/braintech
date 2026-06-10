@@ -236,7 +236,16 @@ export function AllDevicesSection({
   // chat component dispatches after every Bri reply — that triggers an
   // immediate fetch so newly-applied rules appear within ~1s, not 5s.
   // Bri's "✅ Done" then has a tight visible feedback loop.
-  const refresh = useCallback(async () => {
+  // Two cadences:
+  //   - rules + group membership change frequently (parent clicks Add /
+  //     Remove, Bri applies/removes) → poll every 5s
+  //   - brainrot meters + top apps change on the minute (DNS-tail
+  //     populates buckets in real time but the meter rounds to whole
+  //     minutes) → fold in every 60s
+  // Both come from /api/account/state in one shot so we don't fan out
+  // requests — `applyUsage` controls whether the usage portion of the
+  // response merges into local state.
+  const refresh = useCallback(async (applyUsage: boolean) => {
     try {
       const res = await fetch("/api/account/state", { cache: "no-store" });
       if (!res.ok) return;
@@ -254,6 +263,13 @@ export function AllDevicesSection({
             summary: string | null;
           }>;
         }>;
+        usage?: {
+          household_minutes: number | null;
+          household_apps: AppMinutes[];
+          per_mac_minutes: Record<string, number>;
+          per_group_minutes: Record<string, number | null>;
+          per_mac_apps: Record<string, AppMinutes[]>;
+        };
       };
       const primary = data.devices?.[0];
       const inSync = primary
@@ -265,30 +281,59 @@ export function AllDevicesSection({
           const byId = new Map(prev.map((g) => [g.group_id, g] as const));
           return (data.groups ?? []).map((g) => {
             const old = byId.get(g.group_id);
+            // Brainrot + apps: take from `usage` when applyUsage, else
+            // preserve previous value so the rule poll doesn't reset
+            // meters mid-minute.
+            const memberMacs = g.members.map((m) => m.mac.toLowerCase());
+            const newGroupMinutes = applyUsage && data.usage
+              ? data.usage.per_group_minutes[g.group_id] ?? null
+              : old?.brainrot_minutes ?? null;
+            const newGroupApps =
+              applyUsage && data.usage
+                ? sumApps(
+                    memberMacs.map(
+                      (m) => data.usage!.per_mac_apps[m] ?? [],
+                    ),
+                  )
+                : old?.apps ?? [];
             return {
               group_id: g.group_id,
               name: g.name,
               is_default: g.is_default,
               rule_count: g.rules.length,
               rules: g.rules.map((r) => ({ ...r, status })),
-              // brainrot + apps stay where they were until a fuller refetch —
-              // they're aggregate metrics that don't move on rule changes.
-              brainrot_minutes: old?.brainrot_minutes ?? null,
-              apps: old?.apps ?? [],
+              brainrot_minutes: newGroupMinutes,
+              apps: newGroupApps,
             };
           });
         });
+        // Also update device rows' brainrot/apps when applyUsage.
+        if (applyUsage && data.usage) {
+          const usage = data.usage;
+          setItems((prevItems) =>
+            prevItems.map((row) => ({
+              ...row,
+              brainrot_minutes: usage.per_mac_minutes[row.mac] ?? null,
+              apps: usage.per_mac_apps[row.mac] ?? [],
+            })),
+          );
+        }
       }
     } catch {
       // silent — try again next tick
     }
   }, []);
   useEffect(() => {
-    const id = setInterval(refresh, 5000);
-    const onEvt = () => refresh();
+    const rulesTick = setInterval(() => refresh(false), 5000);
+    const usageTick = setInterval(() => refresh(true), 60_000);
+    // First tick: refresh both immediately so a freshly-loaded dashboard
+    // doesn't wait 60s for usage data after a hard reload.
+    refresh(true);
+    const onEvt = () => refresh(true);
     window.addEventListener("braintech:state-changed", onEvt);
     return () => {
-      clearInterval(id);
+      clearInterval(rulesTick);
+      clearInterval(usageTick);
       window.removeEventListener("braintech:state-changed", onEvt);
     };
   }, [refresh]);
