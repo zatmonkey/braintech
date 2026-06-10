@@ -7,19 +7,29 @@ import { BrainrotMeter } from "./brainrot-meter";
  * Stats popover. For v1 most categories show "—" until /api/account/usage
  * starts returning real telemetry-derived data. The shape is the contract.
  */
+type CategoryBreakdown = {
+  social: number;
+  video: number;
+  games: number;
+  learning: number;
+};
+
 export function StatsModal({
   open,
   onClose,
   title,
   subtitle,
   brainrotMinutes,
+  breakdown,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   subtitle?: string;
   brainrotMinutes: number | null;
+  breakdown?: CategoryBreakdown;
 }) {
+  const b = breakdown ?? { social: 0, video: 0, games: 0, learning: 0 };
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -78,10 +88,10 @@ export function StatsModal({
           </div>
           <div className="mt-2 grid grid-cols-4 gap-2">
             {[
-              { k: "Social", colored: true },
-              { k: "Video", colored: true },
-              { k: "Games", colored: true },
-              { k: "Learning", colored: false },
+              { k: "Social", colored: true, mins: b.social },
+              { k: "Video", colored: true, mins: b.video },
+              { k: "Games", colored: true, mins: b.games },
+              { k: "Learning", colored: false, mins: b.learning },
             ].map((c) => (
               <div
                 key={c.k}
@@ -94,7 +104,9 @@ export function StatsModal({
                 >
                   {c.k}
                 </div>
-                <div className="mt-1 font-mono text-base">—</div>
+                <div className="mt-1 font-mono text-base">
+                  {c.mins > 0 ? `${c.mins}m` : "—"}
+                </div>
               </div>
             ))}
           </div>

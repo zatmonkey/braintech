@@ -12,6 +12,10 @@ import {
   loadMacGroups,
   loadAllDevices,
   loadBrainrotMinutes,
+  loadCategoryBreakdownByMac,
+  emptyBreakdown,
+  sumBreakdowns,
+  type CategoryBreakdown,
 } from "@/app/lib/groups";
 import {
   SWRegister,
@@ -90,6 +94,7 @@ export default async function Dashboard() {
   let macGroups = new Map<string, string[]>();
   let allDevices: Awaited<ReturnType<typeof loadAllDevices>> = [];
   let brainrotByMac = new Map<string, number>();
+  let breakdownByMac = new Map<string, CategoryBreakdown>();
   let memory = "";
   if (sql) {
     await ensureDeviceSchema(sql);
@@ -114,6 +119,7 @@ export default async function Dashboard() {
     macGroups = await loadMacGroups(sql, email);
     allDevices = await loadAllDevices(sql, email);
     brainrotByMac = await loadBrainrotMinutes(sql, email);
+    breakdownByMac = await loadCategoryBreakdownByMac(sql, email);
     const leadRows = (await sql`SELECT memory FROM leads WHERE email = ${email};`) as {
       memory: string | null;
     }[];
@@ -137,6 +143,7 @@ export default async function Dashboard() {
   const allDevicesUI = allDevices.map((d) => ({
     ...d,
     brainrot_minutes: brainrotByMac.get(d.mac) ?? null,
+    breakdown: breakdownByMac.get(d.mac) ?? emptyBreakdown(),
   }));
   const groupsForUi = groups.map((g) => {
     const rules = (rulesByGroup.get(g.group_id) ?? []).map((r) => ({
@@ -154,6 +161,9 @@ export default async function Dashboard() {
     const groupMinutes = memberMins.every((m) => m === null)
       ? null
       : memberMins.reduce((acc: number, m) => acc + (m ?? 0), 0);
+    const groupBreakdown = sumBreakdowns(
+      ...memberMacs.map((m) => breakdownByMac.get(m) ?? emptyBreakdown()),
+    );
     return {
       group_id: g.group_id,
       name: g.name,
@@ -161,6 +171,7 @@ export default async function Dashboard() {
       rule_count: rules.length,
       rules,
       brainrot_minutes: groupMinutes,
+      breakdown: groupBreakdown,
     };
   });
   // Household minutes for the top-of-page Usage meter.
@@ -173,6 +184,9 @@ export default async function Dashboard() {
             (acc, d) => acc + (d.brainrot_minutes ?? 0),
             0,
           );
+  const householdBreakdown = sumBreakdowns(
+    ...allDevicesUI.map((d) => d.breakdown),
+  );
   void labels;
 
   return (
@@ -201,10 +215,10 @@ export default async function Dashboard() {
             <BrainrotMeter minutes={householdMinutes} size="lg" />
             <div className="flex-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
-                { k: "Social", warm: true },
-                { k: "Video", warm: true },
-                { k: "Games", warm: true },
-                { k: "Learning", warm: false },
+                { k: "Social", warm: true, mins: householdBreakdown.social },
+                { k: "Video", warm: true, mins: householdBreakdown.video },
+                { k: "Games", warm: true, mins: householdBreakdown.games },
+                { k: "Learning", warm: false, mins: householdBreakdown.learning },
               ].map((c) => (
                 <div
                   key={c.k}
@@ -219,7 +233,9 @@ export default async function Dashboard() {
                   >
                     {c.k}
                   </div>
-                  <div className="mt-1 font-mono text-base">—</div>
+                  <div className="mt-1 font-mono text-base">
+                    {c.mins > 0 ? `${c.mins}m` : "—"}
+                  </div>
                 </div>
               ))}
             </div>

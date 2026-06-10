@@ -25,6 +25,65 @@ export async function loadBrainrotMinutes(
   return map;
 }
 
+export type CategoryBreakdown = {
+  social: number;
+  video: number;
+  games: number;
+  learning: number;
+};
+
+const EMPTY_BREAKDOWN: Readonly<CategoryBreakdown> = Object.freeze({
+  social: 0,
+  video: 0,
+  games: 0,
+  learning: 0,
+});
+
+export function emptyBreakdown(): CategoryBreakdown {
+  return { ...EMPTY_BREAKDOWN };
+}
+
+/**
+ * Per-MAC per-category minutes in the last 24h. One row per (mac, category)
+ * already aggregated to DISTINCT minute-buckets. The dashboard renders this
+ * directly into the StatsModal and the Usage breakdown cards.
+ */
+export async function loadCategoryBreakdownByMac(
+  sql: NeonQueryFunction<false, false>,
+  email: string,
+): Promise<Map<string, CategoryBreakdown>> {
+  const rows = (await sql`
+    SELECT mac::text AS mac, category::text AS category,
+           COUNT(DISTINCT bucket_start)::int AS minutes
+    FROM client_usage_minute
+    WHERE owner_email = ${email}
+      AND bucket_start > NOW() - INTERVAL '24 hours'
+    GROUP BY mac, category;
+  `) as { mac: string; category: string; minutes: number }[];
+  const map = new Map<string, CategoryBreakdown>();
+  for (const r of rows) {
+    const key = r.mac.toLowerCase();
+    const b = map.get(key) ?? emptyBreakdown();
+    if (r.category === "social") b.social = r.minutes;
+    else if (r.category === "video") b.video = r.minutes;
+    else if (r.category === "games") b.games = r.minutes;
+    else if (r.category === "learning") b.learning = r.minutes;
+    map.set(key, b);
+  }
+  return map;
+}
+
+export function sumBreakdowns(...parts: CategoryBreakdown[]): CategoryBreakdown {
+  const out = emptyBreakdown();
+  for (const p of parts) {
+    out.social += p.social;
+    out.video += p.video;
+    out.games += p.games;
+    out.learning += p.learning;
+  }
+  return out;
+}
+
 export type AllDeviceRow = {
   mac: string;
   // Friendly name (from client_labels), or the device's hostname, or the

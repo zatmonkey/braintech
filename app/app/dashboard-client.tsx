@@ -157,6 +157,20 @@ export function AccountChat({ compact = false }: { compact?: boolean } = {}) {
 import { BrainrotMeter } from "./brainrot-meter";
 import { StatsModal } from "./stats-modal";
 
+type CategoryBreakdown = {
+  social: number;
+  video: number;
+  games: number;
+  learning: number;
+};
+
+const EMPTY_BREAKDOWN: Readonly<CategoryBreakdown> = Object.freeze({
+  social: 0,
+  video: 0,
+  games: 0,
+  learning: 0,
+});
+
 type AllDeviceRow = {
   mac: string;
   display_name: string;
@@ -168,6 +182,7 @@ type AllDeviceRow = {
   connected: boolean;
   group_ids: string[];
   brainrot_minutes: number | null;
+  breakdown: CategoryBreakdown;
 };
 
 type TabGroup = {
@@ -182,6 +197,7 @@ type TabGroup = {
     summary: string | null;
   }>;
   brainrot_minutes: number | null;
+  breakdown: CategoryBreakdown;
 };
 
 function relativeTime(iso: string): string {
@@ -213,7 +229,13 @@ export function AllDevicesSection({
     title: string;
     subtitle?: string;
     minutes: number | null;
-  }>({ open: false, title: "", minutes: null });
+    breakdown: CategoryBreakdown;
+  }>({
+    open: false,
+    title: "",
+    minutes: null,
+    breakdown: EMPTY_BREAKDOWN,
+  });
 
   const filtered = selectedGroup
     ? items.filter((r) => r.group_ids.includes(selectedGroup))
@@ -527,6 +549,15 @@ export function AllDevicesSection({
                   title: "Whole house",
                   subtitle: "Aggregate · last 24h",
                   minutes: householdMinutes,
+                  breakdown: items.reduce(
+                    (acc, r) => ({
+                      social: acc.social + r.breakdown.social,
+                      video: acc.video + r.breakdown.video,
+                      games: acc.games + r.breakdown.games,
+                      learning: acc.learning + r.breakdown.learning,
+                    }),
+                    { ...EMPTY_BREAKDOWN },
+                  ),
                 })
               }
               className="rounded-full border border-[var(--color-rule)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]"
@@ -553,6 +584,7 @@ export function AllDevicesSection({
                     ? r.hostname
                     : r.mac,
                   minutes: r.brainrot_minutes,
+                  breakdown: r.breakdown,
                 })
               }
             />
@@ -586,6 +618,7 @@ export function AllDevicesSection({
         title={stats.title}
         subtitle={stats.subtitle}
         brainrotMinutes={stats.minutes}
+        breakdown={stats.breakdown}
       />
     </div>
   );
