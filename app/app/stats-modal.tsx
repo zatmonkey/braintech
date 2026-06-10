@@ -7,12 +7,7 @@ import { BrainrotMeter } from "./brainrot-meter";
  * Stats popover. For v1 most categories show "—" until /api/account/usage
  * starts returning real telemetry-derived data. The shape is the contract.
  */
-type CategoryBreakdown = {
-  social: number;
-  video: number;
-  games: number;
-  learning: number;
-};
+type AppMinutes = { app: string; minutes: number };
 
 export function StatsModal({
   open,
@@ -20,16 +15,16 @@ export function StatsModal({
   title,
   subtitle,
   brainrotMinutes,
-  breakdown,
+  apps,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   subtitle?: string;
   brainrotMinutes: number | null;
-  breakdown?: CategoryBreakdown;
+  apps?: AppMinutes[];
 }) {
-  const b = breakdown ?? { social: 0, video: 0, games: 0, learning: 0 };
+  const list = apps ?? [];
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -84,36 +79,32 @@ export function StatsModal({
 
         <div className="mt-5">
           <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
-            Last 24h by category
+            Last 24h by app
           </div>
-          <div className="mt-2 grid grid-cols-4 gap-2">
-            {[
-              { k: "Social", colored: true, mins: b.social },
-              { k: "Video", colored: true, mins: b.video },
-              { k: "Games", colored: true, mins: b.games },
-              { k: "Learning", colored: false, mins: b.learning },
-            ].map((c) => (
-              <div
-                key={c.k}
-                className="rounded-lg bg-[var(--color-cream)] p-3 text-center"
-              >
-                <div
-                  className={`text-[10px] font-medium uppercase tracking-wider ${
-                    c.colored ? "text-[var(--color-accent)]" : "text-emerald-700"
-                  }`}
+          {list.length === 0 ? (
+            <p className="mt-3 rounded-lg bg-[var(--color-cream)] p-3 text-center text-sm text-[var(--color-ink-soft)]">
+              No categorised app traffic in the last 24h.
+            </p>
+          ) : (
+            <ul className="mt-2 divide-y divide-[var(--color-rule)] rounded-lg border border-[var(--color-rule)] bg-white">
+              {list.slice(0, 10).map((a) => (
+                <li
+                  key={a.app}
+                  className="flex items-center justify-between gap-3 px-3 py-2"
                 >
-                  {c.k}
-                </div>
-                <div className="mt-1 font-mono text-base">
-                  {c.mins > 0 ? `${c.mins}m` : "—"}
-                </div>
-              </div>
-            ))}
-          </div>
+                  <span className="text-sm font-medium text-[var(--color-ink)]">
+                    {a.app}
+                  </span>
+                  <span className="font-mono text-sm text-[var(--color-ink-soft)]">
+                    {a.minutes}m
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
           <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
-            Per-category usage starts populating once your Braintech device
-            streams telemetry. The brain mark above turns green when the kid
-            stays under 10 min of short-form video / social a day.
+            The brain mark above turns green when the kid stays under 10 min
+            a day of brainrot apps. Learning apps don&rsquo;t count.
           </p>
         </div>
       </div>

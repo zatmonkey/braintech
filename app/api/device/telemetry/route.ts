@@ -88,36 +88,31 @@ export async function POST(req: Request) {
     }
   }
 
-  // Per-minute usage rollups: each row is (mac, minute_utc, category, count).
-  // The agent pre-classifies via its dnsmasq query log tailer. Server stores
-  // each (owner, mac, minute, category) idempotently — re-sends of the same
-  // minute just keep the highest query_count (in case telemetry races).
+  // Per-minute usage rollups: each row is (mac, minute_utc, app, count).
+  // The agent classifies into app names ("TikTok", "YouTube", "Khan
+  // Academy"…). Server stores them as-is — the brainrot rollup happens
+  // in app/lib/usage-apps.ts so we can edit the brainrot/learning split
+  // without touching the agent.
   if (owner) {
     type UsageRow = {
       mac?: string;
       minute_utc?: string;
-      category?: string;
+      app?: string;
       query_count?: number;
     };
     const usage = Array.isArray((body as { usage?: unknown[] }).usage)
       ? ((body as { usage: UsageRow[] }).usage)
       : [];
-    const validCategories = new Set([
-      "social",
-      "video",
-      "games",
-      "learning",
-      "other",
-    ]);
     for (const u of usage) {
       if (typeof u.mac !== "string") continue;
       const mac = u.mac.toLowerCase();
       if (!/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(mac)) continue;
       if (typeof u.minute_utc !== "string") continue;
       const minute = u.minute_utc;
-      if (typeof u.category !== "string") continue;
-      const cat = u.category.toLowerCase();
-      if (!validCategories.has(cat)) continue;
+      if (typeof u.app !== "string" || u.app.length === 0 || u.app.length > 64) {
+        continue;
+      }
+      const app = u.app;
       const count =
         typeof u.query_count === "number" && u.query_count > 0
           ? Math.min(u.query_count, 100_000)
@@ -125,10 +120,10 @@ export async function POST(req: Request) {
       try {
         await sql`
           INSERT INTO client_usage_minute
-            (owner_email, mac, bucket_start, category, query_count)
+            (owner_email, mac, bucket_start, app, query_count)
           VALUES
-            (${owner}, ${mac}, ${minute}::timestamptz, ${cat}, ${count})
-          ON CONFLICT (owner_email, mac, bucket_start, category) DO UPDATE SET
+            (${owner}, ${mac}, ${minute}::timestamptz, ${app}, ${count})
+          ON CONFLICT (owner_email, mac, bucket_start, app) DO UPDATE SET
             query_count = GREATEST(client_usage_minute.query_count, EXCLUDED.query_count);
         `;
       } catch (err) {

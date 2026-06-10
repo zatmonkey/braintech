@@ -10,13 +10,14 @@ import (
 	"time"
 )
 
-// usageBucket is one minute-aligned aggregation for (mac, category).
-// Multiple buckets per minute (one per category) are valid. The dashboard
-// counts DISTINCT minute-buckets in (social|video|games) for "brainrot".
+// usageBucket is one minute-aligned aggregation for (mac, app). Multiple
+// buckets per minute (one per app) are valid. The dashboard sums DISTINCT
+// minute-buckets in the BRAINROT_APPS set for the brainrot meter and
+// shows the top apps individually as "TikTok 8m / YouTube 5m / ...".
 type usageBucket struct {
 	Mac        string `json:"mac"`
 	MinuteUTC  string `json:"minute_utc"` // RFC3339, minute-truncated
-	Category   string `json:"category"`
+	App        string `json:"app"`
 	QueryCount int    `json:"query_count"`
 }
 
@@ -31,17 +32,17 @@ func newUsageStore() *usageStore {
 	return &usageStore{buckets: make(map[string]*usageBucket)}
 }
 
-func (s *usageStore) record(mac, category string, ts time.Time) {
-	if mac == "" || category == "" {
+func (s *usageStore) record(mac, app string, ts time.Time) {
+	if mac == "" || app == "" {
 		return
 	}
 	minute := ts.UTC().Truncate(time.Minute).Format(time.RFC3339)
-	key := mac + "|" + minute + "|" + category
+	key := mac + "|" + minute + "|" + app
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, ok := s.buckets[key]
 	if !ok {
-		b = &usageBucket{Mac: mac, MinuteUTC: minute, Category: category}
+		b = &usageBucket{Mac: mac, MinuteUTC: minute, App: app}
 		s.buckets[key] = b
 	}
 	b.QueryCount++
@@ -59,67 +60,67 @@ func (s *usageStore) drain() []usageBucket {
 	return out
 }
 
-// categoryDomains: domain suffixes we treat as the named category. A query
-// matches a category if the queried name equals one of the patterns OR ends
-// with `.<pattern>`. The server stores whatever we send; this table is the
-// source of truth for now.
-var categoryDomains = map[string][]string{
-	"social": {
-		"tiktokv.com", "tiktokcdn.com", "tiktokcdn-us.com", "tiktok.com",
-		"musical.ly", "byteoversea.com", "ttwstatic.com",
-		"instagram.com", "cdninstagram.com",
-		"snapchat.com", "sc-cdn.net", "snap.com",
-		"twitter.com", "x.com", "twimg.com", "t.co",
-		"facebook.com", "fbcdn.net", "fbsbx.com",
-		"reddit.com", "redd.it", "redditstatic.com",
-	},
-	"video": {
-		"youtube.com", "ytimg.com", "googlevideo.com", "ggpht.com", "youtu.be",
-		"netflix.com", "nflxvideo.net", "nflximg.com",
-		"twitch.tv", "ttvnw.net",
-		"hulu.com", "hbomax.com", "max.com",
-		"disneyplus.com", "primevideo.com",
-		"vimeo.com",
-	},
-	"games": {
-		"roblox.com", "rbxcdn.com",
-		"epicgames.com", "fortnitecdn.com",
-		"minecraft.net", "mojang.com",
-		"discord.com", "discordapp.com",
-		"steamcontent.com", "steampowered.com",
-		"battle.net", "blizzard.com",
-	},
-	"learning": {
-		"khanacademy.org", "kastatic.org", "kasandbox.org",
-		"ted.com", "tedcdn.com",
-		"duolingo.com",
-		"wikipedia.org", "wikimedia.org",
-		"scratch.mit.edu",
-		"code.org",
-		"brainpop.com",
-		"nationalgeographic.com", "natgeokids.com",
-	},
+// appDomains: domain (suffix) → user-facing app name. A query matches if
+// the queried name equals a key OR ends with `.<key>`. Order doesn't
+// matter; ambiguous overlaps don't exist in this set.
+var appDomains = map[string]string{
+	// Short-form video / social
+	"tiktokv.com": "TikTok", "tiktokcdn.com": "TikTok", "tiktokcdn-us.com": "TikTok",
+	"tiktok.com": "TikTok", "musical.ly": "TikTok", "byteoversea.com": "TikTok",
+	"byteglb.com": "TikTok", "bytedance.com": "TikTok", "ttwstatic.com": "TikTok",
+	"instagram.com": "Instagram", "cdninstagram.com": "Instagram",
+	"snapchat.com": "Snapchat", "sc-cdn.net": "Snapchat", "snap.com": "Snapchat",
+	"twitter.com": "X", "x.com": "X", "twimg.com": "X", "t.co": "X",
+	"facebook.com": "Facebook", "fbcdn.net": "Facebook", "fbsbx.com": "Facebook",
+	"reddit.com": "Reddit", "redd.it": "Reddit", "redditstatic.com": "Reddit",
+	"discord.com": "Discord", "discordapp.com": "Discord",
+	// Long-form video
+	"youtube.com": "YouTube", "youtu.be": "YouTube",
+	"ytimg.com": "YouTube", "googlevideo.com": "YouTube", "ggpht.com": "YouTube",
+	"netflix.com": "Netflix", "nflxvideo.net": "Netflix", "nflximg.com": "Netflix",
+	"twitch.tv": "Twitch", "ttvnw.net": "Twitch",
+	"hulu.com": "Hulu",
+	"hbomax.com": "HBO Max", "max.com": "HBO Max",
+	"disneyplus.com": "Disney+",
+	"primevideo.com": "Prime Video",
+	"vimeo.com": "Vimeo",
+	// Games
+	"roblox.com": "Roblox", "rbxcdn.com": "Roblox",
+	"epicgames.com": "Fortnite", "fortnitecdn.com": "Fortnite",
+	"minecraft.net": "Minecraft", "mojang.com": "Minecraft",
+	"steampowered.com": "Steam", "steamcontent.com": "Steam",
+	"battle.net": "Battle.net", "blizzard.com": "Battle.net",
+	// Learning
+	"khanacademy.org": "Khan Academy", "kastatic.org": "Khan Academy", "kasandbox.org": "Khan Academy",
+	"ted.com": "TED", "tedcdn.com": "TED",
+	"duolingo.com": "Duolingo",
+	"wikipedia.org": "Wikipedia", "wikimedia.org": "Wikipedia",
+	"scratch.mit.edu": "Scratch",
+	"code.org": "Code.org",
+	"brainpop.com": "BrainPOP",
+	"nationalgeographic.com": "National Geographic", "natgeokids.com": "National Geographic",
 }
 
-func classifyDomain(domain string) string {
+func classifyApp(domain string) string {
 	d := strings.ToLower(strings.TrimSuffix(domain, "."))
-	for cat, patterns := range categoryDomains {
-		for _, p := range patterns {
-			if d == p || strings.HasSuffix(d, "."+p) {
-				return cat
-			}
+	if app, ok := appDomains[d]; ok {
+		return app
+	}
+	for pattern, app := range appDomains {
+		if strings.HasSuffix(d, "."+pattern) {
+			return app
 		}
 	}
 	return "" // unknown — don't bucket
 }
 
-// parseDNSLine extracts MAC + category from one dnsmasq query log line.
+// parseDNSLine extracts MAC + app from one dnsmasq query log line.
 // Expected format:
 //
 //	dnsmasq[1234]: query[A] tiktokv.com from 192.168.1.221
 //
-// Returns "" for either if the line doesn't match a categorised query.
-func parseDNSLine(line string, leaseCache map[string]string) (mac, category string) {
+// Returns "" for either if the line doesn't match a known app's domain.
+func parseDNSLine(line string, leaseCache map[string]string) (mac, app string) {
 	qi := strings.Index(line, " query[")
 	if qi == -1 {
 		return "", ""
@@ -152,8 +153,8 @@ func parseDNSLine(line string, leaseCache map[string]string) (mac, category stri
 	if mac == "" {
 		return "", ""
 	}
-	category = classifyDomain(domain)
-	return mac, category
+	app = classifyApp(domain)
+	return mac, app
 }
 
 // refreshLeaseCache rebuilds an IP→MAC map from the current DHCP leases.
@@ -242,9 +243,9 @@ func tailDNSLog(ctx context.Context, store *usageStore, path string) {
 				leaseCache = refreshLeaseCache()
 				leaseAt = time.Now()
 			}
-			mac, cat := parseDNSLine(line, leaseCache)
-			if mac != "" && cat != "" {
-				store.record(mac, cat, time.Now())
+			mac, app := parseDNSLine(line, leaseCache)
+			if mac != "" && app != "" {
+				store.record(mac, app, time.Now())
 			}
 		}
 	reopen:

@@ -1,4 +1,5 @@
 import type { NeonQueryFunction } from "@neondatabase/serverless";
+import { BRAINROT_APPS } from "./usage-apps";
 
 /**
  * Per-MAC brainrot minutes in the last 24h. Returns a map { mac → minutes }
@@ -12,12 +13,16 @@ export async function loadBrainrotMinutes(
   sql: NeonQueryFunction<false, false>,
   email: string,
 ): Promise<Map<string, number>> {
+  // Per-MAC: DISTINCT minute-buckets where the app is in BRAINROT_APPS.
+  // The set lives in app/lib/usage-apps.ts so it can be tuned without
+  // re-deploying the device agent.
+  const apps = Array.from(BRAINROT_APPS);
   const rows = (await sql`
     SELECT mac::text AS mac, COUNT(DISTINCT bucket_start)::int AS minutes
     FROM client_usage_minute
     WHERE owner_email = ${email}
       AND bucket_start > NOW() - INTERVAL '24 hours'
-      AND category IN ('social', 'video', 'games')
+      AND app = ANY(${apps}::text[])
     GROUP BY mac;
   `) as { mac: string; minutes: number }[];
   const map = new Map<string, number>();
@@ -25,63 +30,55 @@ export async function loadBrainrotMinutes(
   return map;
 }
 
-export type CategoryBreakdown = {
-  social: number;
-  video: number;
-  games: number;
-  learning: number;
-};
-
-const EMPTY_BREAKDOWN: Readonly<CategoryBreakdown> = Object.freeze({
-  social: 0,
-  video: 0,
-  games: 0,
-  learning: 0,
-});
-
-export function emptyBreakdown(): CategoryBreakdown {
-  return { ...EMPTY_BREAKDOWN };
-}
+export type AppMinutes = { app: string; minutes: number };
 
 /**
- * Per-MAC per-category minutes in the last 24h. One row per (mac, category)
- * already aggregated to DISTINCT minute-buckets. The dashboard renders this
- * directly into the StatsModal and the Usage breakdown cards.
+ * Per-MAC top apps in the last 24h. Returns Map<mac, AppMinutes[]> sorted
+ * by minutes DESC. The dashboard renders these directly as the Usage
+ * column ("TikTok 8m / YouTube 3m / …") instead of abstract categories.
  */
-export async function loadCategoryBreakdownByMac(
+export async function loadTopAppsByMac(
   sql: NeonQueryFunction<false, false>,
   email: string,
-): Promise<Map<string, CategoryBreakdown>> {
+): Promise<Map<string, AppMinutes[]>> {
   const rows = (await sql`
-    SELECT mac::text AS mac, category::text AS category,
+    SELECT mac::text AS mac, app::text AS app,
            COUNT(DISTINCT bucket_start)::int AS minutes
     FROM client_usage_minute
     WHERE owner_email = ${email}
       AND bucket_start > NOW() - INTERVAL '24 hours'
-    GROUP BY mac, category;
-  `) as { mac: string; category: string; minutes: number }[];
-  const map = new Map<string, CategoryBreakdown>();
+    GROUP BY mac, app;
+  `) as { mac: string; app: string; minutes: number }[];
+  const map = new Map<string, AppMinutes[]>();
   for (const r of rows) {
     const key = r.mac.toLowerCase();
-    const b = map.get(key) ?? emptyBreakdown();
-    if (r.category === "social") b.social = r.minutes;
-    else if (r.category === "video") b.video = r.minutes;
-    else if (r.category === "games") b.games = r.minutes;
-    else if (r.category === "learning") b.learning = r.minutes;
-    map.set(key, b);
+    const list = map.get(key) ?? [];
+    list.push({ app: r.app, minutes: Number(r.minutes) });
+    map.set(key, list);
+  }
+  for (const list of map.values()) {
+    list.sort((a, b) => b.minutes - a.minutes);
   }
   return map;
 }
 
-export function sumBreakdowns(...parts: CategoryBreakdown[]): CategoryBreakdown {
-  const out = emptyBreakdown();
-  for (const p of parts) {
-    out.social += p.social;
-    out.video += p.video;
-    out.games += p.games;
-    out.learning += p.learning;
+/**
+ * Sum app-minute lists, keeping the highest minute count per app across
+ * the parts. Used to roll up household + group totals from per-MAC lists.
+ */
+export function sumAppMinutes(...parts: AppMinutes[][]): AppMinutes[] {
+  const agg = new Map<string, number>();
+  for (const part of parts) {
+    for (const a of part) {
+      // Aggregate minutes — two MACs both watching TikTok at distinct
+      // times sum, but co-watching at the same minute would double-count.
+      // The latter is rare and not worth a more expensive query.
+      agg.set(a.app, (agg.get(a.app) ?? 0) + a.minutes);
+    }
   }
-  return out;
+  return Array.from(agg.entries())
+    .map(([app, minutes]) => ({ app, minutes }))
+    .sort((a, b) => b.minutes - a.minutes);
 }
 
 export type AllDeviceRow = {

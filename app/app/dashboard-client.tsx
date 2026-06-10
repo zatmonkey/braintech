@@ -157,19 +157,7 @@ export function AccountChat({ compact = false }: { compact?: boolean } = {}) {
 import { BrainrotMeter } from "./brainrot-meter";
 import { StatsModal } from "./stats-modal";
 
-type CategoryBreakdown = {
-  social: number;
-  video: number;
-  games: number;
-  learning: number;
-};
-
-const EMPTY_BREAKDOWN: Readonly<CategoryBreakdown> = Object.freeze({
-  social: 0,
-  video: 0,
-  games: 0,
-  learning: 0,
-});
+export type AppMinutes = { app: string; minutes: number };
 
 type AllDeviceRow = {
   mac: string;
@@ -182,7 +170,7 @@ type AllDeviceRow = {
   connected: boolean;
   group_ids: string[];
   brainrot_minutes: number | null;
-  breakdown: CategoryBreakdown;
+  apps: AppMinutes[];
 };
 
 type TabGroup = {
@@ -197,8 +185,18 @@ type TabGroup = {
     summary: string | null;
   }>;
   brainrot_minutes: number | null;
-  breakdown: CategoryBreakdown;
+  apps: AppMinutes[];
 };
+
+function sumApps(parts: AppMinutes[][]): AppMinutes[] {
+  const agg = new Map<string, number>();
+  for (const part of parts) {
+    for (const a of part) agg.set(a.app, (agg.get(a.app) ?? 0) + a.minutes);
+  }
+  return Array.from(agg.entries())
+    .map(([app, minutes]) => ({ app, minutes }))
+    .sort((a, b) => b.minutes - a.minutes);
+}
 
 function relativeTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -229,12 +227,12 @@ export function AllDevicesSection({
     title: string;
     subtitle?: string;
     minutes: number | null;
-    breakdown: CategoryBreakdown;
+    apps: AppMinutes[];
   }>({
     open: false,
     title: "",
     minutes: null,
-    breakdown: EMPTY_BREAKDOWN,
+    apps: [],
   });
 
   const filtered = selectedGroup
@@ -294,7 +292,7 @@ export function AllDevicesSection({
             rule_count: 0,
             rules: [],
             brainrot_minutes: null,
-            breakdown: { ...EMPTY_BREAKDOWN },
+            apps: [],
           },
         ]);
         setNewGroupName("");
@@ -483,7 +481,7 @@ export function AllDevicesSection({
                       title: activeGroup.name,
                       subtitle: "Group · last 24h",
                       minutes: activeGroup.brainrot_minutes,
-                      breakdown: activeGroup.breakdown,
+                      apps: activeGroup.apps,
                     })
                   }
                   className="rounded-full border border-[var(--color-rule)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]"
@@ -551,15 +549,7 @@ export function AllDevicesSection({
                   title: "Whole house",
                   subtitle: "Aggregate · last 24h",
                   minutes: householdMinutes,
-                  breakdown: items.reduce(
-                    (acc, r) => ({
-                      social: acc.social + r.breakdown.social,
-                      video: acc.video + r.breakdown.video,
-                      games: acc.games + r.breakdown.games,
-                      learning: acc.learning + r.breakdown.learning,
-                    }),
-                    { ...EMPTY_BREAKDOWN },
-                  ),
+                  apps: sumApps(items.map((r) => r.apps)),
                 })
               }
               className="rounded-full border border-[var(--color-rule)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]"
@@ -586,7 +576,7 @@ export function AllDevicesSection({
                     ? r.hostname
                     : r.mac,
                   minutes: r.brainrot_minutes,
-                  breakdown: r.breakdown,
+                  apps: r.apps,
                 })
               }
             />
@@ -620,7 +610,7 @@ export function AllDevicesSection({
         title={stats.title}
         subtitle={stats.subtitle}
         brainrotMinutes={stats.minutes}
-        breakdown={stats.breakdown}
+        apps={stats.apps}
       />
     </div>
   );

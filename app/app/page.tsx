@@ -12,10 +12,9 @@ import {
   loadMacGroups,
   loadAllDevices,
   loadBrainrotMinutes,
-  loadCategoryBreakdownByMac,
-  emptyBreakdown,
-  sumBreakdowns,
-  type CategoryBreakdown,
+  loadTopAppsByMac,
+  sumAppMinutes,
+  type AppMinutes,
 } from "@/app/lib/groups";
 import {
   SWRegister,
@@ -94,7 +93,7 @@ export default async function Dashboard() {
   let macGroups = new Map<string, string[]>();
   let allDevices: Awaited<ReturnType<typeof loadAllDevices>> = [];
   let brainrotByMac = new Map<string, number>();
-  let breakdownByMac = new Map<string, CategoryBreakdown>();
+  let appsByMac = new Map<string, AppMinutes[]>();
   let memory = "";
   if (sql) {
     await ensureDeviceSchema(sql);
@@ -119,7 +118,7 @@ export default async function Dashboard() {
     macGroups = await loadMacGroups(sql, email);
     allDevices = await loadAllDevices(sql, email);
     brainrotByMac = await loadBrainrotMinutes(sql, email);
-    breakdownByMac = await loadCategoryBreakdownByMac(sql, email);
+    appsByMac = await loadTopAppsByMac(sql, email);
     const leadRows = (await sql`SELECT memory FROM leads WHERE email = ${email};`) as {
       memory: string | null;
     }[];
@@ -143,7 +142,7 @@ export default async function Dashboard() {
   const allDevicesUI = allDevices.map((d) => ({
     ...d,
     brainrot_minutes: brainrotByMac.get(d.mac) ?? null,
-    breakdown: breakdownByMac.get(d.mac) ?? emptyBreakdown(),
+    apps: appsByMac.get(d.mac) ?? [],
   }));
   const groupsForUi = groups.map((g) => {
     const rules = (rulesByGroup.get(g.group_id) ?? []).map((r) => ({
@@ -161,8 +160,8 @@ export default async function Dashboard() {
     const groupMinutes = memberMins.every((m) => m === null)
       ? null
       : memberMins.reduce((acc: number, m) => acc + (m ?? 0), 0);
-    const groupBreakdown = sumBreakdowns(
-      ...memberMacs.map((m) => breakdownByMac.get(m) ?? emptyBreakdown()),
+    const groupApps = sumAppMinutes(
+      ...memberMacs.map((m) => appsByMac.get(m) ?? []),
     );
     return {
       group_id: g.group_id,
@@ -171,7 +170,7 @@ export default async function Dashboard() {
       rule_count: rules.length,
       rules,
       brainrot_minutes: groupMinutes,
-      breakdown: groupBreakdown,
+      apps: groupApps,
     };
   });
   // Household minutes for the top-of-page Usage meter.
@@ -184,9 +183,7 @@ export default async function Dashboard() {
             (acc, d) => acc + (d.brainrot_minutes ?? 0),
             0,
           );
-  const householdBreakdown = sumBreakdowns(
-    ...allDevicesUI.map((d) => d.breakdown),
-  );
+  const householdApps = sumAppMinutes(...allDevicesUI.map((d) => d.apps));
   void labels;
 
   return (
@@ -213,37 +210,14 @@ export default async function Dashboard() {
         <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
           <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-6">
             <BrainrotMeter minutes={householdMinutes} size="lg" />
-            <div className="flex-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {[
-                { k: "Social", warm: true, mins: householdBreakdown.social },
-                { k: "Video", warm: true, mins: householdBreakdown.video },
-                { k: "Games", warm: true, mins: householdBreakdown.games },
-                { k: "Learning", warm: false, mins: householdBreakdown.learning },
-              ].map((c) => (
-                <div
-                  key={c.k}
-                  className="rounded-lg bg-[var(--color-cream)] p-3 text-center"
-                >
-                  <div
-                    className={`text-[10px] font-medium uppercase tracking-wider ${
-                      c.warm
-                        ? "text-[var(--color-accent)]"
-                        : "text-emerald-700"
-                    }`}
-                  >
-                    {c.k}
-                  </div>
-                  <div className="mt-1 font-mono text-base">
-                    {c.mins > 0 ? `${c.mins}m` : "—"}
-                  </div>
-                </div>
-              ))}
+            <div className="flex-1">
+              <TopApps apps={householdApps} />
             </div>
           </div>
           <p className="mt-4 text-xs text-[var(--color-ink-soft)]">
-            Last 24h. Brain mark goes green when the household stays under
-            10 minutes a day of short-form video / social. Per-category data
-            turns on once your Braintech device streams telemetry.
+            Last 24h. Brain mark goes green when the house stays under
+            10 minutes a day of brainrot apps (TikTok, YouTube, Instagram,
+            Roblox, &hellip;). Learning apps don&rsquo;t count.
           </p>
         </div>
       </section>
@@ -342,6 +316,36 @@ export default async function Dashboard() {
         )}
       </section>
     </main>
+  );
+}
+
+function TopApps({ apps }: { apps: AppMinutes[] }) {
+  if (apps.length === 0) {
+    return (
+      <div className="rounded-lg bg-[var(--color-cream)] p-3 text-center text-sm text-[var(--color-ink-soft)]">
+        No app traffic in the last 24h yet.
+      </div>
+    );
+  }
+  const top = apps.slice(0, 5);
+  return (
+    <ul className="space-y-1.5">
+      {top.map((a) => (
+        <li key={a.app} className="flex items-center justify-between gap-3">
+          <span className="text-sm font-medium text-[var(--color-ink)]">
+            {a.app}
+          </span>
+          <span className="font-mono text-sm text-[var(--color-ink-soft)]">
+            {a.minutes}m
+          </span>
+        </li>
+      ))}
+      {apps.length > top.length && (
+        <li className="text-xs text-[var(--color-ink-soft)]">
+          + {apps.length - top.length} more
+        </li>
+      )}
+    </ul>
   );
 }
 

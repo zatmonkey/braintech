@@ -247,19 +247,24 @@ export async function ensureDeviceSchema(
       ON client_last_seen (owner_email, last_seen DESC);
   `;
   // Per-minute usage rollups — what the agent ships every telemetry tick.
-  // Granularity: one row per (mac, minute, category). Minutes counted via
-  // dnsmasq query log → IP → MAC → category. Brainrot meter = COUNT(DISTINCT
-  // bucket_start) where category IN ('social','video','games').
+  // Granularity: one row per (mac, minute, app). Minutes are counted via
+  // dnsmasq query log → IP → MAC → app classifier. The dashboard sums
+  // DISTINCT minute-buckets per app, and rolls up the brainrot meter via
+  // the BRAINROT_APPS set defined in app/lib/usage-apps.ts.
   await sql`
     CREATE TABLE IF NOT EXISTS client_usage_minute (
       owner_email   TEXT NOT NULL,
       mac           TEXT NOT NULL,
       bucket_start  TIMESTAMPTZ NOT NULL,
-      category      TEXT NOT NULL,
+      app           TEXT NOT NULL,
       query_count   INTEGER NOT NULL DEFAULT 1,
-      PRIMARY KEY (owner_email, mac, bucket_start, category)
+      PRIMARY KEY (owner_email, mac, bucket_start, app)
     );
   `;
+  // Migration: pre-rename existing prod table.
+  await sql`
+    ALTER TABLE client_usage_minute RENAME COLUMN category TO app;
+  `.catch(() => undefined);
   await sql`
     CREATE INDEX IF NOT EXISTS client_usage_minute_owner_recent_idx
       ON client_usage_minute (owner_email, bucket_start DESC);
