@@ -241,6 +241,9 @@ func quotaSnapshotLoop(ctx context.Context) {
 // can share state without threading a struct everywhere.
 var globalQuotaCounter = newQuotaCounter()
 
+// CreditsSpentToday on PolicyDecision is the running total of credit
+// minutes consumed for this rule today across all member MACs.
+
 // PolicyDecision is the engine's per-rule output for one evaluation tick.
 // Snapshotted to globalDecisions at every tick and shipped in telemetry
 // so the dashboard can show WHICH allow clause is currently letting the
@@ -261,6 +264,9 @@ type PolicyDecision struct {
 	// Next time window for this rule (allowing OR not), so the UI can
 	// say "Next opens Sat 14:00" when the rule is currently enforcing.
 	NextWindowAt string `json:"next_window_at,omitempty"` // RFC3339 local
+	// Credits already spent for this rule today across all member MACs.
+	// 0 when no quota has been exhausted yet today.
+	CreditsSpentToday int `json:"credits_spent_today,omitempty"`
 }
 
 type DecisionWindow struct {
@@ -351,6 +357,12 @@ type policyDoc struct {
 	// Format: { "YYYY-MM-DD": { "mac": minutes_used } }. Only the apply
 	// day is populated; subsequent days fall back to the live counter.
 	BaselineByDay map[string]map[string]int `json:"baseline_by_day,omitempty"`
+	// CreditBalanceByMac is the server's view of each MAC's brain-credit
+	// pool at the moment this policy was materialised. The engine spends
+	// from these when a kid hits a quota — extends the allowance, then
+	// reports the spend via telemetry so the server's ledger catches up.
+	// Refreshed on every server push (any grant via Bri triggers one).
+	CreditBalanceByMac map[string]int `json:"credit_balance_by_mac,omitempty"`
 }
 
 type timeWindow struct {
@@ -365,10 +377,13 @@ type quotaWindow struct {
 }
 
 func policyEvaluatorLoop(ctx context.Context) {
-	// Load persisted counter before the first evaluation so a reboot
-	// during the kid's allotted window doesn't reset their minutes.
+	// Load persisted state before the first evaluation so a reboot
+	// during the kid's allotted window doesn't reset their minutes or
+	// erase the credits they've already spent today.
 	globalQuotaCounter.loadFromDisk()
+	globalCreditPool.loadFromDisk()
 	go quotaSnapshotLoop(ctx)
+	go creditSnapshotLoop(ctx)
 
 	// First tick happens immediately so a freshly-applied rule lands the
 	// correct enforcement state without a one-minute wait.
@@ -406,11 +421,29 @@ func evaluateAllPolicies(ctx context.Context, now time.Time) {
 			log.Printf("policy: load %s: %v", path, err)
 			continue
 		}
+		// Resync the credit pool with the server's snapshot embedded in
+		// the policy doc. Any locally-recorded spend since the last
+		// resync is preserved.
+		if len(doc.CreditBalanceByMac) > 0 {
+			globalCreditPool.resync(doc.CreditBalanceByMac)
+		}
 		decision, report := evaluate(doc, now)
 		globalDecisions.set(report)
 		if err := applyDecision(ctx, doc, decision); err != nil {
 			log.Printf("policy: apply %s (%s): %v", doc.RuleID, decision, err)
 		}
+	}
+}
+
+func creditSnapshotLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			globalCreditPool.snapshotToDisk(time.Now())
+			return
+		case <-time.After(60 * time.Second):
+		}
+		globalCreditPool.snapshotToDisk(time.Now())
 	}
 }
 
@@ -476,6 +509,34 @@ func evaluate(doc *policyDoc, now time.Time) (decision, PolicyDecision) {
 				MinutesMax:  q.MinutesMax,
 			}
 			return decisionAllow, report
+		}
+		// Past the quota — try spending brain credits to extend it. Any
+		// MAC in the rule with a positive balance gets one minute spent
+		// per evaluation tick (since the engine ticks every 60s and a
+		// "minute" of activity = one quota bucket). First MAC with
+		// balance wins; we attribute the spend to this rule.
+		for _, mac := range doc.MACs {
+			if globalCreditPool.balanceOf(mac) <= 0 {
+				continue
+			}
+			if globalCreditPool.spend(mac, doc.RuleID) {
+				report.Decision = string(decisionAllow)
+				report.ActiveQuota = &DecisionQuota{
+					Period:      q.Period,
+					MinutesUsed: used,
+					MinutesMax:  q.MinutesMax,
+				}
+				// Surface the spend in the decision so the dashboard can
+				// say "+18 from credits today".
+				totalSpent := 0
+				for _, r := range globalCreditPool.reports() {
+					if r.RuleID == doc.RuleID && r.Day == now.Format("2006-01-02") {
+						totalSpent += r.SpendMinutes
+					}
+				}
+				report.CreditsSpentToday = totalSpent
+				return decisionAllow, report
+			}
 		}
 	}
 	// Enforcing: surface the "closest to overflow" quota so the dashboard

@@ -407,6 +407,59 @@ export async function ensureAccountSchema(
       PRIMARY KEY (group_id, day)
     );
   `;
+
+  // Brain credits — the kid's earn-to-unlock pool. Per-MAC denormalized
+  // running balance (fast read on every state poll / policy push) +
+  // append-only ledger of every credit/debit (audit + dashboard recent
+  // log).
+  //
+  // Earn sources (today: "manual" only via Bri's grant_credit tool;
+  // Phase 2 adds "learning_dns" auto-earn from time on Khan/TED etc.).
+  // Debit source is always "spend" attributed to the rule_id whose
+  // quota the credits extended.
+  //
+  // User decision (recorded for posterity): balance banks forever
+  // (no expiry), generic pool across all schedule rules, with per-rule
+  // attribution maintained for dashboard clarity.
+  await sql`
+    CREATE TABLE IF NOT EXISTS brain_credits (
+      owner_email      TEXT NOT NULL,
+      mac              TEXT NOT NULL,
+      balance_minutes  INTEGER NOT NULL DEFAULT 0,
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (owner_email, mac)
+    );
+  `;
+  await sql`
+    CREATE TABLE IF NOT EXISTS brain_credit_ledger (
+      id            BIGSERIAL PRIMARY KEY,
+      owner_email   TEXT NOT NULL,
+      mac           TEXT NOT NULL,
+      delta_minutes INTEGER NOT NULL,
+      source        TEXT NOT NULL,    -- "manual" | "learning_dns" | "spend"
+      rule_id       TEXT,             -- the schedule rule that consumed (for spend) or NULL
+      note          TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS brain_credit_ledger_owner_mac_idx ON brain_credit_ledger (owner_email, mac, created_at DESC);`;
+
+  // Idempotency tracking for credit_spend telemetry. The agent reports
+  // its running total of spend per (mac, rule_id, day) every telemetry
+  // tick; this table holds the last value we ack'd so the server only
+  // debits the delta. Without this, multiple reports of the same day's
+  // accumulating count would double-charge the kid's balance.
+  await sql`
+    CREATE TABLE IF NOT EXISTS brain_credit_spend_ack (
+      owner_email  TEXT NOT NULL,
+      mac          TEXT NOT NULL,
+      rule_id      TEXT NOT NULL,
+      day          DATE NOT NULL,
+      total_spent  INTEGER NOT NULL DEFAULT 0,
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (owner_email, mac, rule_id, day)
+    );
+  `;
   accountSchemaReady = true;
 }
 

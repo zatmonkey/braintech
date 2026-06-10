@@ -130,6 +130,61 @@ export async function POST(req: Request) {
         console.error("[telemetry] usage upsert failed", err);
       }
     }
+
+    // Credit spend reports — the agent ships per-(mac, rule_id, day)
+    // running totals. We track the last-ack'd total in
+    // brain_credit_spend_ack and debit only the delta from brain_credits,
+    // writing one ledger row for the delta. Idempotent: re-receiving the
+    // same total has no effect.
+    type CreditRow = {
+      mac?: string;
+      rule_id?: string;
+      day?: string;
+      spend_minutes?: number;
+    };
+    const credits = Array.isArray((body as { credit_spend?: unknown[] }).credit_spend)
+      ? ((body as { credit_spend: CreditRow[] }).credit_spend)
+      : [];
+    for (const c of credits) {
+      if (typeof c.mac !== "string") continue;
+      const mac = c.mac.toLowerCase();
+      if (!/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(mac)) continue;
+      if (typeof c.rule_id !== "string" || c.rule_id.length === 0) continue;
+      if (typeof c.day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(c.day)) continue;
+      const total =
+        typeof c.spend_minutes === "number" && c.spend_minutes >= 0
+          ? Math.min(Math.floor(c.spend_minutes), 100_000)
+          : 0;
+      try {
+        const prior = (await sql`
+          SELECT total_spent FROM brain_credit_spend_ack
+          WHERE owner_email = ${owner} AND mac = ${mac}
+            AND rule_id = ${c.rule_id} AND day = ${c.day}::date;
+        `) as { total_spent: number }[];
+        const priorTotal = prior[0]?.total_spent ?? 0;
+        const delta = total - priorTotal;
+        if (delta <= 0) continue;
+        await sql`
+          INSERT INTO brain_credit_ledger (owner_email, mac, delta_minutes, source, rule_id, note)
+          VALUES (${owner}, ${mac}, ${-delta}, 'spend', ${c.rule_id}, ${`auto-spend on ${c.day}`});
+        `;
+        await sql`
+          UPDATE brain_credits
+             SET balance_minutes = GREATEST(0, balance_minutes - ${delta}),
+                 updated_at = NOW()
+           WHERE owner_email = ${owner} AND mac = ${mac};
+        `;
+        await sql`
+          INSERT INTO brain_credit_spend_ack (owner_email, mac, rule_id, day, total_spent)
+          VALUES (${owner}, ${mac}, ${c.rule_id}, ${c.day}::date, ${total})
+          ON CONFLICT (owner_email, mac, rule_id, day) DO UPDATE SET
+            total_spent = EXCLUDED.total_spent,
+            updated_at = NOW();
+        `;
+      } catch (err) {
+        console.error("[telemetry] credit spend ack failed", err);
+      }
+    }
   }
 
   return NextResponse.json({ ok: true });

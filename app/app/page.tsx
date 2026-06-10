@@ -156,6 +156,7 @@ export default async function Dashboard() {
     ...d,
     brainrot_minutes: brainrotByMac.get(d.mac) ?? null,
     apps: appsByMac.get(d.mac) ?? [],
+    credit_balance: 0, // hydrated from polling; initial render shows 0 if no prior balance
   }));
   // Sync status: a rule is "propagating" while the agent hasn't reported
   // the desired_version that contains it. Once reported catches up, it's
@@ -195,7 +196,7 @@ export default async function Dashboard() {
       name: g.name,
       is_default: g.is_default,
       rule_count: rules.length,
-      rules,
+      rules: rules.map((r) => ({ ...r, credits_spent_today: 0 })),
       brainrot_minutes: groupMinutes,
       apps: groupApps,
     };

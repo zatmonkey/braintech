@@ -494,6 +494,9 @@ type AllDeviceRow = {
   group_ids: string[];
   brainrot_minutes: number | null;
   apps: AppMinutes[];
+  /** Brain-credit balance (minutes) the kid can spend to extend any
+   *  schedule rule's quota. Per-MAC. */
+  credit_balance: number;
 };
 
 type RuleStatus = "propagating" | "active" | "removing";
@@ -527,6 +530,7 @@ type TabGroup = {
     summary: string | null;
     status: RuleStatus;
     policy?: PolicyDecisionUI;
+    credits_spent_today: number;
   }>;
   brainrot_minutes: number | null;
   apps: AppMinutes[];
@@ -600,8 +604,10 @@ export function AllDevicesSection({
             summary: string | null;
             status: RuleStatus;
             policy?: PolicyDecisionUI;
+            credits_spent_today?: number;
           }>;
         }>;
+        credit_balance_by_mac?: Record<string, number>;
         usage?: {
           household_minutes: number | null;
           household_apps: AppMinutes[];
@@ -636,12 +642,25 @@ export function AllDevicesSection({
               rule_count: g.rules.filter((r) => r.status !== "removing").length,
               // Status comes from the server now — it knows active vs
               // propagating vs removing based on device sync + rule active.
-              rules: g.rules,
+              rules: g.rules.map((r) => ({
+                ...r,
+                credits_spent_today: r.credits_spent_today ?? 0,
+              })),
               brainrot_minutes: newGroupMinutes,
               apps: newGroupApps,
             };
           });
         });
+        // Credit balance updates land every poll (cheap query).
+        if (data.credit_balance_by_mac) {
+          const balances = data.credit_balance_by_mac;
+          setItems((prevItems) =>
+            prevItems.map((row) => ({
+              ...row,
+              credit_balance: balances[row.mac] ?? 0,
+            })),
+          );
+        }
         // Also update device rows' brainrot/apps when applyUsage.
         if (applyUsage && data.usage) {
           const usage = data.usage;
@@ -966,6 +985,7 @@ export function AllDevicesSection({
                       summary={r.summary}
                       status={r.status}
                       policy={r.policy}
+                      creditsSpentToday={r.credits_spent_today}
                     />
                   ))}
                 </ul>
@@ -1237,9 +1257,9 @@ function AllDeviceListItem({
           <div className="mt-0.5 truncate pl-4 font-mono text-[11px] text-[var(--color-ink-soft)]">
             {sub}
           </div>
-          {row.group_ids.length > 0 && !activeGroupId && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5 pl-4">
-              {row.group_ids.map((gid) => (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-4">
+            {row.group_ids.length > 0 && !activeGroupId &&
+              row.group_ids.map((gid) => (
                 <span
                   key={gid}
                   className="rounded-full bg-[var(--color-cream)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-ink-soft)]"
@@ -1247,8 +1267,15 @@ function AllDeviceListItem({
                   {groupNamesById[gid] ?? gid}
                 </span>
               ))}
-            </div>
-          )}
+            {row.credit_balance > 0 && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-[var(--color-accent)]/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent)]"
+                title={`${row.credit_balance} min of brain credits available`}
+              >
+                🧠 {row.credit_balance}m credit
+              </span>
+            )}
+          </div>
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1.5 text-right">
@@ -1379,6 +1406,7 @@ export function RuleRow({
   summary,
   status = "active",
   policy,
+  creditsSpentToday = 0,
 }: {
   ruleId: string;
   name: string;
@@ -1392,6 +1420,9 @@ export function RuleRow({
   /** Latest evaluator decision for schedule rules. Undefined for
    *  static rules (block_brainrot_group, pause_group). */
   policy?: PolicyDecisionUI;
+  /** Brain-credit minutes consumed against this rule today (any MAC).
+   *  Surfaces as "+18 from credits today" beside the live decision. */
+  creditsSpentToday?: number;
 }) {
   const [removing, setRemoving] = useState(false);
   const isRemovingState = status === "removing";
@@ -1450,6 +1481,11 @@ export function RuleRow({
         {policy && !isRemovingState && (
           <p className="ml-4 mt-1 text-xs font-medium">
             <PolicyLine policy={policy} />
+            {creditsSpentToday > 0 && (
+              <span className="ml-1 font-normal text-[var(--color-accent)]">
+                · +{creditsSpentToday} from credits today
+              </span>
+            )}
           </p>
         )}
       </div>

@@ -875,6 +875,14 @@ export function policyBlockUnlessJson(
    * expects — yesterday's minutes don't roll over).
    */
   baselineByMacToday: Record<string, number> = {},
+  /**
+   * Per-MAC brain-credit balance, lowercase keys. The engine spends
+   * from this when a kid hits their quota — extends the allowance by
+   * the balance, deducts as the kid consumes the bonus minutes. The
+   * balance is a snapshot from the moment the policy was materialised;
+   * fresh server pushes (or telemetry round-trips) update it.
+   */
+  creditByMac: Record<string, number> = {},
 ): string {
   const today = new Date().toISOString().slice(0, 10);
   const baselineByDay: Record<string, Record<string, number>> = {};
@@ -883,6 +891,7 @@ export function policyBlockUnlessJson(
   }
   const doc: BlockUnlessPolicy & {
     baseline_by_day?: Record<string, Record<string, number>>;
+    credit_balance_by_mac?: Record<string, number>;
   } = {
     kind: "block_unless",
     rule_id: ruleId,
@@ -894,6 +903,7 @@ export function policyBlockUnlessJson(
     allow_quotas: allowQuotas,
     updated_at: new Date().toISOString(),
     ...(Object.keys(baselineByDay).length > 0 ? { baseline_by_day: baselineByDay } : {}),
+    ...(Object.keys(creditByMac).length > 0 ? { credit_balance_by_mac: creditByMac } : {}),
   };
   return JSON.stringify(doc, null, 2) + "\n";
 }
@@ -961,6 +971,12 @@ export type MaterializeContext = {
    * minutes the kid burned earlier in the day.
    */
   scheduleBaselines?: Map<string, Record<string, number>>;
+  /**
+   * Current brain-credit balance per MAC, keyed lowercase. Embedded in
+   * the policy.json file so the on-device engine knows how many bonus
+   * minutes to extend the kid's quota by when they hit it.
+   */
+  creditBalances?: Map<string, number>;
 };
 
 /**
@@ -1033,6 +1049,16 @@ export async function materializeOps(
     const nftContent = nftBrainrotFile(rule.rule_id, []);
     const brainrotContent = brainrotStateJson(rule.rule_id, domains, macs);
     const baseline = ctx.scheduleBaselines?.get(rule.rule_id) ?? {};
+    // Brain credit balances for this rule's MACs. The on-device engine
+    // spends from these when a kid hits their daily quota, before
+    // flipping into enforce mode.
+    const creditByMac: Record<string, number> = {};
+    if (ctx.creditBalances) {
+      for (const m of macs) {
+        const v = ctx.creditBalances.get(m.toLowerCase());
+        if (v !== undefined) creditByMac[m.toLowerCase()] = v;
+      }
+    }
     const policyContent = policyBlockUnlessJson(
       rule.rule_id,
       p.app_label,
@@ -1041,6 +1067,7 @@ export async function materializeOps(
       p.allow_windows ?? [],
       p.allow_quotas ?? [],
       baseline,
+      creditByMac,
     );
     const nftPath = brainrotNftPath(rule.rule_id);
     const brainrotPath = brainrotJsonPath(rule.rule_id);

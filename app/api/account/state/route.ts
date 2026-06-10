@@ -114,6 +114,27 @@ export async function GET() {
     };
     next_window_at?: string;
   };
+  // Brain-credit balances per device. Cheap query, joined into the
+  // device row payload so the dashboard can show "🧠 45 min" per MAC.
+  const credits = (await sql`
+    SELECT mac::text AS mac, balance_minutes
+    FROM brain_credits WHERE owner_email = ${email};
+  `) as { mac: string; balance_minutes: number }[];
+  const creditBalanceByMac = new Map(
+    credits.map((c) => [c.mac.toLowerCase(), Number(c.balance_minutes)]),
+  );
+  // Per-rule credits spent today (from spend_ack), so each schedule
+  // rule card can say "+18 from credits today".
+  const todaySpends = (await sql`
+    SELECT rule_id, SUM(total_spent)::int AS minutes
+    FROM brain_credit_spend_ack
+    WHERE owner_email = ${email} AND day = CURRENT_DATE
+    GROUP BY rule_id;
+  `) as { rule_id: string; minutes: number }[];
+  const creditsSpentByRule = new Map(
+    todaySpends.map((t) => [t.rule_id, Number(t.minutes)]),
+  );
+
   const telemetryAny = primary?.telemetry as { policy_status?: unknown } | null;
   const policyStatus: PolicyDecision[] = Array.isArray(telemetryAny?.policy_status)
     ? (telemetryAny!.policy_status as PolicyDecision[])
@@ -207,6 +228,7 @@ export async function GET() {
       per_group_minutes: usagePerGroup,
       per_mac_apps: appsByMacObj,
     },
+    credit_balance_by_mac: Object.fromEntries(creditBalanceByMac),
     devices: devices.map((d) => ({
       device_id: d.device_id,
       label: d.label,
@@ -242,6 +264,7 @@ export async function GET() {
           // Live policy decision for schedule rules. undefined for
           // static block_brainrot_group / pause_group rules.
           policy: policyByRule.get(r.rule_id),
+          credits_spent_today: creditsSpentByRule.get(r.rule_id) ?? 0,
         })),
       };
     }),

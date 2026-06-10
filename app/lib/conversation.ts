@@ -367,6 +367,16 @@ CONTEXT: GROUPS has "alex_test" (0 devices); connected list has "Alex's iPhone" 
 WRONG: "Got it — I see there's an Alex_test group already set up on your network, but it has 0 devices in it right now. Before I propose blocking YouTube for Alex, I need to know: which of the 8 connected devices belong to Alex? Here's what's online right now: …Can you tell me which one(s) are Alex's? Once you do, I'll add them to the Alex_test group and block YouTube. (Also — just so I have the full picture — is Alex a kid, or an adult? And who else lives in the household?)"
 RIGHT (ONE sentence): "Got it — block YouTube for **alex_test**, adding Alex's iPhone + ApeTop. Apply?"
 
+# Granting brain credits — call grant_credit, NEVER narrate "added"
+
+When the parent says any of: "give Maya 30 min" / "reward Alex with 20 min for reading" / "add 15 minutes to Theo's account" / "she earned 20 minutes" — you MUST:
+
+1. Find the kid's device from CONTEXT (label match → group-with-one-member → ask if ambiguous).
+2. Call **grant_credit** with target_mac + minutes (+ optional note). The credits go into a per-MAC pool; the on-device policy engine automatically spends them when the kid's schedule rule hits its daily quota.
+3. Reply: "Done — added [N] min to [kid's name]'s pool. They'll kick in once today's [N min] runs out." One line.
+
+NEVER reply "added" / "done" without emitting the grant_credit tool_use in the same response. Same hard contract as remove_rule.
+
 # Removing rules — call remove_rule, NEVER narrate "gone"
 
 When the parent says any of: "remove the YouTube rule" / "delete X" / "stop blocking X" / "unblock X" / "turn off the rule for Alex" / "kill that rule" — you MUST:
@@ -570,6 +580,29 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
     name: "cancel_pending_rule",
     description: "Discard the pending proposal (the parent declined or wants something different).",
     input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "grant_credit",
+    description:
+      "Award brain credits to a specific kid's device. Credits add to a per-MAC pool that's spent automatically when any schedule rule hits its daily quota — the kid gets a few more minutes of YouTube/TikTok/etc. instead of being blocked. Use this when the parent says 'Maya did her Khan lesson, give her 20 minutes' / 'reward Alex with 30 min for reading' / 'give Theo 15 more minutes today'. You decide the MAC by matching the kid's name against CONTEXT (device labels, group memberships, household memory). Source defaults to 'manual'; pass 'note' for a short audit-log entry the parent will see.",
+    input_schema: {
+      type: "object",
+      properties: {
+        target_mac: {
+          type: "string",
+          description: "MAC of the device receiving credits. Match the kid's name → device by checking CONTEXT (a labelled device, or a group with one member). If ambiguous, ask which device before granting.",
+        },
+        minutes: {
+          type: "number",
+          description: "Minutes to add to the credit balance. Parent says how many; if they say '20 min of Khan = 30 min of YouTube', do the parent's math and pass the screen-time minutes (30 here).",
+        },
+        note: {
+          type: "string",
+          description: "Optional short audit note. e.g. 'Khan lesson on fractions', '20 min reading'.",
+        },
+      },
+      required: ["target_mac", "minutes"],
+    },
   },
   {
     name: "remove_rule",

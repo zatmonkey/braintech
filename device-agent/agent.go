@@ -173,6 +173,7 @@ func (a *Agent) reportTelemetry(ctx context.Context) {
 	t := collectTelemetry(a.cfg.DeviceID)
 	t.Usage = a.usage.drain()
 	t.PolicyStatus = PolicyDecisions()
+	t.CreditSpend = CreditReports()
 	payload, err := json.Marshal(t)
 	if err != nil {
 		return
