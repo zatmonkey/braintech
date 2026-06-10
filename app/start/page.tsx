@@ -203,6 +203,14 @@ function FounderBlock() {
 }
 
 function ComparisonTable({ braintechPrice }: { braintechPrice: string }) {
+  // Honest comparison rows. All three products are network-level boxes
+  // (Bark Home + Circle Home Plus are real hardware), so we don't claim
+  // "no box" or "no apps" as differentiators — that's where the prior
+  // table got fact-checked. Real differences:
+  //   - Interface: text vs companion app
+  //   - Approach: earn-to-unlock learning vs simple block/filter/schedule
+  //   - Price: Braintech is the priciest; the trade is the interface +
+  //     learning-credit. We don't hide that Bark is cheaper.
   type Row = {
     label: string;
     braintech: "yes" | "no" | string;
@@ -211,27 +219,27 @@ function ComparisonTable({ braintechPrice }: { braintechPrice: string }) {
   };
   const rows: Row[] = [
     {
-      label: "Works on every device with NO apps to install",
+      label: "Rules set by texting in plain English",
+      braintech: "yes",
+      bark: "App",
+      circle: "App",
+    },
+    {
+      label: "Earn-to-unlock learning (Khan, TED, reading credit)",
       braintech: "yes",
       bark: "no",
       circle: "no",
     },
     {
-      label: "Nothing on their phone for the kid to delete",
+      label: "Network-level filtering, no app on the kid’s device",
       braintech: "yes",
-      bark: "no",
-      circle: "no",
-    },
-    {
-      label: "Earn-to-unlock learning (TED, Khan, reading)",
-      braintech: "yes",
-      bark: "no",
-      circle: "no",
+      bark: "yes",
+      circle: "yes",
     },
     {
       label: "Year-one price (device + service)",
       braintech: braintechPrice,
-      bark: "~$129 + $14/mo",
+      bark: "$79 lifetime",
       circle: "~$129 + $129/yr",
     },
   ];
@@ -242,7 +250,7 @@ function ComparisonTable({ braintechPrice }: { braintechPrice: string }) {
           How it compares
         </div>
         <h3 className="serif mt-2 text-2xl leading-snug">
-          The other boxes block. Braintech teaches.
+          All three filter. Only one rewards learning.
         </h3>
       </div>
       <div className="overflow-x-auto">
