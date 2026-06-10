@@ -36,6 +36,7 @@ func (a *Agent) Run(ctx context.Context) {
 	go tailDNSLog(ctx, a.usage, "/tmp/dnsmasq.log")
 	go rotateDNSLog(ctx, "/tmp/dnsmasq.log", 4<<20) // 4 MiB cap
 	go brainrotRefreshLoop(ctx)                     // resolve brainrot domains → nft IP sets
+	go brainrotDNSWatcher(ctx, "/tmp/dnsmasq.log")  // catch CNAME chains + dynamic CDN subdomains in real time
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {
