@@ -1,5 +1,30 @@
 import type { NeonQueryFunction } from "@neondatabase/serverless";
 
+/**
+ * Per-MAC brainrot minutes in the last 24h. Returns a map { mac → minutes }
+ * counting DISTINCT minute-buckets that had at least one query classified
+ * as social / video / games. Learning + other don't contribute.
+ *
+ * This is the load-bearing function for the brainrot meter — every per-row,
+ * per-group, and household number flows through it.
+ */
+export async function loadBrainrotMinutes(
+  sql: NeonQueryFunction<false, false>,
+  email: string,
+): Promise<Map<string, number>> {
+  const rows = (await sql`
+    SELECT mac::text AS mac, COUNT(DISTINCT bucket_start)::int AS minutes
+    FROM client_usage_minute
+    WHERE owner_email = ${email}
+      AND bucket_start > NOW() - INTERVAL '24 hours'
+      AND category IN ('social', 'video', 'games')
+    GROUP BY mac;
+  `) as { mac: string; minutes: number }[];
+  const map = new Map<string, number>();
+  for (const r of rows) map.set(r.mac.toLowerCase(), Number(r.minutes));
+  return map;
+}
+
 export type AllDeviceRow = {
   mac: string;
   // Friendly name (from client_labels), or the device's hostname, or the

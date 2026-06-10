@@ -8,7 +8,11 @@ import {
   ensureAccountSchema,
   ensureDefaultGroup,
 } from "@/app/lib/db";
-import { loadMacGroups, loadAllDevices } from "@/app/lib/groups";
+import {
+  loadMacGroups,
+  loadAllDevices,
+  loadBrainrotMinutes,
+} from "@/app/lib/groups";
 import {
   SWRegister,
   LogoutButton,
@@ -85,6 +89,7 @@ export default async function Dashboard() {
   let groups: GroupRow[] = [];
   let macGroups = new Map<string, string[]>();
   let allDevices: Awaited<ReturnType<typeof loadAllDevices>> = [];
+  let brainrotByMac = new Map<string, number>();
   let memory = "";
   if (sql) {
     await ensureDeviceSchema(sql);
@@ -108,6 +113,7 @@ export default async function Dashboard() {
     `) as GroupRow[];
     macGroups = await loadMacGroups(sql, email);
     allDevices = await loadAllDevices(sql, email);
+    brainrotByMac = await loadBrainrotMinutes(sql, email);
     const leadRows = (await sql`SELECT memory FROM leads WHERE email = ${email};`) as {
       memory: string | null;
     }[];
@@ -125,9 +131,13 @@ export default async function Dashboard() {
     rulesByGroup.set(gid, list);
   }
 
-  // Shape for the new tab system. brainrot_minutes is null until
-  // /api/account/usage starts returning real category data.
-  const allDevicesUI = allDevices.map((d) => ({ ...d, brainrot_minutes: null }));
+  // Shape for the new tab system. brainrot_minutes comes from the per-MAC
+  // map loaded from client_usage_minute (last 24h, distinct minutes with
+  // social/video/games queries). null when no data yet — the meter shows "—".
+  const allDevicesUI = allDevices.map((d) => ({
+    ...d,
+    brainrot_minutes: brainrotByMac.get(d.mac) ?? null,
+  }));
   const groupsForUi = groups.map((g) => {
     const rules = (rulesByGroup.get(g.group_id) ?? []).map((r) => ({
       rule_id: r.rule_id,
@@ -135,18 +145,34 @@ export default async function Dashboard() {
       name: r.name,
       summary: r.summary,
     }));
+    // Group minutes = sum of member minutes (treat null as 0; if every member
+    // is null, surface null instead of 0 so the meter reads "no data yet").
+    const memberMacs = Array.from(macGroups.entries())
+      .filter(([, gids]) => gids.includes(g.group_id))
+      .map(([mac]) => mac);
+    const memberMins = memberMacs.map((m) => brainrotByMac.get(m) ?? null);
+    const groupMinutes = memberMins.every((m) => m === null)
+      ? null
+      : memberMins.reduce((acc: number, m) => acc + (m ?? 0), 0);
     return {
       group_id: g.group_id,
       name: g.name,
       is_default: g.is_default,
       rule_count: rules.length,
       rules,
-      brainrot_minutes: null,
+      brainrot_minutes: groupMinutes,
     };
   });
-  // Unused references retained intentionally — proxy.ts cookies + macGroups
-  // are still set above for future use (e.g. usage attribution).
-  void macGroups;
+  // Household minutes for the top-of-page Usage meter.
+  const householdMinutes =
+    allDevicesUI.length === 0
+      ? null
+      : allDevicesUI.every((d) => d.brainrot_minutes === null)
+        ? null
+        : allDevicesUI.reduce(
+            (acc, d) => acc + (d.brainrot_minutes ?? 0),
+            0,
+          );
   void labels;
 
   return (
@@ -209,7 +235,7 @@ export default async function Dashboard() {
         <h2 className="serif text-2xl tracking-[-0.01em]">Usage</h2>
         <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
           <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-6">
-            <BrainrotMeter minutes={null} size="lg" />
+            <BrainrotMeter minutes={householdMinutes} size="lg" />
             <div className="flex-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
               {[
                 { k: "Social", warm: true },

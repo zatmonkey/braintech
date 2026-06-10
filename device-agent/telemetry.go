@@ -18,16 +18,17 @@ type Client struct {
 
 // Telemetry is the periodic network/system snapshot the agent reports.
 type Telemetry struct {
-	DeviceID     string   `json:"device_id"`
-	CollectedAt  string   `json:"collected_at"`
-	AgentVersion string   `json:"agent_version"`
-	Model        string   `json:"model"`
-	Firmware     string   `json:"firmware"`
-	UptimeSec    int64    `json:"uptime_sec"`
-	Load         string   `json:"load"`
-	WanUp        bool     `json:"wan_up"`
-	ClientCount  int      `json:"client_count"`
-	Clients      []Client `json:"clients"`
+	DeviceID     string        `json:"device_id"`
+	CollectedAt  string        `json:"collected_at"`
+	AgentVersion string        `json:"agent_version"`
+	Model        string        `json:"model"`
+	Firmware     string        `json:"firmware"`
+	UptimeSec    int64         `json:"uptime_sec"`
+	Load         string        `json:"load"`
+	WanUp        bool          `json:"wan_up"`
+	ClientCount  int           `json:"client_count"`
+	Clients      []Client      `json:"clients"`
+	Usage        []usageBucket `json:"usage,omitempty"`
 }
 
 func readFile(path string) string {

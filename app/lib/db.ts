@@ -246,6 +246,24 @@ export async function ensureDeviceSchema(
     CREATE INDEX IF NOT EXISTS client_last_seen_owner_recent_idx
       ON client_last_seen (owner_email, last_seen DESC);
   `;
+  // Per-minute usage rollups — what the agent ships every telemetry tick.
+  // Granularity: one row per (mac, minute, category). Minutes counted via
+  // dnsmasq query log → IP → MAC → category. Brainrot meter = COUNT(DISTINCT
+  // bucket_start) where category IN ('social','video','games').
+  await sql`
+    CREATE TABLE IF NOT EXISTS client_usage_minute (
+      owner_email   TEXT NOT NULL,
+      mac           TEXT NOT NULL,
+      bucket_start  TIMESTAMPTZ NOT NULL,
+      category      TEXT NOT NULL,
+      query_count   INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (owner_email, mac, bucket_start, category)
+    );
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS client_usage_minute_owner_recent_idx
+      ON client_usage_minute (owner_email, bucket_start DESC);
+  `;
   deviceSchemaReady = true;
 }
 

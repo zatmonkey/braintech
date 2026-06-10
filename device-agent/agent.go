@@ -16,6 +16,7 @@ type Agent struct {
 	cfg   Config
 	http  *http.Client
 	state State
+	usage *usageStore
 }
 
 func NewAgent(cfg Config) *Agent {
@@ -24,6 +25,7 @@ func NewAgent(cfg Config) *Agent {
 		// Timeout must exceed the server's long-poll hold (~25s).
 		http:  &http.Client{Timeout: 45 * time.Second},
 		state: LoadStateFile(cfg.StatePath),
+		usage: newUsageStore(),
 	}
 }
 
@@ -31,6 +33,8 @@ func NewAgent(cfg Config) *Agent {
 // exponential backoff on transport errors. It returns when ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) {
 	go a.telemetryLoop(ctx) // report network/system state every minute
+	go tailDNSLog(ctx, a.usage, "/tmp/dnsmasq.log")
+	go rotateDNSLog(ctx, "/tmp/dnsmasq.log", 4<<20) // 4 MiB cap
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {
@@ -160,7 +164,9 @@ func (a *Agent) telemetryLoop(ctx context.Context) {
 }
 
 func (a *Agent) reportTelemetry(ctx context.Context) {
-	payload, err := json.Marshal(collectTelemetry(a.cfg.DeviceID))
+	t := collectTelemetry(a.cfg.DeviceID)
+	t.Usage = a.usage.drain()
+	payload, err := json.Marshal(t)
 	if err != nil {
 		return
 	}
