@@ -40,6 +40,7 @@ func (a *Agent) Run(ctx context.Context) {
 	go ensureCaptiveInfra(ctx)                      // alias IP + dnsmasq "brain" hostname (one-time idempotent)
 	go captiveServer(ctx)                           // http://brain redirector + HTTP captive page
 	go policyEvaluatorLoop(ctx)                     // time/quota policy engine — toggles nft MAC sets per /etc/braintech/policy/*.json
+	go orphanCleanupLoop(ctx, a.cfg.DesiredPath)    // self-heal: delete managed files the current desired doesn't reference
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {
