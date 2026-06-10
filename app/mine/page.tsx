@@ -1,5 +1,9 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { getSql, ensureDeviceSchema, ensureAccountSchema } from "@/app/lib/db";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export const metadata: Metadata = {
   title: "What's set up on this device",
@@ -28,17 +32,105 @@ type MineResponse =
     }
   | { ok: false; reason: string };
 
-async function fetchMine(mac: string, baseUrl: string): Promise<MineResponse> {
-  try {
-    const r = await fetch(
-      `${baseUrl}/api/account/mine?mac=${encodeURIComponent(mac)}`,
-      { cache: "no-store" },
-    );
-    if (!r.ok) return { ok: false, reason: `status ${r.status}` };
-    return (await r.json()) as MineResponse;
-  } catch (err) {
-    return { ok: false, reason: (err as Error).message };
+const GROUP_SCOPED = new Set(["pause_group", "block_brainrot_group"]);
+const DEVICE_SCOPED = new Set(["pause_device"]);
+
+/**
+ * Server-side lookup of a MAC's owner + active rules. Same logic as the
+ * /api/account/mine endpoint, inlined here so the page doesn't have to
+ * round-trip through Vercel's per-deploy URL (which can be access-gated)
+ * to fetch its own JSON.
+ */
+async function lookupMine(mac: string): Promise<MineResponse> {
+  const sql = getSql();
+  if (!sql) return { ok: false, reason: "unavailable" };
+  await ensureDeviceSchema(sql);
+  await ensureAccountSchema(sql);
+
+  const owners = (await sql`
+    SELECT owner_email, last_seen
+    FROM client_last_seen
+    WHERE mac = ${mac}
+    ORDER BY last_seen DESC
+    LIMIT 1;
+  `) as { owner_email: string; last_seen: string }[];
+  if (owners.length === 0) {
+    return { ok: false, reason: "device not recognised on any account" };
   }
+  const owner = owners[0].owner_email;
+  const seenRecently =
+    Date.now() - new Date(owners[0].last_seen).getTime() < 5 * 60 * 1000;
+
+  const labelRow = (await sql`
+    SELECT name FROM client_labels WHERE owner_email = ${owner} AND mac = ${mac};
+  `) as { name: string }[];
+  const label = labelRow[0]?.name ?? null;
+
+  const groupRows = (await sql`
+    SELECT g.group_id, g.name
+    FROM client_group_memberships m
+    JOIN account_groups g
+      ON g.group_id = m.group_id AND g.owner_email = m.owner_email
+    WHERE m.owner_email = ${owner} AND m.mac = ${mac};
+  `) as { group_id: string; name: string }[];
+  const groupIds = new Set(groupRows.map((g) => g.group_id));
+  const groupNameById = new Map(groupRows.map((g) => [g.group_id, g.name]));
+
+  const ruleRows = (await sql`
+    SELECT rule_id, rule_type, name, summary, params
+    FROM account_rules
+    WHERE owner_email = ${owner} AND active = TRUE;
+  `) as {
+    rule_id: string;
+    rule_type: string;
+    name: string;
+    summary: string | null;
+    params: Record<string, unknown>;
+  }[];
+
+  const visible: Rule[] = [];
+  for (const r of ruleRows) {
+    if (DEVICE_SCOPED.has(r.rule_type)) {
+      if (String(r.params.mac ?? "").toLowerCase() === mac) {
+        visible.push({
+          rule_id: r.rule_id,
+          rule_type: r.rule_type,
+          name: r.name,
+          summary: r.summary,
+          scope: "device",
+        });
+      }
+    } else if (GROUP_SCOPED.has(r.rule_type)) {
+      const gid = String(r.params.group_id ?? "");
+      if (groupIds.has(gid)) {
+        visible.push({
+          rule_id: r.rule_id,
+          rule_type: r.rule_type,
+          name: r.name,
+          summary: r.summary,
+          scope: "group",
+          group_name: groupNameById.get(gid),
+        });
+      }
+    } else {
+      visible.push({
+        rule_id: r.rule_id,
+        rule_type: r.rule_type,
+        name: r.name,
+        summary: r.summary,
+        scope: "network",
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    mac,
+    label,
+    groups: groupRows,
+    rules: visible,
+    seen_recently: seenRecently,
+  };
 }
 
 export default async function MinePage({
@@ -50,14 +142,7 @@ export default async function MinePage({
   const macRaw = (sp.mac ?? "").trim().toLowerCase();
   const macOk = /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(macRaw);
 
-  // Build the base URL from the same Vercel deployment we're in.
-  // process.env.VERCEL_URL is the deploy URL; locally falls back to the
-  // dev server.
-  const baseUrl = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
-
-  const data = macOk ? await fetchMine(macRaw, baseUrl) : null;
+  const data = macOk ? await lookupMine(macRaw) : null;
 
   return (
     <main className="flex min-h-screen flex-col">
