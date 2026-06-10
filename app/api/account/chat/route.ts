@@ -38,6 +38,14 @@ import { loadGroupMacs } from "@/app/lib/groups";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Bri's apply path runs assembleDesired + materializeOps for every rule
+// the household has, which can take several seconds on a cold Neon
+// connection. The default 10s function timeout occasionally cuts off
+// AFTER the DB commit lands but BEFORE the response reaches the browser
+// — user sees "Sorry, try that again?" while the rule has actually
+// applied. Giving the chat path real headroom.
+export const maxDuration = 60;
+
 type Client = { hostname?: string; ip?: string; mac?: string; connected?: boolean };
 type Telemetry = {
   firmware?: string;
@@ -219,19 +227,33 @@ export async function POST(req: Request) {
 
   // Membership lives in client_group_memberships (the many-to-many table),
   // NOT in client_labels.group_id (legacy single-group column kept around
-  // for old code paths). Reading from labels would show every group as
-  // empty even when the dashboard shows real members.
+  // for old code paths). We also reach into client_last_seen so each member
+  // gets a real-looking name — manually-set label → DHCP hostname → MAC.
+  // Without the hostname fallback, Bri sees a raw MAC and hallucinates
+  // "I'll add ApeTop to the group" when ApeTop is already in it.
   const memberRows = (await sql`
-    SELECT cgm.group_id, cgm.mac, cl.name AS label_name
+    SELECT cgm.group_id, cgm.mac,
+           cl.name AS label_name,
+           cls.hostname AS hostname
     FROM client_group_memberships cgm
     LEFT JOIN client_labels cl
       ON cl.owner_email = cgm.owner_email AND cl.mac = cgm.mac
+    LEFT JOIN client_last_seen cls
+      ON cls.owner_email = cgm.owner_email AND cls.mac = cgm.mac
     WHERE cgm.owner_email = ${email};
-  `) as { group_id: string; mac: string; label_name: string | null }[];
+  `) as {
+    group_id: string;
+    mac: string;
+    label_name: string | null;
+    hostname: string | null;
+  }[];
   const membership = new Map<string, { mac: string; name: string }[]>();
   for (const r of memberRows) {
     const list = membership.get(r.group_id) ?? [];
-    list.push({ mac: r.mac, name: r.label_name ?? r.mac });
+    list.push({
+      mac: r.mac,
+      name: r.label_name ?? r.hostname ?? r.mac,
+    });
     membership.set(r.group_id, list);
   }
 
