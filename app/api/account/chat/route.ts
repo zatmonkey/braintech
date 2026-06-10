@@ -149,7 +149,7 @@ function buildContext(
             .join("\n");
     const rules =
       activeRules.length === 0
-        ? "none yet"
+        ? "(none — the router has 0 rules right now. Any rule the parent references must be freshly proposed; do NOT say 'already blocked' / 'still in place' / 'already on' based on chat history alone.)"
         : activeRules
             .map(
               (r) =>
