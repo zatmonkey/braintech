@@ -120,6 +120,252 @@ export function AccountChat() {
   );
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+ * AllDevicesSection — the canonical device list.
+ *
+ * One row per MAC seen in the last 7 days, joined with friendly names
+ * (client_labels) and groups (client_group_memberships). Status badge:
+ * green "Connected" if last_seen < 2 min, otherwise "Last seen <rel>".
+ * Filter chips above the list scope it to a single group; "All" resets.
+ *
+ * Renaming a device hits the same /api/account/clients endpoint as the
+ * old ClientRow. We optimistically update local state so the user sees
+ * the new name immediately without a reload.
+ * ──────────────────────────────────────────────────────────────────── */
+
+type AllDeviceRow = {
+  mac: string;
+  display_name: string;
+  has_label: boolean;
+  hostname: string | null;
+  ip: string | null;
+  last_seen: string;
+  first_seen: string;
+  connected: boolean;
+  group_ids: string[];
+};
+
+function relativeTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return "moments ago";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+export function AllDevicesSection({
+  rows,
+  groups,
+}: {
+  rows: AllDeviceRow[];
+  groups: { group_id: string; name: string }[];
+}) {
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [items, setItems] = useState(rows);
+
+  const filtered = selectedGroup
+    ? items.filter((r) => r.group_ids.includes(selectedGroup))
+    : items;
+  const connectedCount = items.filter((r) => r.connected).length;
+
+  function renameLocal(mac: string, name: string) {
+    setItems((rs) =>
+      rs.map((r) =>
+        r.mac === mac.toLowerCase()
+          ? { ...r, display_name: name, has_label: name.length > 0 }
+          : r,
+      ),
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5 text-[var(--color-ink-soft)]">
+        No devices reported yet — your Braintech device updates this every
+        minute.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 space-y-3">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-[var(--color-ink-soft)]">
+          {connectedCount} connected · {items.length} seen last 7 days
+        </span>
+        <span className="text-[var(--color-rule)]">·</span>
+        <button
+          type="button"
+          onClick={() => setSelectedGroup(null)}
+          className={`rounded-full px-2.5 py-1 font-medium transition ${
+            selectedGroup === null
+              ? "bg-[var(--color-ink)] text-[var(--color-cream)]"
+              : "border border-[var(--color-rule)] text-[var(--color-ink-soft)] hover:border-[var(--color-ink)]"
+          }`}
+        >
+          All
+        </button>
+        {groups.map((g) => (
+          <button
+            key={g.group_id}
+            type="button"
+            onClick={() =>
+              setSelectedGroup((curr) =>
+                curr === g.group_id ? null : g.group_id,
+              )
+            }
+            className={`rounded-full px-2.5 py-1 font-medium transition ${
+              selectedGroup === g.group_id
+                ? "bg-[var(--color-ink)] text-[var(--color-cream)]"
+                : "border border-[var(--color-rule)] text-[var(--color-ink-soft)] hover:border-[var(--color-ink)]"
+            }`}
+          >
+            {g.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="rounded-2xl border border-[var(--color-rule)] bg-white">
+        <ul className="divide-y divide-[var(--color-rule)]">
+          {filtered.map((r) => (
+            <AllDeviceListItem
+              key={r.mac}
+              row={r}
+              groupNamesById={Object.fromEntries(
+                groups.map((g) => [g.group_id, g.name] as const),
+              )}
+              onRenamed={renameLocal}
+            />
+          ))}
+          {filtered.length === 0 && (
+            <li className="p-5 text-sm text-[var(--color-ink-soft)]">
+              No devices in this group yet. Assign devices from a row&rsquo;s
+              context menu, or in the Groups section below.
+            </li>
+          )}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function AllDeviceListItem({
+  row,
+  groupNamesById,
+  onRenamed,
+}: {
+  row: AllDeviceRow;
+  groupNamesById: Record<string, string>;
+  onRenamed: (mac: string, name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(row.has_label ? row.display_name : "");
+  const [saving, setSaving] = useState(false);
+
+  async function save(next: string) {
+    const v = next.trim().slice(0, 32);
+    if (!v || v === row.display_name) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    setEditing(false);
+    try {
+      const res = await fetch("/api/account/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mac: row.mac, name: v }),
+      });
+      if (!res.ok) throw new Error(`rename failed: ${res.status}`);
+      onRenamed(row.mac, v);
+    } catch {
+      /* leave display name unchanged */
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const sub = row.hostname && row.hostname !== row.display_name
+    ? row.hostname
+    : row.mac;
+
+  return (
+    <li className="flex items-start justify-between gap-3 px-4 py-3">
+      <div className="flex min-w-0 items-start gap-3">
+        <span
+          aria-label={row.connected ? "Connected" : "Offline"}
+          className={`mt-1.5 size-2 shrink-0 rounded-full ${
+            row.connected ? "bg-emerald-500" : "bg-zinc-300"
+          }`}
+        />
+        <div className="min-w-0">
+          {editing ? (
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => save(draft)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") save(draft);
+                if (e.key === "Escape") {
+                  setDraft(row.has_label ? row.display_name : "");
+                  setEditing(false);
+                }
+              }}
+              disabled={saving}
+              maxLength={32}
+              placeholder="Maya's iPad…"
+              className="w-44 rounded border border-[var(--color-rule)] bg-white px-2 py-0.5 text-sm focus:border-[var(--color-ink)] focus:outline-none"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="block max-w-full truncate text-left text-sm font-medium hover:underline"
+              title="Click to rename"
+            >
+              {row.display_name}
+            </button>
+          )}
+          <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-ink-soft)]">
+            {sub}
+          </div>
+          {row.group_ids.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {row.group_ids.map((gid) => (
+                <span
+                  key={gid}
+                  className="rounded-full bg-[var(--color-cream)] px-2 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-ink-soft)]"
+                >
+                  {groupNamesById[gid] ?? gid}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="shrink-0 text-right">
+        {row.connected ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+            Connected
+            {row.ip && (
+              <span className="font-mono text-emerald-600/80">· {row.ip}</span>
+            )}
+          </span>
+        ) : (
+          <span className="text-[11px] text-[var(--color-ink-soft)]">
+            Last seen {relativeTime(row.last_seen)}
+          </span>
+        )}
+      </div>
+    </li>
+  );
+}
+
 export function ClientRow({
   ip,
   mac,

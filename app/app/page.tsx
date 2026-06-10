@@ -8,14 +8,14 @@ import {
   ensureAccountSchema,
   ensureDefaultGroup,
 } from "@/app/lib/db";
-import { loadMacGroups } from "@/app/lib/groups";
+import { loadMacGroups, loadAllDevices } from "@/app/lib/groups";
 import {
   SWRegister,
   LogoutButton,
   AccountChat,
-  ClientRow,
   RuleRow,
   GroupsSection,
+  AllDevicesSection,
 } from "./dashboard-client";
 
 export const dynamic = "force-dynamic";
@@ -85,6 +85,7 @@ export default async function Dashboard() {
   let activeRules: ActiveRule[] = [];
   let groups: GroupRow[] = [];
   let macGroups = new Map<string, string[]>();
+  let allDevices: Awaited<ReturnType<typeof loadAllDevices>> = [];
   let memory = "";
   if (sql) {
     await ensureDeviceSchema(sql);
@@ -107,6 +108,7 @@ export default async function Dashboard() {
       WHERE owner_email = ${email} ORDER BY is_default DESC, created_at;
     `) as GroupRow[];
     macGroups = await loadMacGroups(sql, email);
+    allDevices = await loadAllDevices(sql, email);
     const leadRows = (await sql`SELECT memory FROM leads WHERE email = ${email};`) as {
       memory: string | null;
     }[];
@@ -206,34 +208,22 @@ export default async function Dashboard() {
         )}
       </section>
 
-      {/* Connected devices */}
+      {/* All devices — canonical registry. Every MAC seen in the last 7
+          days, joined with friendly names + group memberships. Connected
+          ones show a green pill + IP; offline ones show "Last seen <rel>".
+          Group chips above the list scope it as a filter — groups are
+          subsets of the same canonical list, not a parallel render. */}
       {devices.length > 0 && (
         <section>
-          <h2 className="serif text-2xl tracking-[-0.01em]">Connected devices</h2>
-          <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
-            {(() => {
-              const clients = devices.flatMap((d) => realClients(d.telemetry));
-              if (clients.length === 0)
-                return <p className="text-[var(--color-ink-soft)]">No devices reported yet — your Braintech device updates this every minute.</p>;
-              return (
-                <ul className="divide-y divide-[var(--color-rule)]">
-                  {clients.map((c, i) => {
-                    const mac = (c.mac ?? "").toLowerCase();
-                    return (
-                      <ClientRow
-                        key={mac || i}
-                        ip={c.ip ?? ""}
-                        mac={mac}
-                        hostname={c.hostname}
-                        connected={c.connected}
-                        label={mac ? labels.get(mac) : undefined}
-                      />
-                    );
-                  })}
-                </ul>
-              );
-            })()}
-          </div>
+          <h2 className="serif text-2xl tracking-[-0.01em]">All devices</h2>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+            Every screen seen on your network in the last 7 days. Filter by
+            group below.
+          </p>
+          <AllDevicesSection
+            rows={allDevices}
+            groups={groups.map((g) => ({ group_id: g.group_id, name: g.name }))}
+          />
         </section>
       )}
 

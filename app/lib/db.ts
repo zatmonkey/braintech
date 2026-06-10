@@ -226,6 +226,26 @@ export async function ensureDeviceSchema(
   await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS owner_email TEXT;`;
   await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS telemetry JSONB;`;
   await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS telemetry_at TIMESTAMPTZ;`;
+  // Per-MAC presence history. Telemetry pushes upsert one row per visible
+  // client each tick. The dashboard merges this with client_labels (friendly
+  // name) and client_group_memberships (groups) into one canonical
+  // "all devices in the last 7 days" list — connected if last_seen < 2min,
+  // otherwise "last seen <relative time>".
+  await sql`
+    CREATE TABLE IF NOT EXISTS client_last_seen (
+      owner_email  TEXT NOT NULL,
+      mac          TEXT NOT NULL,
+      hostname     TEXT,
+      ip           TEXT,
+      first_seen   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (owner_email, mac)
+    );
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS client_last_seen_owner_recent_idx
+      ON client_last_seen (owner_email, last_seen DESC);
+  `;
   deviceSchemaReady = true;
 }
 

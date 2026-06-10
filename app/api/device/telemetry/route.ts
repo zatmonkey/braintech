@@ -45,5 +45,48 @@ export async function POST(req: Request) {
       last_seen = NOW()
     WHERE device_id = ${deviceId};
   `;
+
+  // Per-MAC presence: upsert one row per visible client into the registry.
+  // The dashboard reads this to render the canonical "all devices last
+  // 7 days" list — groups become a tag/filter on top instead of a
+  // duplicate parallel list.
+  const ownerRows = (await sql`
+    SELECT owner_email FROM devices WHERE device_id = ${deviceId};
+  `) as { owner_email: string | null }[];
+  const owner = ownerRows[0]?.owner_email;
+  if (owner) {
+    const clients = Array.isArray((body as { clients?: unknown[] })?.clients)
+      ? ((body as { clients: unknown[] }).clients as Array<{
+          mac?: string;
+          ip?: string;
+          hostname?: string;
+        }>)
+      : [];
+    for (const c of clients) {
+      if (typeof c.mac !== "string") continue;
+      const mac = c.mac.toLowerCase();
+      if (!/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(mac)) continue;
+      // Skip link-local IPv6 — those are noise, not actual home devices.
+      if (typeof c.ip === "string" && c.ip.toLowerCase().startsWith("fe80")) {
+        continue;
+      }
+      const ip = typeof c.ip === "string" ? c.ip.slice(0, 64) : null;
+      const hostname =
+        typeof c.hostname === "string" ? c.hostname.slice(0, 128) : null;
+      try {
+        await sql`
+          INSERT INTO client_last_seen (owner_email, mac, hostname, ip)
+          VALUES (${owner}, ${mac}, ${hostname}, ${ip})
+          ON CONFLICT (owner_email, mac) DO UPDATE SET
+            hostname  = COALESCE(EXCLUDED.hostname, client_last_seen.hostname),
+            ip        = COALESCE(EXCLUDED.ip, client_last_seen.ip),
+            last_seen = NOW();
+        `;
+      } catch (err) {
+        console.error("[telemetry] last-seen upsert failed", err);
+      }
+    }
+  }
+
   return NextResponse.json({ ok: true });
 }
