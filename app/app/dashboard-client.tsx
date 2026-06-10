@@ -420,82 +420,91 @@ export function AllDevicesSection({
         )}
       </div>
 
-      {/* Group-level toolbar shown when a group is active. */}
-      {activeGroup && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--color-rule)] bg-white p-4">
-          <div className="flex items-center gap-3">
-            <BrainrotMeter
-              minutes={activeGroup.brainrot_minutes}
-              size="sm"
-              withLabel={false}
-            />
-            <div>
-              <div className="text-sm font-semibold">{activeGroup.name}</div>
-              <div className="text-xs text-[var(--color-ink-soft)]">
-                {filtered.length} device{filtered.length === 1 ? "" : "s"} ·{" "}
-                {activeGroup.rule_count} rule
-                {activeGroup.rule_count === 1 ? "" : "s"}
+      {/* One unified card. When a group is active: toolbar → (rules) →
+          device list → add-device picker, separated by thin internal
+          rules so it reads as one piece. When "All" is active: just the
+          whole-house header + the device list. */}
+      <div className="overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-white">
+        {activeGroup ? (
+          <>
+            {/* Group toolbar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-[var(--color-cream)]/40 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <BrainrotMeter
+                  minutes={activeGroup.brainrot_minutes}
+                  size="sm"
+                  withLabel={false}
+                />
+                <div>
+                  <div className="text-sm font-semibold">{activeGroup.name}</div>
+                  <div className="text-xs text-[var(--color-ink-soft)]">
+                    {filtered.length} device{filtered.length === 1 ? "" : "s"} ·{" "}
+                    {activeGroup.rule_count} rule
+                    {activeGroup.rule_count === 1 ? "" : "s"}
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => addRuleFor(activeGroup)}
+                  className="rounded-full bg-[var(--color-ink)] px-3 py-1.5 text-xs font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)]"
+                >
+                  + Add rule
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setStats({
+                      open: true,
+                      title: activeGroup.name,
+                      subtitle: "Group · last 24h",
+                      minutes: activeGroup.brainrot_minutes,
+                    })
+                  }
+                  className="rounded-full border border-[var(--color-rule)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]"
+                >
+                  Stats
+                </button>
+                {!activeGroup.is_default && (
+                  <button
+                    type="button"
+                    onClick={() => deleteGroup(activeGroup.group_id)}
+                    className="text-xs text-[var(--color-ink-soft)] underline hover:text-[var(--color-accent)]"
+                  >
+                    delete group
+                  </button>
+                )}
               </div>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => addRuleFor(activeGroup)}
-              className="rounded-full bg-[var(--color-ink)] px-3 py-1.5 text-xs font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)]"
-            >
-              + Add rule
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                setStats({
-                  open: true,
-                  title: activeGroup.name,
-                  subtitle: "Group · last 24h",
-                  minutes: activeGroup.brainrot_minutes,
-                })
-              }
-              className="rounded-full border border-[var(--color-rule)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]"
-            >
-              Stats
-            </button>
-            {!activeGroup.is_default && (
-              <button
-                type="button"
-                onClick={() => deleteGroup(activeGroup.group_id)}
-                className="text-xs text-[var(--color-ink-soft)] underline hover:text-[var(--color-accent)]"
-              >
-                delete group
-              </button>
+
+            {/* Active rules — inline below the toolbar. */}
+            {activeGroup.rules.length > 0 && (
+              <div className="border-t border-[var(--color-rule)] px-4 py-3">
+                <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
+                  Active rules
+                </div>
+                <ul className="divide-y divide-[var(--color-rule)]">
+                  {activeGroup.rules.map((r) => (
+                    <RuleRow
+                      key={r.rule_id}
+                      ruleId={r.rule_id}
+                      name={r.name}
+                      ruleType={r.rule_type}
+                      summary={r.summary}
+                    />
+                  ))}
+                </ul>
+              </div>
             )}
-          </div>
-        </div>
-      )}
 
-      {/* Active rules for the group (when filtered to a group). */}
-      {activeGroup && activeGroup.rules.length > 0 && (
-        <div className="rounded-2xl border border-[var(--color-rule)] bg-white p-4">
-          <div className="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
-            Active rules
-          </div>
-          <ul className="divide-y divide-[var(--color-rule)]">
-            {activeGroup.rules.map((r) => (
-              <RuleRow
-                key={r.rule_id}
-                ruleId={r.rule_id}
-                name={r.name}
-                ruleType={r.rule_type}
-                summary={r.summary}
-              />
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* The device list. */}
-      <div className="rounded-2xl border border-[var(--color-rule)] bg-white">
-        {!activeGroup && (
+            {/* Devices section header — visually distinct from the toolbar. */}
+            <div className="border-t border-[var(--color-rule)] px-4 pt-3 pb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
+              Devices in this group
+            </div>
+          </>
+        ) : (
+          // "All" tab — household summary header
           <div className="flex items-center justify-between gap-3 border-b border-[var(--color-rule)] bg-[var(--color-cream)]/40 px-4 py-3">
             <div className="flex items-center gap-3">
               <BrainrotMeter
