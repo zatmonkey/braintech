@@ -294,6 +294,7 @@ export function AllDevicesSection({
             rule_count: 0,
             rules: [],
             brainrot_minutes: null,
+            breakdown: { ...EMPTY_BREAKDOWN },
           },
         ]);
         setNewGroupName("");
@@ -482,6 +483,7 @@ export function AllDevicesSection({
                       title: activeGroup.name,
                       subtitle: "Group · last 24h",
                       minutes: activeGroup.brainrot_minutes,
+                      breakdown: activeGroup.breakdown,
                     })
                   }
                   className="rounded-full border border-[var(--color-rule)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]"
