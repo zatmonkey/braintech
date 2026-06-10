@@ -21,6 +21,7 @@ import {
   LogoutButton,
   AccountChat,
   AllDevicesSection,
+  NetworkStatusCard,
 } from "./dashboard-client";
 import { BrainrotMeter } from "./brainrot-meter";
 
@@ -276,64 +277,27 @@ export default async function Dashboard() {
         </section>
       )}
 
-      {/* NETWORK STATUS — moved to the bottom. The status card is useful
-          for debugging but ranks lower than usage / chat / devices for the
-          day-to-day parent flow. */}
+      {/* NETWORK STATUS — bottom of dashboard. Live: polls /api/account/state
+          like the Devices section so "Rules active" + "Config" stay
+          truthful instead of frozen at page-load time. */}
       <section className="pb-4">
         <h2 className="serif text-2xl tracking-[-0.01em]">Network status</h2>
-        {devices.length === 0 ? (
-          <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5 text-[var(--color-ink-soft)]">
-            No device linked to {email} yet. Once your Braintech device is
-            registered to your account, its status appears here.
-          </div>
-        ) : (
-          <div className="mt-3 grid gap-3">
-            {devices.map((d) => {
-              const isOnline = online(d.last_seen);
-              const inSync = d.reported_version === d.desired_version;
-              return (
-                <div
-                  key={d.device_id}
-                  className="rounded-2xl border border-[var(--color-rule)] bg-white p-5"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 font-medium">
-                      <span
-                        className={`size-2.5 rounded-full ${
-                          isOnline ? "bg-emerald-500" : "bg-zinc-300"
-                        }`}
-                      />
-                      {d.label ?? d.device_id}
-                    </div>
-                    <span className="text-xs text-[var(--color-ink-soft)]">
-                      {isOnline ? "Online" : "Offline"}
-                    </span>
-                  </div>
-                  <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                    <Stat
-                      label="Config"
-                      value={inSync ? "In sync ✓" : "Updating…"}
-                    />
-                    <Stat label="WAN" value={d.telemetry?.wan_up ? "Up" : "Down"} />
-                    <Stat label="Firmware" value={d.telemetry?.firmware ?? "—"} />
-                    <Stat
-                      label="Uptime"
-                      value={fmtUptime(d.telemetry?.uptime_sec)}
-                    />
-                    <Stat
-                      label="Connected"
-                      value={`${realClients(d.telemetry).length} devices`}
-                    />
-                    <Stat
-                      label="Rules active"
-                      value={String(activeRules.length)}
-                    />
-                  </dl>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <NetworkStatusCard
+          ownerEmail={email}
+          initial={{
+            devices: devices.map((d) => ({
+              device_id: d.device_id,
+              label: d.label,
+              online: online(d.last_seen),
+              in_sync: d.reported_version === d.desired_version,
+              wan_up: !!d.telemetry?.wan_up,
+              firmware: d.telemetry?.firmware ?? null,
+              uptime_sec: d.telemetry?.uptime_sec ?? null,
+              connected_count: realClients(d.telemetry).length,
+            })),
+            active_rules: activeRules.length,
+          }}
+        />
       </section>
     </main>
   );

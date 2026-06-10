@@ -25,6 +25,155 @@ export function LogoutButton() {
   );
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+ * NetworkStatusCard — the "Your network" section at the bottom of /app.
+ *
+ * Was an inline server-rendered block that never updated until a hard
+ * page reload, so "Rules active: 0" stayed stuck even after Bri added a
+ * rule. Now a client component that subscribes to the same poll +
+ * "braintech:state-changed" event as the rest of the dashboard, so every
+ * stat (online dot, config status, WAN, uptime, connected count, rules
+ * active) updates in the same 5s cadence as the rest of the page.
+ * ──────────────────────────────────────────────────────────────────── */
+type NetworkDevice = {
+  device_id: string;
+  label: string | null;
+  online: boolean;
+  in_sync: boolean;
+  wan_up: boolean;
+  firmware: string | null;
+  uptime_sec: number | null;
+  connected_count: number;
+};
+
+function fmtUptimeSec(s: number | null): string {
+  if (!s) return "—";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+export function NetworkStatusCard({
+  initial,
+  ownerEmail,
+}: {
+  initial: { devices: NetworkDevice[]; active_rules: number };
+  ownerEmail: string;
+}) {
+  const [state, setState] = useState(initial);
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/account/state", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        devices?: Array<{
+          device_id: string;
+          label: string | null;
+          desired_version: number;
+          reported_version: number;
+          online: boolean;
+          in_sync: boolean;
+          telemetry: {
+            firmware?: string;
+            wan_up?: boolean;
+            uptime_sec?: number;
+            clients?: Array<{ ip?: string }>;
+          } | null;
+        }>;
+        rules?: Array<{ active: boolean }>;
+      };
+      const devices: NetworkDevice[] = (data.devices ?? []).map((d) => ({
+        device_id: d.device_id,
+        label: d.label,
+        online: d.online,
+        in_sync: d.in_sync,
+        wan_up: !!d.telemetry?.wan_up,
+        firmware: d.telemetry?.firmware ?? null,
+        uptime_sec: d.telemetry?.uptime_sec ?? null,
+        connected_count: (d.telemetry?.clients ?? []).filter(
+          (c) => c.ip && !c.ip.startsWith("fe80"),
+        ).length,
+      }));
+      const active_rules = (data.rules ?? []).filter((r) => r.active).length;
+      setState({ devices, active_rules });
+    } catch {
+      /* silent */
+    }
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(refresh, 5000);
+    const onEvt = () => refresh();
+    window.addEventListener("braintech:state-changed", onEvt);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("braintech:state-changed", onEvt);
+    };
+  }, [refresh]);
+
+  if (state.devices.length === 0) {
+    return (
+      <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5 text-[var(--color-ink-soft)]">
+        No device linked to {ownerEmail} yet. Once your Braintech device is
+        registered to your account, its status appears here.
+      </div>
+    );
+  }
+  return (
+    <div className="mt-3 grid gap-3">
+      {state.devices.map((d) => (
+        <div
+          key={d.device_id}
+          className="rounded-2xl border border-[var(--color-rule)] bg-white p-5"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 font-medium">
+              <span
+                className={`size-2.5 rounded-full ${
+                  d.online ? "bg-emerald-500" : "bg-zinc-300"
+                }`}
+              />
+              {d.label ?? d.device_id}
+            </div>
+            <span className="text-xs text-[var(--color-ink-soft)]">
+              {d.online ? "Online" : "Offline"}
+            </span>
+          </div>
+          <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <NSStat
+              label="Config"
+              value={d.in_sync ? "In sync ✓" : "Updating…"}
+            />
+            <NSStat label="WAN" value={d.wan_up ? "Up" : "Down"} />
+            <NSStat label="Firmware" value={d.firmware ?? "—"} />
+            <NSStat label="Uptime" value={fmtUptimeSec(d.uptime_sec)} />
+            <NSStat
+              label="Connected"
+              value={`${d.connected_count} devices`}
+            />
+            <NSStat
+              label="Rules active"
+              value={String(state.active_rules)}
+            />
+          </dl>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NSStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs uppercase tracking-wider text-[var(--color-ink-soft)]">
+        {label}
+      </dt>
+      <dd className="mt-0.5 font-medium text-[var(--color-ink)]">{value}</dd>
+    </div>
+  );
+}
+
 type Msg = { role: "user" | "assistant"; content: string };
 
 export function AccountChat({ compact = false }: { compact?: boolean } = {}) {
