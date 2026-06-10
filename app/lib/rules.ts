@@ -132,9 +132,24 @@ export function newRuleId(
   return `${prefix}_${randomBytes(4).toString("hex")}`;
 }
 
-/** Path on the router for a brainrot rule's dnsmasq conf snippet. */
-export function brainrotConfPath(ruleId: string): string {
-  return `/etc/dnsmasq.d/bt-${ruleId}.conf`;
+/**
+ * Path on the router for a brainrot rule's nftables include. dnsmasq doesn't
+ * support per-tag DNS responses (the `tag:TAG,address=...` syntax is not
+ * accepted), so per-MAC blocks live in nftables: a MAC set + dynamic IP
+ * sets the agent refreshes by resolving the configured domains every
+ * ~30 seconds.
+ */
+export function brainrotNftPath(ruleId: string): string {
+  return `/etc/nftables.d/bt-${ruleId}.nft`;
+}
+/**
+ * Side-car JSON state file the agent reads to know which domains to resolve
+ * + which nft sets to populate for this rule. Kept separate from the nft
+ * file so the executor can write static structural state and the agent
+ * keeps dynamic IP state independently.
+ */
+export function brainrotJsonPath(ruleId: string): string {
+  return `/etc/braintech/brainrot/${ruleId}.json`;
 }
 
 export function newGroupId(): string {
@@ -191,7 +206,10 @@ export function ownedTargets(
     case "pause_group":
       return [{ kind: "file", path: pauseGroupNftPath(ruleId) }];
     case "block_brainrot_group":
-      return [{ kind: "file", path: brainrotConfPath(ruleId) }];
+      return [
+        { kind: "file", path: brainrotNftPath(ruleId) },
+        { kind: "file", path: brainrotJsonPath(ruleId) },
+      ];
   }
 }
 
@@ -307,24 +325,25 @@ export function buildRuleOps(
       ];
     }
     case "block_brainrot_group": {
-      // Structural placeholder — MACs + domain list are filled in at
-      // assembly time by materializeOps. Also needs the dnsmasq confdir
-      // option set on /etc/config/dhcp so /etc/dnsmasq.d/ is loaded
-      // (idempotent uci.set).
+      // Structural placeholders — MAC set + domain list are filled in at
+      // assembly time by materializeOps. The nft file defines static
+      // structure (MAC set, empty IP sets, chain); the JSON file tells the
+      // agent which domains to resolve into those IP sets. Agent refreshes
+      // IPs every ~30s — see device-agent/brainrot.go.
       return [
         {
-          type: "uci.set",
-          config: "dhcp",
-          section: "@dnsmasq[0]",
-          option: "confdir",
-          value: "/etc/dnsmasq.d",
-        },
-        {
           type: "file.write",
-          path: brainrotConfPath(ruleId),
+          path: brainrotJsonPath(ruleId),
           content: "",
           mode: "644",
         },
+        {
+          type: "file.write",
+          path: brainrotNftPath(ruleId),
+          content: "",
+          mode: "644",
+        },
+        { type: "service", name: "firewall", action: "reload" },
       ];
     }
     case "force_router_dns": {
@@ -572,44 +591,107 @@ export function nftBlockIpSetFile(
 }
 
 /**
- * Build the dnsmasq conf for a brainrot block scoped to one kid's MACs.
+ * Build the nftables include for a brainrot block scoped to a group's MACs.
  *
- * Mechanism: dnsmasq's tag system. We emit `dhcp-host=<mac>,set:<tag>`
- * lines that attach a per-rule tag to each member MAC's DHCP lease. Then
- * `tag:<tag>,address=/domain/0.0.0.0` lines null-route the brainrot
- * domains for ONLY those tagged clients. Everyone else on the LAN keeps
- * resolving normally.
+ * Why nft, not dnsmasq: dnsmasq's `tag:<tag>,address=/domain/0.0.0.0`
+ * syntax — which would let us null-route domains for one MAC and not
+ * another — is NOT a real dnsmasq option. dnsmasq's `tag:` prefix only
+ * works on DHCP options. We previously emitted it anyway and crashed
+ * dnsmasq with "bad option" → DNS died on the whole LAN. That was the
+ * postmortem that produced this design.
  *
- * Multiple brainrot rules can target the same MAC (e.g. a kid in
- * "youtube-blocked" and "social-blocked") — dnsmasq merges dhcp-host
- * entries across configs, so a MAC accumulates every tag and every
- * tagged address rule applies.
+ * Mechanism: three nft sets + one chain at forward priority -10:
+ *   - bt_<id>_macs   : ether_addr   (MAC set, populated at write time)
+ *   - bt_<id>_ips4   : ipv4_addr w/ timeout (refreshed by the agent)
+ *   - bt_<id>_ips6   : ipv6_addr w/ timeout (refreshed by the agent)
+ *   - chain bt_<id>  : ether saddr ∈ macs && ip[6] daddr ∈ ips[46] → reject
+ *
+ * The agent (device-agent/brainrot.go) reads the side-car JSON file for
+ * this rule, resolves each domain every ~30s, and runs
+ * `nft add element inet fw4 bt_<id>_ips[46] { IP }` for each result. Sets
+ * are declared with timeout so stale CDN IPs age out automatically.
+ *
+ * On fw4 reload, the include re-creates the sets (empty); the agent's next
+ * refresh cycle re-populates them. Worst-case window without protection
+ * after a reload is one refresh cycle (~30s).
  */
-export function dnsmasqBrainrotConf(
-  ruleId: string,
-  macs: string[],
-  domains: string[],
-): string {
-  const tag = `bt_${ruleId}`;
+export function nftBrainrotFile(ruleId: string, macs: string[]): string {
+  const macSet = `bt_${ruleId}_macs`;
+  const ip4Set = `bt_${ruleId}_ips4`;
+  const ip6Set = `bt_${ruleId}_ips6`;
+  const chain = `bt_${ruleId}`;
   const lines: string[] = [];
-  lines.push("# Braintech — brainrot block (auto-generated, do not edit)");
-  lines.push(`# rule ${ruleId} — ${macs.length} MACs, ${domains.length} domains`);
+  lines.push("# Braintech — brainrot per-MAC block (auto-generated, do not edit)");
+  lines.push(`# rule ${ruleId} — ${macs.length} MACs`);
+  lines.push("# IP sets are refreshed by the agent (resolve domains -> nft add element)");
   lines.push("");
-  if (macs.length === 0) {
-    lines.push("# (no member MACs — rule is structurally present but inert)");
-    return lines.join("\n") + "\n";
+
+  // MAC set — populated at file-write time.
+  lines.push(`set ${macSet} {`);
+  lines.push(`    type ether_addr`);
+  if (macs.length > 0) {
+    lines.push(`    elements = {`);
+    for (let i = 0; i < macs.length; i += 4) {
+      const chunk = macs.slice(i, i + 4).join(", ");
+      const isLast = i + 4 >= macs.length;
+      lines.push(`        ${chunk}${isLast ? "" : ","}`);
+    }
+    lines.push(`    }`);
   }
-  lines.push("# Tag each member MAC's DHCP lease");
-  for (const mac of macs) {
-    lines.push(`dhcp-host=${mac},set:${tag}`);
-  }
+  lines.push(`}`);
   lines.push("");
-  lines.push("# Block brainrot domains for any client tagged " + tag);
-  for (const d of domains) {
-    lines.push(`tag:${tag},address=/${d}/0.0.0.0`);
-    lines.push(`tag:${tag},address=/${d}/::`);
+
+  // IP sets — agent populates these at runtime. timeout=2h means stale
+  // CDN IPs roll off automatically without us having to track them.
+  lines.push(`set ${ip4Set} {`);
+  lines.push(`    type ipv4_addr`);
+  lines.push(`    flags interval, timeout`);
+  lines.push(`    timeout 2h`);
+  lines.push(`}`);
+  lines.push("");
+  lines.push(`set ${ip6Set} {`);
+  lines.push(`    type ipv6_addr`);
+  lines.push(`    flags interval, timeout`);
+  lines.push(`    timeout 2h`);
+  lines.push(`}`);
+  lines.push("");
+
+  // Chain: only reject when MAC ∈ kids AND dest ∈ blocked IPs. Anyone
+  // outside the MAC set (parents) keeps full access; any destination not
+  // in the IP set is unaffected (the rest of the internet still works).
+  lines.push(`chain ${chain} {`);
+  lines.push(`    type filter hook forward priority -10; policy accept;`);
+  if (macs.length > 0) {
+    lines.push(
+      `    ether saddr @${macSet} ip daddr @${ip4Set} reject comment "bt:${ruleId} v4"`,
+    );
+    lines.push(
+      `    ether saddr @${macSet} ip6 daddr @${ip6Set} reject comment "bt:${ruleId} v6"`,
+    );
+  } else {
+    lines.push(`    # (no member MACs — chain is inert)`);
   }
+  lines.push(`}`);
   return lines.join("\n") + "\n";
+}
+
+/**
+ * Side-car JSON the agent watches for. Tells the refresh loop which sets
+ * to populate from which domains. Shape is small and stable on purpose —
+ * if we add another rule type with dynamic IPs later, it reuses this shape.
+ */
+export function brainrotStateJson(ruleId: string, domains: string[]): string {
+  return JSON.stringify(
+    {
+      rule_id: ruleId,
+      ip4_set: `bt_${ruleId}_ips4`,
+      ip6_set: `bt_${ruleId}_ips6`,
+      domains,
+      updated_at: new Date().toISOString(),
+    },
+    null,
+    2,
+  ) + "\n";
 }
 
 /**
@@ -703,11 +785,16 @@ export async function materializeOps(
     const p = rule.params as BlockBrainrotGroupParams;
     const macs = ctx.groupMacs?.get(p.group_id) ?? [];
     const domains = p.domains?.length ? p.domains : DEFAULT_BRAINROT_DOMAINS;
-    const content = dnsmasqBrainrotConf(rule.rule_id, macs, domains);
-    const path = brainrotConfPath(rule.rule_id);
-    return rule.ops.map((o) =>
-      o.type === "file.write" && o.path === path ? { ...o, content } : o,
-    );
+    const nftContent = nftBrainrotFile(rule.rule_id, macs);
+    const jsonContent = brainrotStateJson(rule.rule_id, domains);
+    const nftPath = brainrotNftPath(rule.rule_id);
+    const jsonPath = brainrotJsonPath(rule.rule_id);
+    return rule.ops.map((o) => {
+      if (o.type !== "file.write") return o;
+      if (o.path === nftPath) return { ...o, content: nftContent };
+      if (o.path === jsonPath) return { ...o, content: jsonContent };
+      return o;
+    });
   }
   return rule.ops;
 }

@@ -35,6 +35,7 @@ func (a *Agent) Run(ctx context.Context) {
 	go a.telemetryLoop(ctx) // report network/system state every minute
 	go tailDNSLog(ctx, a.usage, "/tmp/dnsmasq.log")
 	go rotateDNSLog(ctx, "/tmp/dnsmasq.log", 4<<20) // 4 MiB cap
+	go brainrotRefreshLoop(ctx)                     // resolve brainrot domains → nft IP sets
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {
