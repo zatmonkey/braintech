@@ -25,7 +25,8 @@ export type RuleType =
   | "force_router_dns"
   | "block_managed_list"
   | "block_ip_set"
-  | "block_brainrot_group";
+  | "block_brainrot_group"
+  | "block_schedule_group";
 
 export type PauseDeviceParams = { mac: string; client_name?: string };
 export type PauseGroupParams = { group_id: string; group_name?: string };
@@ -69,6 +70,25 @@ export type BlockBrainrotGroupParams = {
   group_name?: string;
   domains?: string[]; // override; otherwise DEFAULT_BRAINROT_DOMAINS
 };
+/**
+ * Like block_brainrot_group, but the on-device policy engine decides
+ * per-minute whether to enforce or pass-through based on a schedule:
+ *
+ *   - allow_windows: time-of-day windows on specific weekdays
+ *   - allow_quotas:  per-period minute budgets (day/weekend/weekday/week)
+ *
+ * Both are OR'd. Empty arrays = block always (same effect as
+ * block_brainrot_group). At least one of the two must be non-empty for
+ * the rule to be meaningful as a "schedule".
+ */
+export type BlockScheduleGroupParams = {
+  group_id: string;
+  group_name?: string;
+  app_label: string; // "YouTube", "TikTok", etc. — displayed on /blocked
+  domains?: string[]; // override; otherwise DEFAULT_BRAINROT_DOMAINS
+  allow_windows?: TimeWindow[];
+  allow_quotas?: QuotaWindow[];
+};
 export type RuleParams =
   | PauseDeviceParams
   | PauseGroupParams
@@ -76,7 +96,8 @@ export type RuleParams =
   | ForceRouterDnsParams
   | BlockManagedListParams
   | BlockIpSetParams
-  | BlockBrainrotGroupParams;
+  | BlockBrainrotGroupParams
+  | BlockScheduleGroupParams;
 
 /**
  * The canonical "brainrot" — infinite-scroll algorithmic feeds Bri can
@@ -127,7 +148,8 @@ export function newRuleId(
     | "dnsforce"
     | "mlist"
     | "ipset"
-    | "brainrot",
+    | "brainrot"
+    | "sched",
 ): string {
   return `${prefix}_${randomBytes(4).toString("hex")}`;
 }
@@ -209,6 +231,12 @@ export function ownedTargets(
       return [
         { kind: "file", path: brainrotNftPath(ruleId) },
         { kind: "file", path: brainrotJsonPath(ruleId) },
+      ];
+    case "block_schedule_group":
+      return [
+        { kind: "file", path: brainrotNftPath(ruleId) },
+        { kind: "file", path: brainrotJsonPath(ruleId) },
+        { kind: "file", path: policyDocPath(ruleId) },
       ];
   }
 }
@@ -334,6 +362,34 @@ export function buildRuleOps(
         {
           type: "file.write",
           path: brainrotJsonPath(ruleId),
+          content: "",
+          mode: "644",
+        },
+        {
+          type: "file.write",
+          path: brainrotNftPath(ruleId),
+          content: "",
+          mode: "644",
+        },
+        { type: "service", name: "firewall", action: "reload" },
+      ];
+    }
+    case "block_schedule_group": {
+      // Three files: nft (chain + empty sets), brainrot JSON (domains + macs
+      // for the DNS watcher), policy JSON (windows + quotas for the engine).
+      // The MAC set starts empty in the nft file — the policy engine
+      // populates it when enforcement is currently required and clears it
+      // when the schedule says "allow".
+      return [
+        {
+          type: "file.write",
+          path: brainrotJsonPath(ruleId),
+          content: "",
+          mode: "644",
+        },
+        {
+          type: "file.write",
+          path: policyDocPath(ruleId),
           content: "",
           mode: "644",
         },
@@ -698,16 +754,23 @@ export function nftBrainrotFile(ruleId: string, macs: string[]): string {
 
 /**
  * Side-car JSON the agent watches for. Tells the refresh loop which sets
- * to populate from which domains. Shape is small and stable on purpose —
- * if we add another rule type with dynamic IPs later, it reuses this shape.
+ * to populate from which domains AND which MACs to attribute observed
+ * queries to (for per-MAC quota counting in the policy engine). Shape is
+ * small and stable on purpose — both block_brainrot_group and
+ * block_schedule_group rules use this same file.
  */
-export function brainrotStateJson(ruleId: string, domains: string[]): string {
+export function brainrotStateJson(
+  ruleId: string,
+  domains: string[],
+  macs: string[],
+): string {
   return JSON.stringify(
     {
       rule_id: ruleId,
       ip4_set: `bt_${ruleId}_ips4`,
       ip6_set: `bt_${ruleId}_ips6`,
       domains,
+      macs,
       updated_at: new Date().toISOString(),
     },
     null,
@@ -919,13 +982,41 @@ export async function materializeOps(
     const macs = ctx.groupMacs?.get(p.group_id) ?? [];
     const domains = p.domains?.length ? p.domains : DEFAULT_BRAINROT_DOMAINS;
     const nftContent = nftBrainrotFile(rule.rule_id, macs);
-    const jsonContent = brainrotStateJson(rule.rule_id, domains);
+    const jsonContent = brainrotStateJson(rule.rule_id, domains, macs);
     const nftPath = brainrotNftPath(rule.rule_id);
     const jsonPath = brainrotJsonPath(rule.rule_id);
     return rule.ops.map((o) => {
       if (o.type !== "file.write") return o;
       if (o.path === nftPath) return { ...o, content: nftContent };
       if (o.path === jsonPath) return { ...o, content: jsonContent };
+      return o;
+    });
+  }
+  if (rule.rule_type === "block_schedule_group") {
+    const p = rule.params as BlockScheduleGroupParams;
+    const macs = ctx.groupMacs?.get(p.group_id) ?? [];
+    const domains = p.domains?.length ? p.domains : DEFAULT_BRAINROT_DOMAINS;
+    // Schedule rules use the SAME nft chain + IP sets as block_brainrot_group,
+    // but the MAC set starts empty — the on-device policy engine populates
+    // it when the schedule says "enforce" and clears it when "allow".
+    const nftContent = nftBrainrotFile(rule.rule_id, []);
+    const brainrotContent = brainrotStateJson(rule.rule_id, domains, macs);
+    const policyContent = policyBlockUnlessJson(
+      rule.rule_id,
+      p.app_label,
+      domains,
+      macs,
+      p.allow_windows ?? [],
+      p.allow_quotas ?? [],
+    );
+    const nftPath = brainrotNftPath(rule.rule_id);
+    const brainrotPath = brainrotJsonPath(rule.rule_id);
+    const policyPath = policyDocPath(rule.rule_id);
+    return rule.ops.map((o) => {
+      if (o.type !== "file.write") return o;
+      if (o.path === nftPath) return { ...o, content: nftContent };
+      if (o.path === brainrotPath) return { ...o, content: brainrotContent };
+      if (o.path === policyPath) return { ...o, content: policyContent };
       return o;
     });
   }

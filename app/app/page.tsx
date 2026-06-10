@@ -133,7 +133,11 @@ export default async function Dashboard() {
   // don't bucket — they apply to everyone, not a specific group.
   const rulesByGroup = new Map<string, ActiveRule[]>();
   for (const r of activeRules) {
-    if (r.rule_type !== "pause_group" && r.rule_type !== "block_brainrot_group") {
+    if (
+      r.rule_type !== "pause_group" &&
+      r.rule_type !== "block_brainrot_group" &&
+      r.rule_type !== "block_schedule_group"
+    ) {
       continue;
     }
     const gid = (r.params as { group_id?: string } | null)?.group_id;

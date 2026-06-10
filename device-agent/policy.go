@@ -9,8 +9,237 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
+
+// quotaCounter tracks minutes-with-activity per (rule_id, mac, day) on the
+// router. brainrotDNSWatcher records into it every time a query from a
+// rule-member MAC matches a rule's domain list.
+//
+// Persistence: snapshot to disk every minute and on shutdown; reload on
+// boot. Keeps the kid from rebooting their way out of a quota. Old day
+// keys (>14 days) are GC'd on each snapshot.
+//
+// "Minutes" = distinct minute-of-day buckets where at least one
+// matching query was observed. Same semantics as the dashboard meter.
+const (
+	quotaCounterPath = "/etc/braintech/quota-counter.json"
+	quotaDayKeepDays = 14
+)
+
+type quotaCounter struct {
+	mu     sync.Mutex
+	active map[string]map[string]map[string]map[int]bool // [ruleID][mac][YYYY-MM-DD][minOfDay]
+}
+
+func newQuotaCounter() *quotaCounter {
+	return &quotaCounter{active: make(map[string]map[string]map[string]map[int]bool)}
+}
+
+func (c *quotaCounter) record(ruleID, mac string, ts time.Time) {
+	if ruleID == "" || mac == "" {
+		return
+	}
+	mac = strings.ToLower(mac)
+	day := ts.Format("2006-01-02")
+	minute := ts.Hour()*60 + ts.Minute()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rd := c.active[ruleID]
+	if rd == nil {
+		rd = make(map[string]map[string]map[int]bool)
+		c.active[ruleID] = rd
+	}
+	md := rd[mac]
+	if md == nil {
+		md = make(map[string]map[int]bool)
+		rd[mac] = md
+	}
+	dd := md[day]
+	if dd == nil {
+		dd = make(map[int]bool)
+		md[day] = dd
+	}
+	dd[minute] = true
+}
+
+// countPeriod sums DISTINCT minute-buckets across the given days for
+// any of the given MACs. Returns total minutes used by the group during
+// the period.
+func (c *quotaCounter) countPeriod(ruleID string, macs []string, dayKeys []string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rd, ok := c.active[ruleID]
+	if !ok {
+		return 0
+	}
+	// Use a set to avoid double-counting the same minute if two MACs
+	// were both active in it.
+	seen := make(map[string]bool, 32)
+	for _, mac := range macs {
+		md, ok := rd[strings.ToLower(mac)]
+		if !ok {
+			continue
+		}
+		for _, day := range dayKeys {
+			for min := range md[day] {
+				seen[day+":"+fmt.Sprintf("%04d", min)] = true
+			}
+		}
+	}
+	return len(seen)
+}
+
+// periodDayKeys returns the YYYY-MM-DD strings making up the requested
+// period relative to "now". Implementation note: ISO week starts on
+// Monday for week/weekday/weekend semantics; that matches what parents
+// mean by "this weekend".
+func periodDayKeys(period string, now time.Time) []string {
+	switch period {
+	case "day":
+		return []string{now.Format("2006-01-02")}
+	case "weekend":
+		// Saturday + Sunday of the current ISO week (Mon=1, Sun=7).
+		mondayOffset := int(now.Weekday())
+		if mondayOffset == 0 {
+			mondayOffset = 7 // Sunday → 7 days from previous Monday
+		}
+		monday := now.AddDate(0, 0, -(mondayOffset - 1))
+		sat := monday.AddDate(0, 0, 5)
+		sun := monday.AddDate(0, 0, 6)
+		return []string{sat.Format("2006-01-02"), sun.Format("2006-01-02")}
+	case "weekday":
+		mondayOffset := int(now.Weekday())
+		if mondayOffset == 0 {
+			mondayOffset = 7
+		}
+		monday := now.AddDate(0, 0, -(mondayOffset - 1))
+		out := make([]string, 5)
+		for i := 0; i < 5; i++ {
+			out[i] = monday.AddDate(0, 0, i).Format("2006-01-02")
+		}
+		return out
+	case "week":
+		mondayOffset := int(now.Weekday())
+		if mondayOffset == 0 {
+			mondayOffset = 7
+		}
+		monday := now.AddDate(0, 0, -(mondayOffset - 1))
+		out := make([]string, 7)
+		for i := 0; i < 7; i++ {
+			out[i] = monday.AddDate(0, 0, i).Format("2006-01-02")
+		}
+		return out
+	}
+	return nil
+}
+
+// loadFromDisk replaces the in-memory counter with the snapshot at
+// quotaCounterPath. Safe to call on an empty/missing file (no-op).
+func (c *quotaCounter) loadFromDisk() {
+	b, err := os.ReadFile(quotaCounterPath)
+	if err != nil {
+		return
+	}
+	// On-disk format: { ruleID: { mac: { day: [min, min, ...] } } } —
+	// arrays instead of bool-maps for JSON compactness.
+	var raw map[string]map[string]map[string][]int
+	if err := json.Unmarshal(b, &raw); err != nil {
+		log.Printf("quota: load %s: %v", quotaCounterPath, err)
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.active = make(map[string]map[string]map[string]map[int]bool, len(raw))
+	for ruleID, macMap := range raw {
+		rd := make(map[string]map[string]map[int]bool, len(macMap))
+		c.active[ruleID] = rd
+		for mac, dayMap := range macMap {
+			md := make(map[string]map[int]bool, len(dayMap))
+			rd[mac] = md
+			for day, mins := range dayMap {
+				dd := make(map[int]bool, len(mins))
+				md[day] = dd
+				for _, m := range mins {
+					dd[m] = true
+				}
+			}
+		}
+	}
+}
+
+// snapshotToDisk writes the current counter, GC'ing day-keys older than
+// quotaDayKeepDays as we go.
+func (c *quotaCounter) snapshotToDisk(now time.Time) {
+	cutoff := now.AddDate(0, 0, -quotaDayKeepDays).Format("2006-01-02")
+	c.mu.Lock()
+	out := make(map[string]map[string]map[string][]int, len(c.active))
+	for ruleID, macMap := range c.active {
+		rd := make(map[string]map[string][]int, len(macMap))
+		for mac, dayMap := range macMap {
+			md := make(map[string][]int, len(dayMap))
+			for day, mins := range dayMap {
+				if day < cutoff {
+					delete(dayMap, day)
+					continue
+				}
+				arr := make([]int, 0, len(mins))
+				for m := range mins {
+					arr = append(arr, m)
+				}
+				md[day] = arr
+			}
+			if len(md) > 0 {
+				rd[mac] = md
+			}
+		}
+		if len(rd) > 0 {
+			out[ruleID] = rd
+		}
+	}
+	c.mu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(quotaCounterPath), 0o755); err != nil {
+		log.Printf("quota: mkdir: %v", err)
+		return
+	}
+	tmp := quotaCounterPath + ".tmp"
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		log.Printf("quota: marshal: %v", err)
+		return
+	}
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		log.Printf("quota: write: %v", err)
+		return
+	}
+	if err := os.Rename(tmp, quotaCounterPath); err != nil {
+		log.Printf("quota: rename: %v", err)
+	}
+}
+
+// quotaSnapshotLoop persists the counter every minute. The policy
+// evaluator also runs every minute but on a separate ticker; these
+// two cadences are independent on purpose so the engine's decision
+// doesn't depend on the snapshot succeeding.
+func quotaSnapshotLoop(ctx context.Context) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(60 * time.Second):
+		}
+		globalQuotaCounter.snapshotToDisk(time.Now())
+	}
+}
+
+// globalQuotaCounter is read by policy.evaluate (via quotaAllows) and
+// written by brainrotDNSWatcher. Package-level so the two goroutines
+// can share state without threading a struct everywhere.
+var globalQuotaCounter = newQuotaCounter()
 
 /*
 policyEvaluator — on-device rule engine.
@@ -65,15 +294,23 @@ type quotaWindow struct {
 }
 
 func policyEvaluatorLoop(ctx context.Context) {
+	// Load persisted counter before the first evaluation so a reboot
+	// during the kid's allotted window doesn't reset their minutes.
+	globalQuotaCounter.loadFromDisk()
+	go quotaSnapshotLoop(ctx)
+
 	// First tick happens immediately so a freshly-applied rule lands the
 	// correct enforcement state without a one-minute wait.
 	for {
 		if ctx.Err() != nil {
+			// Final snapshot so we don't lose the last minute.
+			globalQuotaCounter.snapshotToDisk(time.Now())
 			return
 		}
 		evaluateAllPolicies(ctx, time.Now())
 		select {
 		case <-ctx.Done():
+			globalQuotaCounter.snapshotToDisk(time.Now())
 			return
 		case <-time.After(60 * time.Second):
 		}
@@ -179,15 +416,15 @@ func windowMatches(w timeWindow, now time.Time) bool {
 	return min >= w.StartMinOfDay && min < w.EndMinOfDay
 }
 
-// quotaAllows: STUB. The framework is here, but the actual minute counter
-// isn't wired yet. To finish: maintain a per-(rule_id, period_start)
-// counter that brainrotDNSWatcher increments any time it would have
-// blocked a query, then read it here and compare against q.MinutesMax.
-// Returns false today so quota clauses don't accidentally allow
-// everything before the counter exists.
-func quotaAllows(_ *policyDoc, _ quotaWindow, _ time.Time) bool {
-	// TODO(scaffold): real counter lookup goes here. See top-file comment.
-	return false
+// quotaAllows reads globalQuotaCounter and returns true while the group
+// is still under their budget for the requested period.
+func quotaAllows(doc *policyDoc, q quotaWindow, now time.Time) bool {
+	days := periodDayKeys(q.Period, now)
+	if len(days) == 0 {
+		return false // unknown period → fail closed
+	}
+	used := globalQuotaCounter.countPeriod(doc.RuleID, doc.MACs, days)
+	return used < q.MinutesMax
 }
 
 // applyDecision flips the nft MAC set to match the engine's decision.
@@ -204,24 +441,25 @@ func applyDecision(ctx context.Context, doc *policyDoc, d decision) error {
 	sub, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	flush := exec.CommandContext(sub, "nft", "flush", "set", "inet", "fw4", doc.NftMacSet)
-	if out, err := flush.CombinedOutput(); err != nil {
-		// "no such set" while the chain is being torn down → quietly skip
-		if strings.Contains(string(out), "No such file") ||
-			strings.Contains(string(out), "Could not process rule") {
+	flushOut, flushErr := flush.CombinedOutput()
+	if flushErr != nil {
+		if strings.Contains(string(flushOut), "No such file") ||
+			strings.Contains(string(flushOut), "Could not process rule") {
 			return nil
 		}
-		return fmt.Errorf("flush %s: %v: %s", doc.NftMacSet, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("flush %s: %v: %s", doc.NftMacSet, flushErr, strings.TrimSpace(string(flushOut)))
 	}
 	if d == decisionAllow || len(doc.MACs) == 0 {
 		return nil
 	}
 	macList := strings.Join(doc.MACs, ", ")
+	addArg := "{ " + macList + " }"
 	add := exec.CommandContext(sub, "nft",
-		"add", "element", "inet", "fw4", doc.NftMacSet,
-		"{ "+macList+" }",
+		"add", "element", "inet", "fw4", doc.NftMacSet, addArg,
 	)
-	if out, err := add.CombinedOutput(); err != nil {
-		return fmt.Errorf("add %s: %v: %s", doc.NftMacSet, err, strings.TrimSpace(string(out)))
+	addOut, addErr := add.CombinedOutput()
+	if addErr != nil {
+		return fmt.Errorf("add %s: %v: %s", doc.NftMacSet, addErr, strings.TrimSpace(string(addOut)))
 	}
 	return nil
 }

@@ -405,6 +405,7 @@ Rule types you can use right now:
 - **pause_device** (needs target_mac): blocks ALL traffic from one device. For "pause Maya's iPad", look up Maya's iPad in the Connected list to get its MAC.
 - **pause_group** (needs group_id): blocks ALL traffic from every device in a named GROUP. Use this when the parent says "pause the kids" or "block Theo's devices" and they have a group set up. If the group doesn't exist yet, call create_group first (and ask which devices to put in it) before proposing the pause.
 - **block_brainrot_group** (needs group_id, optional domains[]): blocks the infinite-scroll / algorithmic-feed apps (YouTube, Instagram, TikTok, Snapchat, Reddit, Twitter/X, Twitch, Threads — plus their CDN domains) for ONE kid (or the kids group). Uses per-MAC dnsmasq tagging so only the targeted devices lose access — parents keep everything. Pass 'domains' only if the parent wants to add/remove specific sites; default list is comprehensive and curated to avoid false positives.
+- **block_schedule_group** (needs group_id + app_label + at least one allow clause): like block_brainrot_group BUT the kid can use the app during specific time windows and/or up to a daily/weekly minute budget. Use this when the parent says "she can watch YouTube on weekends 2–5pm" or "up to 2h of YouTube on weekends" or any combination. The on-device policy engine evaluates every minute and flips between block/allow. Params: app_label ("YouTube" / "TikTok"), allow_windows: [{days, start_hhmm, end_hhmm}] with days from {mon,tue,wed,thu,fri,sat,sun} and HH:MM strings, allow_quotas: [{period, minutes_max}] with period from {day, week, weekend, weekday}. At least one allow_window OR allow_quota must be provided — otherwise the rule would block always, in which case use block_brainrot_group instead. Optional domains[] override the default brainrot list.
 - **block_domains_network** (needs domains[]): blocks specific domains for the whole network via DNS. Be thorough — for "block TikTok", include tiktok.com, tiktokcdn.com, musical.ly. For "block YouTube", include youtube.com, youtu.be, ytimg.com, googlevideo.com.
 - **force_router_dns** (no params): redirects all LAN DNS traffic (tcp/udp port 53) to the router's own resolver and blocks DNS-over-TLS (tcp/853). Prevents kids from bypassing domain blocks by manually setting their DNS to 8.8.8.8 or 1.1.1.1. Recommend this whenever domain blocks are in place. Note: does NOT block DNS-over-HTTPS (DoH) yet — that's a separate fight.
 - **block_managed_list** (param: source="hagezi-anti-bypass"): drops a curated, multi-daily-updated blocklist on the device (~17k entries) covering ALL major VPNs (NordVPN, ExpressVPN, ProtonVPN, Surfshark, Mullvad, etc.), public DoH/DoT providers (Cloudflare, Google, Quad9, NextDNS, AdGuard), Tor bootstrap, and general proxies. Use this whenever the parent says "block VPNs", "prevent bypass", "block Tor", "no anonymizers", etc. ALWAYS pair with force_router_dns. Side effect: this is comprehensive, so it may also block obscure DoH endpoints used by some apps' analytics — surface this caveat.
@@ -478,6 +479,7 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
             "block_managed_list",
             "block_ip_set",
             "block_brainrot_group",
+            "block_schedule_group",
           ],
         },
         name: { type: "string" },
@@ -499,6 +501,38 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
         dest_port: {
           type: "number",
           description: "For block_ip_set: optional port to limit the block to (e.g. 443 for DoH). Omit to block any port.",
+        },
+        app_label: {
+          type: "string",
+          description: "For block_schedule_group: the user-facing app name, e.g. 'YouTube', 'TikTok', 'Roblox'. Used on the /blocked page and in the dashboard.",
+        },
+        allow_windows: {
+          type: "array",
+          description: "For block_schedule_group: time-of-day windows in which the kid IS allowed access. Each window is {days, start_hhmm, end_hhmm} where days is a non-empty subset of {mon,tue,wed,thu,fri,sat,sun} (lowercase) and the times are HH:MM strings in 24h local time (e.g. '14:00').",
+          items: {
+            type: "object",
+            properties: {
+              days: {
+                type: "array",
+                items: { type: "string", enum: ["mon","tue","wed","thu","fri","sat","sun"] },
+              },
+              start_hhmm: { type: "string" },
+              end_hhmm: { type: "string" },
+            },
+            required: ["days","start_hhmm","end_hhmm"],
+          },
+        },
+        allow_quotas: {
+          type: "array",
+          description: "For block_schedule_group: minute budgets per period. Each quota is {period, minutes_max}. period is one of: 'day' (midnight to midnight), 'weekend' (Sat+Sun of current week), 'weekday' (Mon–Fri of current week), 'week' (Mon–Sun of current week).",
+          items: {
+            type: "object",
+            properties: {
+              period: { type: "string", enum: ["day","week","weekend","weekday"] },
+              minutes_max: { type: "number" },
+            },
+            required: ["period","minutes_max"],
+          },
         },
       },
       required: ["rule_type", "name", "summary"],

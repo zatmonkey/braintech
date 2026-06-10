@@ -114,7 +114,11 @@ export async function GET() {
     Array<RuleRow & { status: "active" | "propagating" | "removing" }>
   >();
   for (const r of rules) {
-    if (r.rule_type !== "pause_group" && r.rule_type !== "block_brainrot_group") {
+    if (
+      r.rule_type !== "pause_group" &&
+      r.rule_type !== "block_brainrot_group" &&
+      r.rule_type !== "block_schedule_group"
+    ) {
       continue;
     }
     const s = ruleStatus(r);

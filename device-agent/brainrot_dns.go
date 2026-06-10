@@ -46,11 +46,16 @@ func brainrotDNSWatcher(ctx context.Context, path string) {
 
 	type txEntry struct {
 		domain string
+		src    string // source IP of the original query
 		seen   time.Time
 	}
 	var (
 		txMu sync.Mutex
 		tx   = make(map[int]txEntry, 256)
+	)
+	var (
+		leaseCache map[string]string
+		leaseAt    time.Time
 	)
 
 	gc := func() {
@@ -121,14 +126,22 @@ func brainrotDNSWatcher(ctx context.Context, path string) {
 				continue
 			}
 
-			txid, kind, dom, payload, ok := parseDnsmasqLine(line)
+			// Refresh the IP→MAC cache periodically — needed to attribute
+			// each query to a member of the rule's MAC list for quota
+			// tracking.
+			if time.Since(leaseAt) > 10*time.Second {
+				leaseCache = refreshLeaseCache()
+				leaseAt = time.Now()
+			}
+
+			txid, kind, srcIP, dom, payload, ok := parseDnsmasqLine(line)
 			if !ok {
 				continue
 			}
 			switch kind {
 			case "query":
 				txMu.Lock()
-				tx[txid] = txEntry{domain: dom, seen: time.Now()}
+				tx[txid] = txEntry{domain: dom, src: srcIP, seen: time.Now()}
 				txMu.Unlock()
 			case "reply":
 				ip := payload
@@ -139,21 +152,37 @@ func brainrotDNSWatcher(ctx context.Context, path string) {
 				if net.ParseIP(ip) == nil {
 					continue
 				}
-				// The reply's own domain may be the final CNAME target — we
-				// want the ORIGINAL queried domain so suffix-matching works
-				// against the rule's listed domains (e.g. www.youtube.com →
-				// youtube-ui.l.google.com → match base youtube.com).
 				txMu.Lock()
 				e, present := tx[txid]
 				txMu.Unlock()
 				original := dom
-				if present && e.domain != "" {
-					original = e.domain
+				asker := srcIP
+				if present {
+					if e.domain != "" {
+						original = e.domain
+					}
+					if e.src != "" {
+						asker = e.src
+					}
 				}
+				// Map source IP → MAC for quota attribution. If we can't
+				// resolve a MAC, we still add the IP to the block set —
+				// just don't record to the per-MAC counter.
+				askerMAC := leaseCache[asker]
+
 				for _, rule := range rules {
 					if !matchesAny(original, rule.Domains) {
 						continue
 					}
+					// Per-MAC quota record. countPeriod() in the policy
+					// engine sums distinct minute-buckets across the
+					// rule's MAC list, so we record by MAC (not by rule
+					// alone) — two devices in the same group accumulate
+					// time honestly.
+					if askerMAC != "" {
+						globalQuotaCounter.record(rule.RuleID, askerMAC, time.Now())
+					}
+
 					setName := rule.IP4Set
 					if strings.Contains(ip, ":") {
 						setName = rule.IP6Set
@@ -215,9 +244,10 @@ func matchesAny(domain string, blocked []string) bool {
 	return false
 }
 
-// parseDnsmasqLine extracts (txid, kind, domain, payload) from one line of
-// dnsmasq's query log. Returns ok=false for lines we can't parse — the
-// log has lots of non-query noise we want to skip cheaply.
+// parseDnsmasqLine extracts (txid, kind, srcIP, domain, payload) from one
+// line of dnsmasq's query log. srcIP is the client that asked, peeled
+// from "<src>/<port>" in field[1]. Used by the brainrot watcher to
+// attribute each query to a MAC via the lease cache.
 //
 // Expected formats:
 //
@@ -227,44 +257,47 @@ func matchesAny(domain string, blocked []string) bool {
 //	... <txid> 192.168.1.159/51428 cached youtube.com is 142.251.219.142
 //	... <txid> 192.168.1.159/51428 forwarded www.youtube.com to 192.168.4.1
 //
-// We treat "cached" as a reply (it carries the final IP), "forwarded" as
-// ignorable.
-func parseDnsmasqLine(line string) (txid int, kind, domain, payload string, ok bool) {
+// "cached" is treated as a reply (carries the final IP); "forwarded" is
+// ignored.
+func parseDnsmasqLine(line string) (txid int, kind, srcIP, domain, payload string, ok bool) {
 	idx := strings.Index(line, "dnsmasq[")
 	if idx == -1 {
-		return 0, "", "", "", false
+		return 0, "", "", "", "", false
 	}
 	rest := line[idx:]
 	close := strings.Index(rest, "]: ")
 	if close == -1 {
-		return 0, "", "", "", false
+		return 0, "", "", "", "", false
 	}
 	rest = rest[close+3:]
 	// Now rest starts with: "<txid> <src>/<port> <kind> <domain> ..."
 	fields := strings.Fields(rest)
 	if len(fields) < 4 {
-		return 0, "", "", "", false
+		return 0, "", "", "", "", false
 	}
 	id, err := strconv.Atoi(fields[0])
 	if err != nil {
-		return 0, "", "", "", false
+		return 0, "", "", "", "", false
+	}
+	// fields[1] is "<src-ip>/<port>" — split to grab the IP.
+	src := fields[1]
+	if slash := strings.LastIndex(src, "/"); slash >= 0 {
+		src = src[:slash]
 	}
 	k := fields[2]
 	dom := fields[3]
-	// Skip type bracket for queries: query[A], query[AAAA], etc.
 	if strings.HasPrefix(k, "query[") {
 		k = "query"
 	} else if k == "cached" {
 		k = "reply"
 	} else if k != "reply" {
-		return 0, "", "", "", false
+		return 0, "", "", "", "", false
 	}
-	// Reply lines have "is <payload>" trailing.
 	if k == "reply" && len(fields) >= 6 && fields[4] == "is" {
-		return id, k, dom, fields[5], true
+		return id, k, src, dom, fields[5], true
 	}
 	if k == "query" {
-		return id, k, dom, "", true
+		return id, k, src, dom, "", true
 	}
-	return 0, "", "", "", false
+	return 0, "", "", "", "", false
 }

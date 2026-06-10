@@ -22,6 +22,7 @@ type brainrotState struct {
 	IP4Set    string   `json:"ip4_set"`
 	IP6Set    string   `json:"ip6_set"`
 	Domains   []string `json:"domains"`
+	MACs      []string `json:"macs"`
 	UpdatedAt string   `json:"updated_at"`
 }
 

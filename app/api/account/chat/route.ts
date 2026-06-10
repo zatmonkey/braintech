@@ -30,6 +30,11 @@ import {
   type BlockManagedListParams,
   type BlockIpSetParams,
   type BlockBrainrotGroupParams,
+  type BlockScheduleGroupParams,
+  type TimeWindow,
+  type QuotaWindow,
+  type Weekday,
+  hhmmToMinutes,
   type ManagedListSource,
   type IpSetSource,
 } from "@/app/lib/rules";
@@ -330,7 +335,7 @@ export async function POST(req: Request) {
         const friendlyName = String(i.name ?? "").slice(0, 64) || "unnamed";
         const summary = String(i.summary ?? "").slice(0, 200);
         let params: RuleParams;
-        let prefix: "pause" | "pausegrp" | "domains" | "dnsforce" | "mlist" | "ipset" | "brainrot";
+        let prefix: "pause" | "pausegrp" | "domains" | "dnsforce" | "mlist" | "ipset" | "brainrot" | "sched";
         if (rt === "pause_device") {
           const mac = String(i.target_mac ?? "").toLowerCase();
           if (!mac) return "error: target_mac required for pause_device";
@@ -357,6 +362,68 @@ export async function POST(req: Request) {
             ...(customDomains?.length ? { domains: customDomains } : {}),
           } as BlockBrainrotGroupParams;
           prefix = "brainrot";
+        } else if (rt === "block_schedule_group") {
+          const gid = String(i.group_id ?? "");
+          if (!gid) return "error: group_id required for block_schedule_group";
+          const g = (await sql`SELECT name FROM account_groups WHERE group_id = ${gid} AND owner_email = ${email};`) as { name: string }[];
+          if (g.length === 0) return `error: group "${gid}" not found`;
+          const appLabel = String(i.app_label ?? "").slice(0, 32) || "the app";
+          // Parse allow_windows: convert HH:MM strings to minute-of-day
+          // ints up front; surface bad input as a tool error rather than
+          // shipping garbage to the agent.
+          type RawWin = { days?: unknown; start_hhmm?: unknown; end_hhmm?: unknown };
+          const winsIn = Array.isArray(i.allow_windows)
+            ? (i.allow_windows as RawWin[])
+            : [];
+          const validDays = new Set(["mon","tue","wed","thu","fri","sat","sun"]);
+          let parsedWindows: TimeWindow[];
+          try {
+            parsedWindows = winsIn.map((w) => {
+              const ds = Array.isArray(w.days) ? (w.days as string[]).map((x) => String(x).toLowerCase()) : [];
+              if (ds.length === 0 || !ds.every((d) => validDays.has(d))) {
+                throw new Error(`bad days: ${JSON.stringify(w.days)}`);
+              }
+              return {
+                days: ds as Weekday[],
+                start_min_of_day: hhmmToMinutes(String(w.start_hhmm ?? "")),
+                end_min_of_day: hhmmToMinutes(String(w.end_hhmm ?? "")),
+              };
+            });
+          } catch (e) {
+            return `error: bad allow_windows — ${(e as Error).message}`;
+          }
+          type RawQuota = { period?: unknown; minutes_max?: unknown };
+          const quotasIn = Array.isArray(i.allow_quotas)
+            ? (i.allow_quotas as RawQuota[])
+            : [];
+          const validPeriods = new Set(["day","week","weekend","weekday"]);
+          const parsedQuotas: QuotaWindow[] = [];
+          for (const q of quotasIn) {
+            const p = String(q.period ?? "");
+            const m = Number(q.minutes_max ?? 0);
+            if (!validPeriods.has(p) || !(m > 0 && m < 10_000)) {
+              return `error: bad allow_quota: ${JSON.stringify(q)}`;
+            }
+            parsedQuotas.push({
+              period: p as "day"|"week"|"weekend"|"weekday",
+              minutes_max: Math.floor(m),
+            });
+          }
+          if (parsedWindows.length === 0 && parsedQuotas.length === 0) {
+            return "error: block_schedule_group needs at least one allow_window or allow_quota — otherwise use block_brainrot_group";
+          }
+          const customDomains = Array.isArray(i.domains)
+            ? (i.domains as string[]).map((d) => String(d).toLowerCase()).filter(Boolean)
+            : undefined;
+          params = {
+            group_id: gid,
+            group_name: g[0].name,
+            app_label: appLabel,
+            ...(customDomains?.length ? { domains: customDomains } : {}),
+            allow_windows: parsedWindows,
+            allow_quotas: parsedQuotas,
+          } as BlockScheduleGroupParams;
+          prefix = "sched";
         } else if (rt === "block_domains_network") {
           const ds = Array.isArray(i.domains) ? (i.domains as string[]).map((d) => String(d).toLowerCase()).filter(Boolean) : [];
           if (ds.length === 0) return "error: domains[] required for block_domains_network";
