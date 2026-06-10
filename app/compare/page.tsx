@@ -2,28 +2,25 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Braintech vs Circle vs Bark — How they actually compare",
+  title: "Braintech vs Circle vs Bark — In plain English",
   description:
-    "Same shelf as Circle and Bark. A different machine underneath. Inline gateway vs ARP-spoof boxes, earn-to-unlock screen time, and one subscription with the device included.",
+    "A friendly side-by-side of the three home boxes for screen-time control. How they work, what they cost, and the one thing only Braintech does.",
 };
 
 const LEGEND = [
-  { sym: "✓", color: "text-emerald-700", label: "Advantage" },
-  { sym: "~", color: "text-amber-700", label: "Partial / depends" },
-  { sym: "✕", color: "text-red-600", label: "Weakness or gap" },
-  { sym: "★", color: "text-[var(--color-accent)]", label: "Only one ships this" },
-  { sym: "—", color: "text-[var(--color-ink-soft)]", label: "Neutral / N/A" },
+  { sym: "✓", color: "text-emerald-700", label: "Yes" },
+  { sym: "~", color: "text-amber-700", label: "Sort of" },
+  { sym: "✕", color: "text-red-600", label: "No" },
+  { sym: "★", color: "text-[var(--color-accent)]", label: "Only one does this" },
 ];
 
 type Cell = {
-  /** "yes" | "no" | "partial" | "only" | "none" | plain text */
-  mark?: "yes" | "no" | "partial" | "only" | "none";
+  mark: "yes" | "no" | "partial" | "only" | "none";
   text?: string;
 };
 
 type Row = {
   label: string;
-  /** Optional sub-label rendered under the main label in muted text. */
   hint?: string;
   braintech: Cell;
   circle: Cell;
@@ -33,207 +30,186 @@ type Row = {
 type Section = {
   number: string;
   title: string;
+  body: string;
   rows: Row[];
 };
 
 const SECTIONS: Section[] = [
   {
     number: "01",
-    title: "Architecture & enforcement",
+    title: "How it actually controls your network",
+    body:
+      "The cheapest way to filter traffic is to sit beside your router and pretend to be it. Modern phones, game consoles, and mesh systems often see through the trick and route around it. Braintech replaces your router as the gateway — there's nothing to see through.",
     rows: [
       {
-        label: "How it controls the network",
-        braintech: {
-          mark: "yes",
-          text:
-            "True inline checkpoint. Traffic physically routes through the box; nothing reaches the internet around it.",
-        },
+        label: "Every packet has to pass through it",
+        braintech: { mark: "yes", text: "Yes — it is the gateway." },
         circle: {
-          mark: "partial",
-          text:
-            "ARP spoofing — impersonates the gateway so traffic detours through it (a man-in-the-middle technique).",
+          mark: "no",
+          text: "No — sits beside the router and intercepts.",
         },
         bark: {
-          mark: "partial",
-          text: "ARP spoofing — same beside-the-router approach.",
+          mark: "no",
+          text: "No — same beside-the-router approach.",
         },
       },
       {
-        label: "Can a kid escape it on the home network?",
+        label: "A kid can't route around it at home",
         braintech: {
           mark: "yes",
-          text:
-            "No. MAC spoofing, static ARP, mesh quirks — none of it routes around an inline box.",
+          text: "Inline. No bypass works — there's no “gateway” to fake.",
         },
         circle: {
           mark: "no",
           text:
-            "Yes. Static ARP entries, MAC changes, and mesh/ISP gateways breaking the spoof are common escape routes.",
+            "Static-ARP tricks, MAC changes, and some mesh setups escape it.",
         },
-        bark: { mark: "no", text: "Yes. Same evasion surface." },
+        bark: { mark: "no", text: "Same evasion surface." },
       },
       {
-        label: "Day-to-day reliability",
+        label: "Set once, stays put",
         braintech: {
           mark: "yes",
-          text:
-            "Set once, stays put. No re-pairing battle. If the box drops, the kids' segment loses internet — it fails closed, not open.",
+          text: "Reviews don't fight re-pairing battles. Fails closed.",
         },
         circle: {
           mark: "partial",
-          text:
-            "Drop-outs reported; reviews cite devices disconnecting and needing the box restarted.",
+          text: "Drop-outs in reviews — needs restarts.",
         },
-        bark: {
-          mark: "partial",
-          text: "Re-pairing complaints; devices “escaping” recur in reviews.",
-        },
+        bark: { mark: "partial", text: "“Escaping” devices recur in reviews." },
       },
       {
-        label: "Install friction",
+        label: "Plug it in, you're done",
+        hint: "All three are plug-in boxes; details below.",
         braintech: {
-          mark: "partial",
+          mark: "yes",
           text:
-            "Plug inline — no network rebuild. No ISP credentials to re-enter. The one job: make sure the kids' devices actually sit behind the box.",
+            "Plug-and-play. Your existing Wi-Fi switches to access-point mode — Bri walks you through it in about a minute.",
         },
         circle: {
           mark: "yes",
-          text:
-            "Easy first setup — plug into the router, change nothing (then fight the breakage later).",
+          text: "Plug beside the router, change nothing.",
         },
         bark: {
           mark: "yes",
-          text: "Easy first setup — same low-friction start.",
+          text: "Plug beside the router, change nothing.",
         },
       },
     ],
   },
   {
     number: "02",
-    title: "Where nobody gets to over-claim",
+    title: "Privacy & bypass resistance",
+    body:
+      "You want strong control without spying on your kid's messages or installing a certificate that reads everything they type. All three boxes filter by destination (the domain the device is reaching) — none of them read the words inside encrypted traffic. Where Braintech goes further is on the bypass tools kids actually try.",
     rows: [
       {
-        label: "Off the home Wi-Fi (cellular / LTE)",
-        hint: "The classic teen move: turn Wi-Fi off",
+        label: "Forces all DNS through one resolver",
+        hint: "Closes the “just set 8.8.8.8 yourself” bypass.",
         braintech: {
-          mark: "partial",
-          text:
-            "Not covered by the box alone. A home gateway governs the home network; off-network needs a companion device app — same as everyone.",
+          mark: "yes",
+          text: "Yes — as the gateway, it's enforced cleanly.",
         },
         circle: {
           mark: "partial",
-          text: "Companion app / VPN extends to mobile via an on-device profile.",
+          text: "Limited — relies on the beside-router trick holding.",
         },
-        bark: {
-          mark: "partial",
-          text: "Companion app — mobile coverage via the Bark for Kids app.",
-        },
+        bark: { mark: "partial", text: "Same limit." },
       },
       {
-        label: "VPNs & encrypted DNS (DoH)",
+        label: "Blocks encrypted-DNS bypasses (DoH / DoT)",
         braintech: {
           mark: "yes",
           text:
-            "Blocked harder, not magically. As the gateway, Braintech can force its own resolver and shut down DoH bypasses an ARP box can't reliably touch. Obfuscated VPNs still exist for everyone.",
+            "Domain block + IP block on known DoH endpoints. Updated regularly.",
         },
         circle: {
-          mark: "no",
-          text:
-            "Weaker leverage — beside-router position limits how firmly bypasses can be forced.",
+          mark: "partial",
+          text: "Patchier — Chrome's secure DNS often slips by.",
         },
-        bark: { mark: "no", text: "Weaker leverage — same constraint." },
+        bark: { mark: "partial", text: "Same patchiness." },
       },
       {
-        label: "Content visibility inside HTTPS",
-        braintech: {
-          mark: "partial",
-          text:
-            "Domain-level, by design. Filters on destination, not message contents — no root cert on every device, no privacy minefield.",
-        },
-        circle: {
-          mark: "partial",
-          text: "Domain-level — same encrypted-traffic ceiling.",
-        },
+        label: "Doesn't read inside your kid's messages",
+        hint: "No root certificate installed on the kid's phone.",
+        braintech: { mark: "yes", text: "Filters destinations only." },
+        circle: { mark: "yes", text: "Filters destinations only." },
         bark: {
           mark: "yes",
           text:
-            "Reads content on-device — Bark's real edge: its app scans texts/social for risk signals (a different job than the box).",
+            "Box doesn't. (The separate Bark phone app does — that's a different product.)",
         },
       },
     ],
   },
   {
     number: "03",
-    title: "Business model",
+    title: "What you actually pay for",
+    body:
+      "Some boxes sell you hardware first, then a subscription on top. Braintech is one line item: the device is included. If you cancel, the device goes back — nothing stranded on a shelf.",
     rows: [
       {
-        label: "What the parent actually buys",
-        braintech: {
-          mark: "yes",
-          text:
-            "One subscription. Device included. $0 hardware barrier, single line item. Cancel and the device goes back — nothing stranded.",
-        },
+        label: "Device included in the subscription",
+        braintech: { mark: "yes", text: "Yes — $0 hardware barrier." },
         circle: {
           mark: "no",
-          text:
-            "Device up front + renewal: ~$129 box (first year bundled), then ~$99/yr to keep premium.",
+          text: "$129 box up front (first-year sub bundled).",
         },
         bark: {
           mark: "no",
-          text:
-            "Device and a separate sub: $79 box, plus an active Bark subscription required on top — two purchases stacked.",
+          text: "$79 box + ~$99/yr Bark sub required on top.",
         },
       },
       {
-        label: "Upfront cost to say yes",
-        braintech: {
-          mark: "yes",
-          text: "$0 hardware — lowest barrier to activation in the category.",
-        },
-        circle: { mark: "no", text: "$129 — hardware paid before value." },
-        bark: { mark: "no", text: "$79+ — hardware + sub before value." },
+        label: "Upfront cost to say yes today",
+        braintech: { mark: "yes", text: "$0" },
+        circle: { mark: "no", text: "~$129" },
+        bark: { mark: "no", text: "~$79 + sub" },
       },
     ],
   },
   {
     number: "04",
-    title: "The thing only one of them does",
+    title: "The thing only one of us does",
+    body:
+      "Every parental-control product on the shelf is some flavour of block-and-limit. Braintech is the only one where your kid earns screen time by finishing a learning task — a TED talk, a Khan Academy lesson, twenty minutes of reading. Time stops being a battle you ration and starts being something they grow into.",
     rows: [
       {
-        label: "The screen-time model",
-        hint: "Block-and-restrict vs. earn-and-grow",
+        label: "Kids EARN screen time by completing learning tasks",
         braintech: {
           mark: "only",
           text:
-            "Kids earn screen time by completing educational tasks. Time becomes something learned into, not just rationed. No competitor ships this loop.",
+            "Yes. The differentiator nobody else ships — block, plus a way out through learning.",
         },
         circle: {
           mark: "none",
-          text:
-            "Block & limit. Has a manual “reward minutes” toggle, but no earn-through-learning system.",
+          text: "Block & limit. A “bonus minutes” toggle exists, but no learning loop.",
         },
         bark: {
           mark: "none",
           text:
-            "Block & monitor. Center of gravity is alerts, not screen-time economics.",
+            "Block & alert. Center of gravity is monitoring, not screen-time economics.",
         },
       },
     ],
   },
 ];
 
-function MarkCell({ mark }: { mark?: Cell["mark"] }) {
-  if (!mark) return null;
-  const styles: Record<NonNullable<Cell["mark"]>, { sym: string; cls: string; label: string }> = {
-    yes: { sym: "✓", cls: "bg-emerald-500/15 text-emerald-700", label: "Advantage" },
-    no: { sym: "✕", cls: "bg-red-500/10 text-red-600", label: "Weakness" },
-    partial: { sym: "~", cls: "bg-amber-500/15 text-amber-700", label: "Partial" },
+function MarkCell({ mark }: { mark: Cell["mark"] }) {
+  const styles: Record<Cell["mark"], { sym: string; cls: string; label: string }> = {
+    yes: { sym: "✓", cls: "bg-emerald-500/15 text-emerald-700", label: "Yes" },
+    no: { sym: "✕", cls: "bg-red-500/10 text-red-600", label: "No" },
+    partial: { sym: "~", cls: "bg-amber-500/15 text-amber-700", label: "Sort of" },
     only: {
       sym: "★",
       cls: "bg-[var(--color-accent)]/15 text-[var(--color-accent)]",
       label: "Only one",
     },
-    none: { sym: "—", cls: "bg-[var(--color-rule)]/40 text-[var(--color-ink-soft)]", label: "Neutral" },
+    none: {
+      sym: "—",
+      cls: "bg-[var(--color-rule)]/40 text-[var(--color-ink-soft)]",
+      label: "Neutral",
+    },
   };
   const s = styles[mark];
   return (
@@ -287,7 +263,7 @@ function ComparisonRow({
 
 function SectionBlock({ section }: { section: Section }) {
   return (
-    <section className="mt-12">
+    <section className="mt-14">
       <div className="mb-3 flex items-baseline gap-3">
         <span className="font-mono text-xs uppercase tracking-wider text-[var(--color-accent)]">
           {section.number}
@@ -296,6 +272,9 @@ function SectionBlock({ section }: { section: Section }) {
           {section.title}
         </h2>
       </div>
+      <p className="mb-5 max-w-3xl leading-relaxed text-[var(--color-ink-soft)]">
+        {section.body}
+      </p>
       <div className="overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-white">
         <div className="hidden border-b border-[var(--color-rule)] bg-[var(--color-cream)]/60 px-6 py-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)] sm:grid sm:grid-cols-[1.2fr_1fr_1fr_1fr] sm:gap-6">
           <span>&nbsp;</span>
@@ -318,7 +297,7 @@ function SectionBlock({ section }: { section: Section }) {
 export default function ComparePage() {
   return (
     <main className="flex flex-1 flex-col">
-      {/* Nav (matches /privacy + /terms chrome) */}
+      {/* Nav */}
       <nav className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-6">
         <Link href="/" className="flex items-center gap-2">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -342,21 +321,20 @@ export default function ComparePage() {
       {/* Hero */}
       <header className="mx-auto w-full max-w-5xl px-6 pb-6 pt-6 sm:pt-10">
         <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
-          Competitive Brief · Home Screen-Time Hardware
+          How Braintech compares
         </div>
         <h1 className="serif mt-4 max-w-3xl text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
-          Same shelf as Circle and Bark.
+          Same shelf as Bark and Circle.
           <br />
           <span className="text-[var(--color-accent)]">
             A different machine underneath.
           </span>
         </h1>
         <p className="mt-5 max-w-2xl text-lg leading-relaxed text-[var(--color-ink-soft)]">
-          Circle and Bark sit <em>beside</em> your router and quietly impersonate
-          the gateway to intercept traffic — a trick devices routinely slip past.
-          Braintech sits <em>inline</em>: every packet behind the box has to
-          pass through it, and kids earn their screen time by finishing real
-          learning tasks.
+          Bark and Circle sit beside your router and try to look like it.
+          Modern phones often see through the trick. Braintech replaces your
+          router as the gateway — so there&rsquo;s nothing to see through.
+          Here&rsquo;s what changes, in plain English.
         </p>
 
         {/* Legend */}
@@ -370,12 +348,12 @@ export default function ComparePage() {
           ))}
         </div>
 
-        {/* Column legend (machine summary above the tables) */}
+        {/* Machine summary in friendly language */}
         <div className="mt-6 grid gap-3 text-sm sm:grid-cols-3">
           <div className="rounded-2xl border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/5 p-4">
             <div className="font-semibold text-[var(--color-ink)]">Braintech</div>
             <div className="mt-1 text-xs text-[var(--color-ink-soft)]">
-              Inline gateway · double-NAT · subscription includes the device
+              Replaces your router as the gateway. Everything flows through it.
             </div>
           </div>
           <div className="rounded-2xl border border-[var(--color-rule)] bg-white p-4">
@@ -383,19 +361,20 @@ export default function ComparePage() {
               Circle Home Plus
             </div>
             <div className="mt-1 text-xs text-[var(--color-ink-soft)]">
-              ARP-based · device + renewing subscription
+              Sits beside your router and pretends to be it.
             </div>
           </div>
           <div className="rounded-2xl border border-[var(--color-rule)] bg-white p-4">
             <div className="font-semibold text-[var(--color-ink)]">Bark Home</div>
             <div className="mt-1 text-xs text-[var(--color-ink-soft)]">
-              ARP-based · device + separate Bark subscription required
+              Same beside-the-router trick. Bark&rsquo;s phone app adds content
+              scanning (a different product).
             </div>
           </div>
         </div>
       </header>
 
-      {/* Comparison sections */}
+      {/* Sections */}
       <div className="mx-auto w-full max-w-5xl px-6 pb-8">
         {SECTIONS.map((s) => (
           <SectionBlock key={s.number} section={s} />
@@ -409,18 +388,20 @@ export default function ComparePage() {
             The two-sentence pitch.
           </h2>
           <blockquote className="mt-6 max-w-3xl border-l-2 border-[var(--color-accent)] pl-5 text-lg leading-relaxed text-[var(--color-ink)]">
-            Circle and Bark sit next to your router and impersonate it — kids&rsquo;
-            devices slip past it all the time.{" "}
-            <strong>Braintech is the checkpoint everything behind it has to cross.</strong>
+            Bark and Circle sit next to your router and try to look like it
+            — kids&rsquo; devices slip past them all the time.{" "}
+            <strong>
+              Braintech is the gateway. Everything behind it has to pass through.
+            </strong>
             <br />
             <br />
-            And it&rsquo;s the only one where kids <em>earn</em> their screen time
-            by completing learning tasks — with the device included in the
-            subscription, nothing to buy up front.
+            And it&rsquo;s the only one where your kid <em>earns</em> their
+            screen time by completing a learning task — with the device
+            included in the subscription, nothing to buy up front.
           </blockquote>
 
           <h3 className="serif mt-12 text-2xl leading-snug tracking-[-0.01em]">
-            Three proof points, in priority order.
+            Three reasons families pick us.
           </h3>
           <ol className="mt-6 grid gap-4 sm:grid-cols-3">
             {[
@@ -428,19 +409,19 @@ export default function ComparePage() {
                 n: "01",
                 title: "Earn-to-unlock",
                 body:
-                  "Kids earn screen time by completing educational tasks — the differentiator nobody else has.",
+                  "Kids earn screen time by completing learning tasks — the one feature nobody else has.",
               },
               {
                 n: "02",
                 title: "Enforcement that doesn't break",
                 body:
-                  "Inline gateway vs ARP spoofing that devices escape. Set once, stays put.",
+                  "Inline gateway vs. beside-the-router tricks. Set once, stays put.",
               },
               {
                 n: "03",
                 title: "Device included",
                 body:
-                  "One subscription. $0 up front vs paying for hardware and a sub stacked.",
+                  "One subscription, the box is in it. $0 today vs. paying for hardware AND a sub.",
               },
             ].map((p) => (
               <li
@@ -469,12 +450,12 @@ export default function ComparePage() {
             Year one
           </span>
           <h2 className="serif text-2xl leading-snug tracking-[-0.01em] sm:text-3xl">
-            Pricing, illustrative.
+            What you&rsquo;ll actually spend.
           </h2>
         </div>
         <p className="mb-6 max-w-2xl text-sm text-[var(--color-ink-soft)]">
-          List pricing as of mid-2026 — competitor promos vary. Verify before
-          publishing.
+          Competitor list pricing as of 2026. Promos vary — check before
+          buying.
         </p>
         <div className="overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-white">
           <div className="grid grid-cols-1 gap-4 border-b border-[var(--color-rule)] bg-[var(--color-cream)]/60 px-5 py-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)] sm:grid-cols-4 sm:gap-6 sm:px-6">
@@ -488,7 +469,7 @@ export default function ComparePage() {
               product: "Braintech",
               device: "included",
               sub: "all-in",
-              take: "One line item · $0 up front",
+              take: "$0 today · one line item",
               highlight: true,
             },
             {
@@ -521,65 +502,47 @@ export default function ComparePage() {
         </div>
       </section>
 
-      {/* Honesty notes */}
+      {/* Honest caveats — kept short, friendly */}
       <section className="border-t border-[var(--color-rule)] bg-white">
         <div className="mx-auto w-full max-w-5xl px-6 py-14 sm:py-20">
           <div className="mb-3 flex items-baseline gap-3">
             <span className="font-mono text-xs uppercase tracking-wider text-[var(--color-accent)]">
-              Caveats
+              Things to know
             </span>
             <h2 className="serif text-2xl leading-snug tracking-[-0.01em] sm:text-3xl">
-              Where we don&rsquo;t win yet.
+              The honest small print.
             </h2>
           </div>
+          <p className="max-w-3xl text-[var(--color-ink-soft)]">
+            Two things every home parental-control box has in common — worth
+            knowing whichever one you pick.
+          </p>
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <div className="rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]/40 p-5">
               <div className="font-semibold text-[var(--color-ink)]">
-                Cellular / off-network
+                Off the home Wi-Fi
               </div>
               <p className="mt-2 text-sm leading-relaxed text-[var(--color-ink-soft)]">
-                The box governs the home network. A kid on LTE is outside it
-                until there&rsquo;s a companion app — every competitor has the
-                same gap.
+                Any home box can only protect what&rsquo;s on the home
+                network. When a kid&rsquo;s phone is on cellular at school,
+                that&rsquo;s the phone&rsquo;s screen-time controls&rsquo; job
+                (Apple Screen Time, Google Family Link). Every box on this
+                page has the same limit — we&rsquo;ll be honest about it.
               </p>
             </div>
             <div className="rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]/40 p-5">
               <div className="font-semibold text-[var(--color-ink)]">
-                Double-NAT side effects
+                Setup note: access-point mode
               </div>
               <p className="mt-2 text-sm leading-relaxed text-[var(--color-ink-soft)]">
-                Console gaming (strict NAT), some video calls, and
-                port-forwarding can degrade behind two NATs. We pair gaming
-                households with a UPnP / known-good-config answer on setup.
+                Because Braintech is the gateway (that&rsquo;s why it works
+                so well), your existing Wi-Fi router needs to switch to
+                access-point mode for the first 60 seconds of setup. Bri
+                walks you through it for your specific router — it&rsquo;s
+                one menu toggle, then plug-and-play.
               </p>
             </div>
           </div>
-
-          <h3 className="serif mt-12 text-xl leading-snug tracking-[-0.01em]">
-            Claim guardrails.
-          </h3>
-          <ul className="mt-4 space-y-3 text-sm leading-relaxed text-[var(--color-ink-soft)]">
-            <li>
-              <strong className="text-[var(--color-ink)]">
-                &ldquo;Inescapable behind the box&rdquo;
-              </strong>{" "}
-              = on-network traffic only. Never stated unqualified.
-            </li>
-            <li>
-              <strong className="text-[var(--color-ink)]">
-                &ldquo;Blocks VPNs / encrypted DNS&rdquo;
-              </strong>{" "}
-              is true for known / detectable bypasses — not &ldquo;VPNs
-              can&rsquo;t get through.&rdquo; Obfuscated VPNs over 443 remain a
-              category-wide limitation.
-            </li>
-            <li>
-              Filtering is{" "}
-              <strong className="text-[var(--color-ink)]">domain-level</strong>{" "}
-              (destination / SNI), not content-level. Braintech does not read
-              inside HTTPS — by design.
-            </li>
-          </ul>
         </div>
       </section>
 
@@ -603,7 +566,7 @@ export default function ComparePage() {
         </div>
       </section>
 
-      {/* Footer (matches /privacy + /terms) */}
+      {/* Footer */}
       <footer className="mt-auto border-t border-[var(--color-rule)] bg-white">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-4 px-6 py-8 text-sm text-[var(--color-ink-soft)]">
           <span>© {new Date().getFullYear()} Braintech · Mutant Ventures LLC</span>

@@ -167,7 +167,13 @@ function buildContext(
   });
   if (pending) {
     sections.push(
-      `PENDING PROPOSAL waiting for confirmation:\n- ${pending.name} [${pending.rule_type}] — ${pending.summary}`,
+      [
+        `PENDING PROPOSAL waiting for confirmation:`,
+        `- ${pending.name} [${pending.rule_type}] — ${pending.summary}`,
+        ``,
+        `>>> If the parent's latest message is a confirmation (yes/yep/apply/do it/go/sure/ok/👍),`,
+        `>>> call apply_pending_rule NOW. Do NOT call propose_rule again. Do NOT re-emit "Apply?".`,
+      ].join("\n"),
     );
   }
   return [memSection, groupSection, ...sections].join("\n\n");
