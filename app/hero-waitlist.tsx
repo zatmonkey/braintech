@@ -320,8 +320,8 @@ export function HeroWaitlist({
         </span>
       </div>
       <form onSubmit={onSubmit}>
-        <div className="flex flex-col gap-2 sm:flex-row sm:gap-2">
-          <label className="flex-1">
+        <div className="flex flex-col gap-2 md:flex-row md:gap-2">
+          <label className="md:flex-1">
             <span className="sr-only">Email</span>
             <input
               ref={inputRef}
@@ -339,7 +339,7 @@ export function HeroWaitlist({
             disabled={state.kind === "submitting"}
             data-cta="hero-discount"
             data-variation={variation.id}
-            className="inline-flex items-center justify-center whitespace-nowrap rounded-lg bg-[var(--color-ink)] px-5 py-3.5 text-base font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)] disabled:opacity-60"
+            className="inline-flex shrink-0 items-center justify-center rounded-lg bg-[var(--color-ink)] px-5 py-3.5 text-base font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)] disabled:opacity-60"
           >
             {state.kind === "submitting" ? "Sending…" : variation.cta}
           </button>
