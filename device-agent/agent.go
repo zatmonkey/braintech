@@ -39,6 +39,7 @@ func (a *Agent) Run(ctx context.Context) {
 	go brainrotDNSWatcher(ctx, "/tmp/dnsmasq.log")  // catch CNAME chains + dynamic CDN subdomains in real time
 	go ensureCaptiveInfra(ctx)                      // alias IP + dnsmasq "brain" hostname (one-time idempotent)
 	go captiveServer(ctx)                           // http://brain redirector + HTTP captive page
+	go policyEvaluatorLoop(ctx)                     // time/quota policy engine — toggles nft MAC sets per /etc/braintech/policy/*.json
 	backoff := time.Second
 	for {
 		if ctx.Err() != nil {

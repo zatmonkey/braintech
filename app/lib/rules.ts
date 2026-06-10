@@ -715,6 +715,118 @@ export function brainrotStateJson(ruleId: string, domains: string[]): string {
   ) + "\n";
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+ * Policy schema (scaffold)
+ *
+ * A policy is a small JSON document that the SERVER writes once at rule
+ * deploy time and the AGENT'S on-device engine evaluates every minute.
+ * Everything operational (time check, quota tracking, enforcement
+ * toggle) lives on the router — the cloud has zero involvement in the
+ * minute-by-minute decision.
+ *
+ * Today there's one policy `kind`: "block_unless". It says: "block
+ * traffic from <macs> to <domains> UNLESS one of the allow clauses
+ * matches right now." Allow clauses OR together:
+ *
+ *   - allow_windows: time-of-day windows on specific weekdays
+ *   - allow_quotas:  per-period minute budgets
+ *
+ * The engine resolves "right now":
+ *   • Time window match: today's local weekday is in `days` AND local
+ *     clock is between `start_min_of_day` and `end_min_of_day`.
+ *   • Quota match: total minutes used in this `period` <= `minutes_max`.
+ *
+ * Quota tracking is stubbed in the agent (always reports under-quota
+ * for now). Wiring it to client_usage_minute / a local counter is the
+ * next push.
+ *
+ * Adding new rule kinds: add a new value to `PolicyDoc.kind`, define
+ * its allow logic, and teach `policy.go::evaluate` how to read it.
+ * The MAC-set-toggle enforcement model stays the same.
+ * ──────────────────────────────────────────────────────────────────── */
+
+export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+export type TimeWindow = {
+  days: Weekday[];
+  /** Minutes from midnight in LOCAL time (0..1439). Start inclusive,
+   *  end exclusive. So 14:00–17:00 = { start: 840, end: 1020 }. */
+  start_min_of_day: number;
+  end_min_of_day: number;
+};
+
+export type QuotaWindow = {
+  /** "day" = midnight to midnight, "week" = Monday to Sunday,
+   *  "weekend" = Saturday + Sunday, "weekday" = Mon–Fri. */
+  period: "day" | "week" | "weekend" | "weekday";
+  minutes_max: number;
+};
+
+export type BlockUnlessPolicy = {
+  kind: "block_unless";
+  /** Stable opaque id matching the account_rules row + nft set names. */
+  rule_id: string;
+  /** Display label for the app being blocked ("YouTube"). */
+  app_label: string;
+  /** Domains the policy targets (used for stats + future allow-list
+   *  scoping). The actual IP set is populated by brainrotDNSWatcher
+   *  from CNAME-chain resolutions of these. */
+  domains: string[];
+  /** Kid MACs the policy applies to. Engine writes these to the nft
+   *  MAC set when the policy is in "blocking" state, clears them when
+   *  in "allowing" state. */
+  macs: string[];
+  /** Nft set names the engine toggles. */
+  nft_mac_set: string;
+  /** Allow clauses — ANY match → allow. Empty arrays → never allow
+   *  (effectively a permanent block, equivalent to block_brainrot_group). */
+  allow_windows: TimeWindow[];
+  allow_quotas: QuotaWindow[];
+  /** RFC3339 timestamp; informational. */
+  updated_at: string;
+};
+
+export function policyDocPath(ruleId: string): string {
+  return `/etc/braintech/policy/${ruleId}.json`;
+}
+
+export function policyBlockUnlessJson(
+  ruleId: string,
+  appLabel: string,
+  domains: string[],
+  macs: string[],
+  allowWindows: TimeWindow[],
+  allowQuotas: QuotaWindow[],
+): string {
+  const doc: BlockUnlessPolicy = {
+    kind: "block_unless",
+    rule_id: ruleId,
+    app_label: appLabel,
+    domains,
+    macs,
+    nft_mac_set: `bt_${ruleId}_macs`,
+    allow_windows: allowWindows,
+    allow_quotas: allowQuotas,
+    updated_at: new Date().toISOString(),
+  };
+  return JSON.stringify(doc, null, 2) + "\n";
+}
+
+/**
+ * Helper: convert "14:30" → 870 minutes from midnight. Inverse for
+ * generation isn't needed yet (UI sends start/end-min directly).
+ */
+export function hhmmToMinutes(hhmm: string): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) throw new Error(`invalid HH:MM "${hhmm}"`);
+  const h = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if (h < 0 || h > 23 || mm < 0 || mm > 59) {
+    throw new Error(`out-of-range HH:MM "${hhmm}"`);
+  }
+  return h * 60 + mm;
+}
+
 /**
  * Build the nftables include for a pause_group rule: a set of MAC addresses
  * + a forward-hook chain at priority -10 that REJECTs anything sourced from
