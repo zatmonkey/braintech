@@ -203,44 +203,41 @@ function FounderBlock() {
 }
 
 function ComparisonTable({ braintechPrice }: { braintechPrice: string }) {
-  // Honest comparison rows. All three products are network-level boxes
-  // (Bark Home + Circle Home Plus are real hardware), so we don't claim
-  // "no box" or "no apps" as differentiators — that's where the prior
-  // table got fact-checked. Real differences:
-  //   - Interface: text vs companion app
-  //   - Approach: earn-to-unlock learning vs simple block/filter/schedule
-  //   - Price: Braintech is the priciest; the trade is the interface +
-  //     learning-credit. We don't hide that Bark is cheaper.
+  // Compact /start version — mirrors the three priority proof points
+  // from /compare. Deeper breakdown (architecture, over-claim guardrails,
+  // pricing footnotes) lives at /compare and is linked below.
   type Row = {
     label: string;
-    braintech: "yes" | "no" | string;
-    bark: "yes" | "no" | string;
-    circle: "yes" | "no" | string;
+    hint?: string;
+    braintech: "yes" | "no" | "only" | string;
+    bark: "yes" | "no" | "only" | string;
+    circle: "yes" | "no" | "only" | string;
   };
   const rows: Row[] = [
     {
-      label: "Rules set by texting in plain English",
-      braintech: "yes",
-      bark: "App",
-      circle: "App",
+      label: "Kids EARN screen time by completing learning tasks",
+      braintech: "only",
+      bark: "no",
+      circle: "no",
     },
     {
-      label: "Earn-to-unlock learning (Khan, TED, reading credit)",
+      label: "Inline gateway — nothing routes around the box",
+      hint: "vs ARP spoofing that devices escape",
       braintech: "yes",
       bark: "no",
       circle: "no",
     },
     {
-      label: "Network-level filtering, no app on the kid’s device",
+      label: "Device included in the subscription",
       braintech: "yes",
-      bark: "yes",
-      circle: "yes",
+      bark: "no",
+      circle: "no",
     },
     {
       label: "Year-one price (device + service)",
       braintech: braintechPrice,
-      bark: "$79 lifetime",
-      circle: "~$129 + $129/yr",
+      bark: "$79 + ~$99/yr",
+      circle: "~$129 + $99/yr after",
     },
   ];
   return (
@@ -250,7 +247,7 @@ function ComparisonTable({ braintechPrice }: { braintechPrice: string }) {
           How it compares
         </div>
         <h3 className="serif mt-2 text-2xl leading-snug">
-          All three filter. Only one rewards learning.
+          Three boxes. One earns screen time.
         </h3>
       </div>
       <div className="overflow-x-auto">
@@ -284,7 +281,12 @@ function ComparisonTable({ braintechPrice }: { braintechPrice: string }) {
                   scope="row"
                   className="px-4 py-3 text-left text-[var(--color-ink)] sm:px-6 sm:py-4"
                 >
-                  {r.label}
+                  <span className="font-medium">{r.label}</span>
+                  {r.hint && (
+                    <span className="mt-0.5 block text-xs font-normal text-[var(--color-ink-soft)]">
+                      {r.hint}
+                    </span>
+                  )}
                 </th>
                 <td className="px-4 py-3 text-center font-medium text-[var(--color-ink)] sm:px-6 sm:py-4">
                   <Cell value={r.braintech} accent />
@@ -316,9 +318,22 @@ function Cell({
   value,
   accent = false,
 }: {
-  value: "yes" | "no" | string;
+  value: "yes" | "no" | "only" | string;
   accent?: boolean;
 }) {
+  if (value === "only") {
+    return (
+      <span
+        className="inline-flex size-6 items-center justify-center rounded-full bg-[var(--color-accent)] text-white"
+        aria-label="Only Braintech does this"
+        title="Only Braintech does this"
+      >
+        <svg viewBox="0 0 20 20" fill="currentColor" className="size-3.5">
+          <path d="M10 1.5l2.47 5.96 6.43.52-4.9 4.22 1.5 6.3L10 15.27l-5.5 3.23 1.5-6.3-4.9-4.22 6.43-.52z" />
+        </svg>
+      </span>
+    );
+  }
   if (value === "yes") {
     return (
       <span
