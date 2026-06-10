@@ -736,18 +736,21 @@ export function nftBrainrotFile(ruleId: string, macs: string[]): string {
   // port 443 (HTTPS) and any other port. Anyone outside the MAC set
   // (parents) keeps full access; any destination not in the IP set is
   // unaffected (the rest of the internet still works).
+  //
+  // ALWAYS emit the reject rules — even when macs[] is empty at file-write
+  // time. Schedule rules deliberately ship empty MAC sets (the on-device
+  // policy engine populates them when enforcing). With no rules in the
+  // chain, the engine could flip the MAC set all day and nothing would
+  // happen at L3. An empty set just doesn't match — so the rules are
+  // inert until the engine adds MACs, which is exactly what we want.
   lines.push(`chain ${chain} {`);
   lines.push(`    type filter hook forward priority -10; policy accept;`);
-  if (macs.length > 0) {
-    lines.push(
-      `    ether saddr @${macSet} ip daddr @${ip4Set} reject comment "bt:${ruleId} v4"`,
-    );
-    lines.push(
-      `    ether saddr @${macSet} ip6 daddr @${ip6Set} reject comment "bt:${ruleId} v6"`,
-    );
-  } else {
-    lines.push(`    # (no member MACs — chain is inert)`);
-  }
+  lines.push(
+    `    ether saddr @${macSet} ip daddr @${ip4Set} reject comment "bt:${ruleId} v4"`,
+  );
+  lines.push(
+    `    ether saddr @${macSet} ip6 daddr @${ip6Set} reject comment "bt:${ruleId} v6"`,
+  );
   lines.push(`}`);
   return lines.join("\n") + "\n";
 }
