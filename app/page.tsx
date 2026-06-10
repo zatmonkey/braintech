@@ -63,7 +63,11 @@ export default async function Home({
       <HowItWorks />
       <ContentPartners />
       <Examples />
-      <Testimonials />
+      {/* Testimonials section intentionally NOT rendered until we have
+          real founding-family quotes to use. Fabricated/styled testimonials
+          for this audience are both a conversion killer (sniff-test) and
+          an FTC compliance risk under the 2024 Endorsement Guides. When
+          real quotes exist, just put <Testimonials /> back in. */}
       <Pricing variation={variation} pricing={pricing} />
       <FAQ />
       <Footer country={pricing.country} />
@@ -563,80 +567,13 @@ function Examples() {
   );
 }
 
-function Testimonials() {
-  // Beta-family quotes. Honestly framed as beta (not "thousands of parents")
-  // because our audience is skeptical and inflated social proof reads as
-  // a scam signal. Two, not three — fewer claims, more weight per claim.
-  const quotes = [
-    {
-      body:
-        "Bedtime used to be a 20-minute negotiation. Now I text Bri the rule once, and it just… runs. First quiet evening I&rsquo;ve had in years.",
-      who: "Sarah W.",
-      meta: "Beta family · 6 weeks in",
-      initial: "S",
-    },
-    {
-      body:
-        "Day 30, he told us about black holes at dinner. Then a Spanish word he taught his sister. I didn&rsquo;t even know he&rsquo;d been learning.",
-      who: "Marcus R.",
-      meta: "Beta family · 30 days in",
-      initial: "M",
-    },
-  ];
-
-  return (
-    <section className="border-y border-[var(--color-rule)] bg-[var(--color-cream)]">
-      <div className="mx-auto w-full max-w-6xl px-6 py-20 sm:px-10 sm:py-24">
-        <div className="max-w-2xl">
-          <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
-            From our beta families
-          </div>
-          <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
-            Early notes from week-six homes.
-          </h2>
-          <p className="mt-4 text-lg text-[var(--color-ink-soft)]">
-            Two real families, a few weeks into using a Braintech device. We
-            picked the quotes that surprised us most. Not a sample of
-            thousands — yet.
-          </p>
-        </div>
-        <div className="mt-10 grid gap-5 lg:grid-cols-2">
-          {quotes.map((q) => (
-            <figure
-              key={q.who}
-              className="flex flex-col rounded-2xl border border-[var(--color-rule)] bg-white p-6 sm:p-7"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                aria-hidden
-                className="size-6 text-[var(--color-accent)]/70"
-              >
-                <path d="M7 4c-2 0-3.5 1.6-3.5 3.7v8.6c0 .9.7 1.7 1.7 1.7H10c.9 0 1.7-.7 1.7-1.7v-4.6c0-1-.7-1.7-1.7-1.7H7C7 6.9 8.2 6 9.4 6V4H7Zm10 0c-2 0-3.5 1.6-3.5 3.7v8.6c0 .9.7 1.7 1.7 1.7H20c.9 0 1.7-.7 1.7-1.7v-4.6c0-1-.7-1.7-1.7-1.7h-3c0-3.1 1.2-4 2.4-4V4h-2.4Z" />
-              </svg>
-              <blockquote className="mt-4 flex-1 text-[17px] leading-relaxed text-[var(--color-ink)]">
-                &ldquo;{q.body}&rdquo;
-              </blockquote>
-              <figcaption className="mt-6 flex items-center gap-3 border-t border-[var(--color-rule)] pt-4">
-                <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--color-ink)] text-sm font-semibold text-[var(--color-cream)]">
-                  {q.initial}
-                </div>
-                <div className="leading-tight">
-                  <div className="text-sm font-semibold text-[var(--color-ink)]">
-                    {q.who}
-                  </div>
-                  <div className="text-xs text-[var(--color-ink-soft)]">
-                    {q.meta}
-                  </div>
-                </div>
-              </figcaption>
-            </figure>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
+// Testimonials section removed 2026-06-09 until real founding-family
+// quotes exist. Re-add with first_name + real detail when ready.
+// Audience for this product sniffs out fabricated social proof, AND the
+// FTC 2024 Endorsement Guides put per-violation penalties on fake
+// reviews. "Founding families" / "early access" framing is the right
+// label when we do have real ones — never use "beta" (poison in a
+// product whose pitch is "it just works").
 
 function Pricing({
   variation,

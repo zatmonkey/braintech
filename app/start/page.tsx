@@ -1,8 +1,10 @@
 // Dedicated paid-traffic landing for the Meta Leads campaign.
 // Continues the UGC ad story ("For two years, I was losing him to a
 // screen...") with a message-matched hero. ONE CTA only: email capture.
-// Trust row below the fold: founder block + beta testimonial +
-// Bark/Circle comparison table.
+// Trust row below the fold: founder block + Bark/Circle comparison
+// table. Testimonial block held back until we have real founding-family
+// quotes — fabricated/styled quotes for this audience are a conversion
+// killer and an FTC compliance risk under the 2024 Endorsement Guides.
 //
 // Variation pinning: this page renders variation 5 unconditionally and
 // re-pins bt_var=5 via proxy.ts. ?variation=N still allows dev preview.
@@ -123,11 +125,11 @@ export default async function Start({
         </div>
       </section>
 
-      {/* TRUST ROW — founder + beta testimonial + comparison. Single
-          column stack on mobile; 1+2 grid on desktop. */}
+      {/* TRUST ROW — founder + comparison. Testimonial block held back
+          until we have real founding-family quotes (FTC + sniff-test
+          reasons). When ready, add a <FoundingTestimonial /> here. */}
       <section className="mx-auto w-full max-w-3xl px-6 pb-16 sm:pb-24">
         <FounderBlock />
-        <BetaTestimonial />
         <ComparisonTable
           braintechPrice={`${discounted.label.replace("/yr", "")}/yr`}
         />
@@ -197,34 +199,6 @@ function FounderBlock() {
         </p>
       </div>
     </div>
-  );
-}
-
-function BetaTestimonial() {
-  return (
-    <figure className="mt-6 rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)] p-6 sm:p-7">
-      <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-accent)]">
-        From our beta families
-      </div>
-      <blockquote className="mt-3 text-[17px] leading-relaxed text-[var(--color-ink)]">
-        &ldquo;Bedtime used to be a 20-minute negotiation. Now I text Bri the
-        rule once, and it just&hellip; runs. First quiet evening I&rsquo;ve had
-        in years.&rdquo;
-      </blockquote>
-      <figcaption className="mt-4 flex items-center gap-3 border-t border-[var(--color-rule)] pt-4 text-sm">
-        <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--color-ink)] text-sm font-semibold text-[var(--color-cream)]">
-          S
-        </div>
-        <div className="leading-tight">
-          <div className="font-semibold text-[var(--color-ink)]">
-            Sarah W., beta family
-          </div>
-          <div className="text-xs text-[var(--color-ink-soft)]">
-            6 weeks in · two kids · Austin, TX
-          </div>
-        </div>
-      </figcaption>
-    </figure>
   );
 }
 
