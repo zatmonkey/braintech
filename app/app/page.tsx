@@ -125,10 +125,16 @@ export default async function Dashboard() {
     memory = leadRows[0]?.memory ?? "";
   }
 
-  // Bucket active rules by the group they target (pause_group → params.group_id).
+  // Bucket active rules by the group they target. Any rule_type whose
+  // params include group_id counts here — currently pause_group +
+  // block_brainrot_group. Network-wide types (block_domains_network,
+  // force_router_dns, block_managed_list, block_ip_set) intentionally
+  // don't bucket — they apply to everyone, not a specific group.
   const rulesByGroup = new Map<string, ActiveRule[]>();
   for (const r of activeRules) {
-    if (r.rule_type !== "pause_group") continue;
+    if (r.rule_type !== "pause_group" && r.rule_type !== "block_brainrot_group") {
+      continue;
+    }
     const gid = (r.params as { group_id?: string } | null)?.group_id;
     if (!gid) continue;
     const list = rulesByGroup.get(gid) ?? [];
