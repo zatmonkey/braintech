@@ -157,18 +157,45 @@ func parseDNSLine(line string, leaseCache map[string]string) (mac, app string) {
 	return mac, app
 }
 
-// refreshLeaseCache rebuilds an IP→MAC map from the current DHCP leases.
+// refreshLeaseCache rebuilds an IP→MAC map. Two sources, merged:
+//
+//  1. /tmp/dhcp.leases — every IPv4 lease the dnsmasq DHCP server has
+//     handed out, even if the device is currently idle.
+//  2. `ip neigh show` — the live neighbour table, which is the ONLY source
+//     of IPv6 → MAC mappings (DHCP leases is IPv4-only). Both IPv6 ULA
+//     (fd00::/8) and globally-routable IPv6 get covered here.
+//
+// Without (2), every DNS query whose source IP is an IPv6 address gets
+// dropped on the floor — and modern phones / Chrome on desktop strongly
+// prefer IPv6, so on a dual-stack LAN that's a large fraction of traffic.
+// fe80:: link-local entries are skipped (rarely originate DNS).
 func refreshLeaseCache() map[string]string {
 	cache := make(map[string]string)
-	b, err := os.ReadFile("/tmp/dhcp.leases")
-	if err != nil {
-		return cache
+	if b, err := os.ReadFile("/tmp/dhcp.leases"); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 3 {
+				cache[fields[2]] = strings.ToLower(fields[1])
+			}
+		}
 	}
-	for _, line := range strings.Split(string(b), "\n") {
-		fields := strings.Fields(line)
-		// expiry mac ip hostname clientid
-		if len(fields) >= 3 {
-			cache[fields[2]] = strings.ToLower(fields[1])
+	if out, err := run("ip", "neigh", "show"); err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) < 5 {
+				continue
+			}
+			ip := fields[0]
+			if strings.HasPrefix(ip, "fe80") {
+				continue
+			}
+			for i, f := range fields {
+				if f == "lladdr" && i+1 < len(fields) {
+					if _, present := cache[ip]; !present {
+						cache[ip] = strings.ToLower(fields[i+1])
+					}
+				}
+			}
 		}
 	}
 	return cache
