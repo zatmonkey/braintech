@@ -216,12 +216,23 @@ export async function POST(req: Request) {
     SELECT group_id, name, description
     FROM account_groups WHERE owner_email = ${email} ORDER BY created_at;
   `) as GroupRow[];
+
+  // Membership lives in client_group_memberships (the many-to-many table),
+  // NOT in client_labels.group_id (legacy single-group column kept around
+  // for old code paths). Reading from labels would show every group as
+  // empty even when the dashboard shows real members.
+  const memberRows = (await sql`
+    SELECT cgm.group_id, cgm.mac, cl.name AS label_name
+    FROM client_group_memberships cgm
+    LEFT JOIN client_labels cl
+      ON cl.owner_email = cgm.owner_email AND cl.mac = cgm.mac
+    WHERE cgm.owner_email = ${email};
+  `) as { group_id: string; mac: string; label_name: string | null }[];
   const membership = new Map<string, { mac: string; name: string }[]>();
-  for (const l of labelRows) {
-    if (!l.group_id) continue;
-    const list = membership.get(l.group_id) ?? [];
-    list.push({ mac: l.mac, name: l.name });
-    membership.set(l.group_id, list);
+  for (const r of memberRows) {
+    const list = membership.get(r.group_id) ?? [];
+    list.push({ mac: r.mac, name: r.label_name ?? r.mac });
+    membership.set(r.group_id, list);
   }
 
   const ruleRows = (await sql`
