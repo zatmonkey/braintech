@@ -242,6 +242,78 @@ export function UsagePanel({
   );
 }
 
+/* PolicyLine — one short sentence describing the live evaluator state.
+ * Examples:
+ *   Allowing — Sat/Sun 14:00–17:00 window
+ *   Allowing — 38 / 120 min used today
+ *   Blocking — 120 / 120 min used today · next opens Sat 14:00
+ * Designed to fit in the rule row without wrapping on most viewports.
+ */
+function PolicyLine({ policy }: { policy: PolicyDecisionUI }) {
+  const isAllow = policy.decision === "allow";
+  const color = isAllow ? "text-emerald-700" : "text-red-600";
+  const verb = isAllow ? "Allowing" : "Blocking";
+
+  let reason = "";
+  if (isAllow && policy.active_window) {
+    const w = policy.active_window;
+    reason = `${formatDays(w.days)} ${formatHHMM(w.start_min_of_day)}–${formatHHMM(w.end_min_of_day)} window`;
+  } else if (isAllow && policy.active_quota) {
+    const q = policy.active_quota;
+    reason = `${q.minutes_used} / ${q.minutes_max} min used ${periodLabel(q.period)}`;
+  } else if (!isAllow && policy.active_quota) {
+    const q = policy.active_quota;
+    reason = `${q.minutes_used} / ${q.minutes_max} min used ${periodLabel(q.period)}`;
+  } else if (!isAllow) {
+    reason = "outside allowed windows";
+  }
+
+  const nextOpens =
+    !isAllow && policy.next_window_at ? formatNextOpens(policy.next_window_at) : "";
+
+  return (
+    <span className={color}>
+      {verb}
+      {reason && <span className="font-normal"> — {reason}</span>}
+      {nextOpens && (
+        <span className="font-normal text-[var(--color-ink-soft)]">
+          {" "}
+          · next opens {nextOpens}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function formatHHMM(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+}
+function formatDays(days: string[]): string {
+  const cap = (d: string) => d.charAt(0).toUpperCase() + d.slice(1);
+  if (days.length === 7) return "Every day";
+  if (days.length === 5 && ["mon","tue","wed","thu","fri"].every((d) => days.includes(d))) {
+    return "Weekdays";
+  }
+  if (days.length === 2 && ["sat","sun"].every((d) => days.includes(d))) {
+    return "Weekends";
+  }
+  return days.map(cap).join("/");
+}
+function periodLabel(p: string): string {
+  return p === "day" ? "today" : `this ${p}`;
+}
+function formatNextOpens(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const wkday = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
+    return `${wkday} ${d.getHours().toString().padStart(2,"0")}:${d.getMinutes().toString().padStart(2,"0")}`;
+  } catch {
+    return "";
+  }
+}
+
 function UsageTopApps({ apps }: { apps: AppMinutes[] }) {
   if (apps.length === 0) {
     return (
@@ -426,6 +498,23 @@ type AllDeviceRow = {
 
 type RuleStatus = "propagating" | "active" | "removing";
 
+type PolicyDecisionUI = {
+  decision: "allow" | "enforce";
+  evaluated_at: string;
+  minutes_used_day: number;
+  active_window?: {
+    days: string[];
+    start_min_of_day: number;
+    end_min_of_day: number;
+  };
+  active_quota?: {
+    period: string;
+    minutes_used: number;
+    minutes_max: number;
+  };
+  next_window_at?: string;
+};
+
 type TabGroup = {
   group_id: string;
   name: string;
@@ -437,6 +526,7 @@ type TabGroup = {
     rule_type: string;
     summary: string | null;
     status: RuleStatus;
+    policy?: PolicyDecisionUI;
   }>;
   brainrot_minutes: number | null;
   apps: AppMinutes[];
@@ -509,6 +599,7 @@ export function AllDevicesSection({
             rule_type: string;
             summary: string | null;
             status: RuleStatus;
+            policy?: PolicyDecisionUI;
           }>;
         }>;
         usage?: {
@@ -874,6 +965,7 @@ export function AllDevicesSection({
                       ruleType={r.rule_type}
                       summary={r.summary}
                       status={r.status}
+                      policy={r.policy}
                     />
                   ))}
                 </ul>
@@ -1286,6 +1378,7 @@ export function RuleRow({
   ruleType,
   summary,
   status = "active",
+  policy,
 }: {
   ruleId: string;
   name: string;
@@ -1296,19 +1389,41 @@ export function RuleRow({
    *  parent has clicked remove and the agent hasn't yet picked up the
    *  cleanup — the rule is still on the router until the next sync. */
   status?: "propagating" | "active" | "removing";
+  /** Latest evaluator decision for schedule rules. Undefined for
+   *  static rules (block_brainrot_group, pause_group). */
+  policy?: PolicyDecisionUI;
 }) {
   const [removing, setRemoving] = useState(false);
   const isRemovingState = status === "removing";
-  const dotCls =
-    status === "active"
-      ? "bg-red-500"
-      : "bg-amber-500 animate-pulse";
-  const dotTitle =
-    status === "active"
-      ? "Active — enforcing on the router"
-      : status === "removing"
-        ? "Removing — device cleaning up"
-        : "Propagating — device picking it up";
+  // For schedule rules, the live policy decision overrides the static
+  // colour: green when currently allowing, red when currently enforcing.
+  // Static rules keep the original semantics (red while enforced, amber
+  // pulse while propagating/removing).
+  let dotCls: string;
+  let dotTitle: string;
+  if (policy) {
+    if (status === "propagating" || status === "removing") {
+      dotCls = "bg-amber-500 animate-pulse";
+      dotTitle =
+        status === "removing"
+          ? "Removing — device cleaning up"
+          : "Propagating — device picking it up";
+    } else if (policy.decision === "allow") {
+      dotCls = "bg-emerald-500";
+      dotTitle = "Allowing right now — schedule lets this app through";
+    } else {
+      dotCls = "bg-red-500";
+      dotTitle = "Blocking right now — schedule is enforcing";
+    }
+  } else {
+    dotCls = status === "active" ? "bg-red-500" : "bg-amber-500 animate-pulse";
+    dotTitle =
+      status === "active"
+        ? "Active — enforcing on the router"
+        : status === "removing"
+          ? "Removing — device cleaning up"
+          : "Propagating — device picking it up";
+  }
   return (
     <li className="flex items-start justify-between gap-3 py-2.5">
       <div className="min-w-0">
@@ -1331,6 +1446,11 @@ export function RuleRow({
         </div>
         {summary && !isRemovingState && (
           <p className="ml-4 mt-1 text-xs text-[var(--color-ink-soft)]">{summary}</p>
+        )}
+        {policy && !isRemovingState && (
+          <p className="ml-4 mt-1 text-xs font-medium">
+            <PolicyLine policy={policy} />
+          </p>
         )}
       </div>
       <button

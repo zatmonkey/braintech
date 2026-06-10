@@ -93,6 +93,32 @@ export async function GET() {
   const inSync = primary
     ? primary.desired_version === primary.reported_version
     : true;
+
+  // Pull policy decisions reported by the agent on its last telemetry
+  // tick. block_schedule_group rules attach these so the dashboard can
+  // show "Allowing — 38/120 min today" or "Blocking — next opens Sat 14:00".
+  type PolicyDecision = {
+    rule_id: string;
+    decision: "allow" | "enforce";
+    evaluated_at: string;
+    minutes_used_day: number;
+    active_window?: {
+      days: string[];
+      start_min_of_day: number;
+      end_min_of_day: number;
+    };
+    active_quota?: {
+      period: string;
+      minutes_used: number;
+      minutes_max: number;
+    };
+    next_window_at?: string;
+  };
+  const telemetryAny = primary?.telemetry as { policy_status?: unknown } | null;
+  const policyStatus: PolicyDecision[] = Array.isArray(telemetryAny?.policy_status)
+    ? (telemetryAny!.policy_status as PolicyDecision[])
+    : [];
+  const policyByRule = new Map(policyStatus.map((d) => [d.rule_id, d] as const));
   // 5 minutes is a generous safety window — usually the agent picks up
   // a delete within 25s. The cap stops ancient deactivated rules from
   // resurfacing on the dashboard if someone leaves it open for days.
@@ -213,6 +239,9 @@ export async function GET() {
           name: r.name,
           summary: r.summary,
           status: r.status,
+          // Live policy decision for schedule rules. undefined for
+          // static block_brainrot_group / pause_group rules.
+          policy: policyByRule.get(r.rule_id),
         })),
       };
     }),

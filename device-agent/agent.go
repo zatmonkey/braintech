@@ -171,6 +171,7 @@ func (a *Agent) telemetryLoop(ctx context.Context) {
 func (a *Agent) reportTelemetry(ctx context.Context) {
 	t := collectTelemetry(a.cfg.DeviceID)
 	t.Usage = a.usage.drain()
+	t.PolicyStatus = PolicyDecisions()
 	payload, err := json.Marshal(t)
 	if err != nil {
 		return

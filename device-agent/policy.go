@@ -241,6 +241,70 @@ func quotaSnapshotLoop(ctx context.Context) {
 // can share state without threading a struct everywhere.
 var globalQuotaCounter = newQuotaCounter()
 
+// PolicyDecision is the engine's per-rule output for one evaluation tick.
+// Snapshotted to globalDecisions at every tick and shipped in telemetry
+// so the dashboard can show WHICH allow clause is currently letting the
+// kid through (or which quota's about to flip them into enforce).
+//
+// Fields are kept small + JSON-friendly. The TS side mirrors this shape.
+type PolicyDecision struct {
+	RuleID         string `json:"rule_id"`
+	Decision       string `json:"decision"` // "allow" | "enforce"
+	EvaluatedAt    string `json:"evaluated_at"`
+	MinutesUsedDay int    `json:"minutes_used_day"`
+	// If allow because a time window matched, the window. Else nil.
+	ActiveWindow *DecisionWindow `json:"active_window,omitempty"`
+	// If allow because a quota matched (used < max), the quota + counts.
+	// If enforce, the closest-to-overflow quota (so the UI can say
+	// "120/120 min used today" — the obvious reason for the block).
+	ActiveQuota *DecisionQuota `json:"active_quota,omitempty"`
+	// Next time window for this rule (allowing OR not), so the UI can
+	// say "Next opens Sat 14:00" when the rule is currently enforcing.
+	NextWindowAt string `json:"next_window_at,omitempty"` // RFC3339 local
+}
+
+type DecisionWindow struct {
+	Days     []string `json:"days"`
+	StartMin int      `json:"start_min_of_day"`
+	EndMin   int      `json:"end_min_of_day"`
+}
+
+type DecisionQuota struct {
+	Period       string `json:"period"`
+	MinutesUsed  int    `json:"minutes_used"`
+	MinutesMax   int    `json:"minutes_max"`
+}
+
+type decisionStore struct {
+	mu sync.Mutex
+	m  map[string]PolicyDecision
+}
+
+func (d *decisionStore) set(p PolicyDecision) {
+	d.mu.Lock()
+	d.m[p.RuleID] = p
+	d.mu.Unlock()
+}
+
+func (d *decisionStore) snapshot() []PolicyDecision {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]PolicyDecision, 0, len(d.m))
+	for _, v := range d.m {
+		out = append(out, v)
+	}
+	return out
+}
+
+// PolicyDecisions exposes the latest evaluator output to the telemetry
+// goroutine. Called once per telemetry tick (60s, same cadence as
+// evaluation), so reads see at most one decision-cycle of staleness.
+func PolicyDecisions() []PolicyDecision {
+	return globalDecisions.snapshot()
+}
+
+var globalDecisions = &decisionStore{m: make(map[string]PolicyDecision)}
+
 /*
 policyEvaluator — on-device rule engine.
 
@@ -335,7 +399,8 @@ func evaluateAllPolicies(ctx context.Context, now time.Time) {
 			log.Printf("policy: load %s: %v", path, err)
 			continue
 		}
-		decision := evaluate(doc, now)
+		decision, report := evaluate(doc, now)
+		globalDecisions.set(report)
 		if err := applyDecision(ctx, doc, decision); err != nil {
 			log.Printf("policy: apply %s (%s): %v", doc.RuleID, decision, err)
 		}
@@ -362,29 +427,108 @@ const (
 )
 
 // evaluate is the policy engine's brain. Today it understands one kind
-// (block_unless). Add new kinds here.
-func evaluate(doc *policyDoc, now time.Time) decision {
+// (block_unless). Add new kinds here. Returns the decision PLUS the
+// reason — which window/quota matched, current minutes used, etc. —
+// so the dashboard can show parents what's actually deciding the state.
+func evaluate(doc *policyDoc, now time.Time) (decision, PolicyDecision) {
+	report := PolicyDecision{
+		RuleID:         doc.RuleID,
+		EvaluatedAt:    now.Format(time.RFC3339),
+		MinutesUsedDay: globalQuotaCounter.countPeriod(doc.RuleID, doc.MACs, periodDayKeys("day", now)),
+	}
 	if doc.Kind != "block_unless" {
-		// Unknown kind — fail closed (enforce). Better to over-block than
-		// silently allow when the schema drifts.
-		return decisionEnforce
+		report.Decision = string(decisionEnforce)
+		return decisionEnforce, report
 	}
-	// Empty allow set → block always (equivalent to block_brainrot_group).
 	if len(doc.AllowWindows) == 0 && len(doc.AllowQuotas) == 0 {
-		return decisionEnforce
+		report.Decision = string(decisionEnforce)
+		return decisionEnforce, report
 	}
-	// ANY allow clause matches → allow.
 	for _, w := range doc.AllowWindows {
 		if windowMatches(w, now) {
-			return decisionAllow
+			report.Decision = string(decisionAllow)
+			report.ActiveWindow = &DecisionWindow{
+				Days:     append([]string{}, w.Days...),
+				StartMin: w.StartMinOfDay,
+				EndMin:   w.EndMinOfDay,
+			}
+			return decisionAllow, report
 		}
 	}
 	for _, q := range doc.AllowQuotas {
-		if quotaAllows(doc, q, now) {
-			return decisionAllow
+		days := periodDayKeys(q.Period, now)
+		used := globalQuotaCounter.countPeriod(doc.RuleID, doc.MACs, days)
+		if used < q.MinutesMax {
+			report.Decision = string(decisionAllow)
+			report.ActiveQuota = &DecisionQuota{
+				Period:      q.Period,
+				MinutesUsed: used,
+				MinutesMax:  q.MinutesMax,
+			}
+			return decisionAllow, report
 		}
 	}
-	return decisionEnforce
+	// Enforcing: surface the "closest to overflow" quota so the dashboard
+	// can say "120 / 120 min today" — the obvious reason it kicked in.
+	// Pick the quota with the highest minutes_used (most-recently-exceeded).
+	var closest *DecisionQuota
+	for _, q := range doc.AllowQuotas {
+		days := periodDayKeys(q.Period, now)
+		used := globalQuotaCounter.countPeriod(doc.RuleID, doc.MACs, days)
+		if closest == nil || used > closest.MinutesUsed {
+			closest = &DecisionQuota{
+				Period:      q.Period,
+				MinutesUsed: used,
+				MinutesMax:  q.MinutesMax,
+			}
+		}
+	}
+	report.ActiveQuota = closest
+	report.Decision = string(decisionEnforce)
+	report.NextWindowAt = nextWindowOpen(doc.AllowWindows, now)
+	return decisionEnforce, report
+}
+
+// nextWindowOpen returns the RFC3339 local timestamp of the next time
+// any of the allow_windows opens, relative to `now`. Empty string if
+// the rule has no windows or none open within the next 14 days.
+//
+// Walks day-by-day rather than per-window-per-day so we naturally pick
+// the earliest match across all windows.
+func nextWindowOpen(windows []timeWindow, now time.Time) string {
+	if len(windows) == 0 {
+		return ""
+	}
+	for d := 0; d < 14; d++ {
+		when := now.AddDate(0, 0, d)
+		wkday := weekdayCode[when.Weekday()]
+		earliest := -1
+		for _, w := range windows {
+			ok := false
+			for _, day := range w.Days {
+				if strings.ToLower(day) == wkday {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				continue
+			}
+			candidate := w.StartMinOfDay
+			if d == 0 && candidate <= now.Hour()*60+now.Minute() {
+				continue
+			}
+			if earliest == -1 || candidate < earliest {
+				earliest = candidate
+			}
+		}
+		if earliest >= 0 {
+			open := time.Date(when.Year(), when.Month(), when.Day(),
+				earliest/60, earliest%60, 0, 0, now.Location())
+			return open.Format(time.RFC3339)
+		}
+	}
+	return ""
 }
 
 var weekdayCode = map[time.Weekday]string{

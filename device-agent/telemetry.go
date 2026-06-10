@@ -28,7 +28,8 @@ type Telemetry struct {
 	WanUp        bool          `json:"wan_up"`
 	ClientCount  int           `json:"client_count"`
 	Clients      []Client      `json:"clients"`
-	Usage        []usageBucket `json:"usage,omitempty"`
+	Usage        []usageBucket    `json:"usage,omitempty"`
+	PolicyStatus []PolicyDecision `json:"policy_status,omitempty"`
 }
 
 func readFile(path string) string {
