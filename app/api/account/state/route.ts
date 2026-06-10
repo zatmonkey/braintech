@@ -126,9 +126,13 @@ export async function GET() {
       .filter(([, gids]) => gids.includes(g.group_id))
       .map(([m]) => m);
     const mins = memberMacs.map((m) => brainrotByMac.get(m) ?? null);
-    usagePerGroup[g.group_id] = mins.every((m) => m === null)
-      ? null
-      : mins.reduce((a, m) => a + (m ?? 0), 0);
+    if (mins.every((m) => m === null)) {
+      usagePerGroup[g.group_id] = null;
+    } else {
+      let total = 0;
+      for (const m of mins) total += m ?? 0;
+      usagePerGroup[g.group_id] = total;
+    }
   }
   const allMacs = [...appsByMac.keys()];
   let householdMinutes: number | null = null;
