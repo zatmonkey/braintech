@@ -48,23 +48,27 @@ async function lookupMine(mac: string): Promise<MineResponse> {
   await ensureAccountSchema(sql);
 
   const owners = (await sql`
-    SELECT owner_email, last_seen
+    SELECT owner_email, last_seen, hostname
     FROM client_last_seen
     WHERE mac = ${mac}
     ORDER BY last_seen DESC
     LIMIT 1;
-  `) as { owner_email: string; last_seen: string }[];
+  `) as { owner_email: string; last_seen: string; hostname: string | null }[];
   if (owners.length === 0) {
     return { ok: false, reason: "device not recognised on any account" };
   }
   const owner = owners[0].owner_email;
+  const hostname = owners[0].hostname;
   const seenRecently =
     Date.now() - new Date(owners[0].last_seen).getTime() < 5 * 60 * 1000;
 
+  // Label preference: manually-set label → DHCP-provided hostname → null.
+  // Most devices on a fresh setup never get a manual label; the hostname
+  // ("ApeTop", "Mayas-iPhone") is what the dashboard's already showing.
   const labelRow = (await sql`
     SELECT name FROM client_labels WHERE owner_email = ${owner} AND mac = ${mac};
   `) as { name: string }[];
-  const label = labelRow[0]?.name ?? null;
+  const label = labelRow[0]?.name ?? hostname ?? null;
 
   const groupRows = (await sql`
     SELECT g.group_id, g.name
