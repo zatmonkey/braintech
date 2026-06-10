@@ -150,12 +150,26 @@ export default async function Dashboard() {
     brainrot_minutes: brainrotByMac.get(d.mac) ?? null,
     apps: appsByMac.get(d.mac) ?? [],
   }));
+  // Sync status: a rule is "propagating" while the agent hasn't reported
+  // the desired_version that contains it. Once reported catches up, it's
+  // "active" (i.e. live on the router). v1 simplification: all rules
+  // share the device's current sync state — if any rule's deploy is in
+  // flight, all show propagating. The dashboard polls every 5s, so the
+  // orange-to-red transition happens visibly within seconds of the
+  // device's long-poll picking up.
+  const primaryDevice = devices[0];
+  const allInSync = primaryDevice
+    ? primaryDevice.desired_version === primaryDevice.reported_version
+    : true;
+  const ruleStatus: "propagating" | "active" = allInSync ? "active" : "propagating";
+
   const groupsForUi = groups.map((g) => {
     const rules = (rulesByGroup.get(g.group_id) ?? []).map((r) => ({
       rule_id: r.rule_id,
       rule_type: r.rule_type,
       name: r.name,
       summary: r.summary,
+      status: ruleStatus,
     }));
     // Group minutes = sum of member minutes (treat null as 0; if every member
     // is null, surface null instead of 0 so the meter reads "no data yet").

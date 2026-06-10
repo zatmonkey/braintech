@@ -78,19 +78,22 @@ export async function GET() {
     FROM account_rules WHERE owner_email = ${email} ORDER BY created_at;
   `) as RuleRow[];
 
-  // Bucket rules by the group they target (rule_type='pause_group' →
-  // params.group_id). Other rule types are network-wide and rendered
-  // separately in the dashboard.
+  // Bucket rules by the group they target. Any group-scoped rule_type
+  // counts: pause_group + block_brainrot_group. Network-wide types
+  // (block_domains_network, force_router_dns, block_managed_list,
+  // block_ip_set) intentionally don't bucket here — they're rendered
+  // elsewhere as house-wide rules.
   const rulesByGroup = new Map<string, RuleRow[]>();
   for (const r of rules) {
     if (!r.active) continue;
-    if (r.rule_type === "pause_group") {
-      const gid = (r.params as { group_id?: string }).group_id;
-      if (!gid) continue;
-      const list = rulesByGroup.get(gid) ?? [];
-      list.push(r);
-      rulesByGroup.set(gid, list);
+    if (r.rule_type !== "pause_group" && r.rule_type !== "block_brainrot_group") {
+      continue;
     }
+    const gid = (r.params as { group_id?: string }).group_id;
+    if (!gid) continue;
+    const list = rulesByGroup.get(gid) ?? [];
+    list.push(r);
+    rulesByGroup.set(gid, list);
   }
 
   const sessionId = `acct:${email}`;

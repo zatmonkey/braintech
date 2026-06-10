@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function SWRegister() {
   useEffect(() => {
@@ -83,6 +83,10 @@ export function AccountChat({ compact = false }: { compact?: boolean } = {}) {
         ...m,
         { role: "assistant", content: data?.reply ?? "Sorry, try that again?" },
       ]);
+      // Bri's reply may have just created, applied, or removed a rule —
+      // tell the devices panel to refetch immediately so the parent
+      // doesn't have to reload to see the change.
+      window.dispatchEvent(new CustomEvent("braintech:state-changed"));
     } catch {
       setMessages((m) => [...m, { role: "assistant", content: "Network hiccup — try again?" }]);
     } finally {
@@ -173,6 +177,8 @@ type AllDeviceRow = {
   apps: AppMinutes[];
 };
 
+type RuleStatus = "propagating" | "active";
+
 type TabGroup = {
   group_id: string;
   name: string;
@@ -183,6 +189,7 @@ type TabGroup = {
     name: string;
     rule_type: string;
     summary: string | null;
+    status: RuleStatus;
   }>;
   brainrot_minutes: number | null;
   apps: AppMinutes[];
@@ -222,6 +229,69 @@ export function AllDevicesSection({
   const [groups, setGroups] = useState(initialGroups);
   const [newGroupOpen, setNewGroupOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
+
+  // Live refresh: poll /api/account/state every 5s so rules added (or
+  // removed) via Bri or another tab show up without the parent reloading
+  // the whole page. Also subscribe to a "state-changed" window event the
+  // chat component dispatches after every Bri reply — that triggers an
+  // immediate fetch so newly-applied rules appear within ~1s, not 5s.
+  // Bri's "✅ Done" then has a tight visible feedback loop.
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/account/state", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        devices?: Array<{ desired_version: number; reported_version: number }>;
+        groups?: Array<{
+          group_id: string;
+          name: string;
+          is_default: boolean;
+          members: Array<{ mac: string; name: string }>;
+          rules: Array<{
+            rule_id: string;
+            name: string;
+            rule_type: string;
+            summary: string | null;
+          }>;
+        }>;
+      };
+      const primary = data.devices?.[0];
+      const inSync = primary
+        ? primary.desired_version === primary.reported_version
+        : true;
+      const status: RuleStatus = inSync ? "active" : "propagating";
+      if (Array.isArray(data.groups)) {
+        setGroups((prev) => {
+          const byId = new Map(prev.map((g) => [g.group_id, g] as const));
+          return (data.groups ?? []).map((g) => {
+            const old = byId.get(g.group_id);
+            return {
+              group_id: g.group_id,
+              name: g.name,
+              is_default: g.is_default,
+              rule_count: g.rules.length,
+              rules: g.rules.map((r) => ({ ...r, status })),
+              // brainrot + apps stay where they were until a fuller refetch —
+              // they're aggregate metrics that don't move on rule changes.
+              brainrot_minutes: old?.brainrot_minutes ?? null,
+              apps: old?.apps ?? [],
+            };
+          });
+        });
+      }
+    } catch {
+      // silent — try again next tick
+    }
+  }, []);
+  useEffect(() => {
+    const id = setInterval(refresh, 5000);
+    const onEvt = () => refresh();
+    window.addEventListener("braintech:state-changed", onEvt);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("braintech:state-changed", onEvt);
+    };
+  }, [refresh]);
   const [stats, setStats] = useState<{
     open: boolean;
     title: string;
@@ -514,6 +584,7 @@ export function AllDevicesSection({
                       name={r.name}
                       ruleType={r.rule_type}
                       summary={r.summary}
+                      status={r.status}
                     />
                   ))}
                 </ul>
@@ -925,23 +996,40 @@ export function RuleRow({
   name,
   ruleType,
   summary,
+  status = "active",
 }: {
   ruleId: string;
   name: string;
   ruleType: string;
   summary: string | null;
+  /** "propagating" while the device hasn't reported the desired_version
+   *  containing this rule yet; "active" once it has — the rule is live
+   *  on the router and enforcing. */
+  status?: "propagating" | "active";
 }) {
   const [removing, setRemoving] = useState(false);
+  const dotCls =
+    status === "propagating"
+      ? "bg-amber-500 animate-pulse"
+      : "bg-red-500";
+  const dotTitle =
+    status === "propagating"
+      ? "Propagating — device picking it up"
+      : "Active — enforcing on the router";
   return (
     <li className="flex items-start justify-between gap-3 py-2.5">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
+          <span
+            className={`size-2 shrink-0 rounded-full ${dotCls}`}
+            title={dotTitle}
+            aria-label={dotTitle}
+          />
           <span className="font-medium">{name}</span>
           <span className="text-xs text-[var(--color-ink-soft)]">{ruleType.replace(/_/g, " ")}</span>
         </div>
         {summary && (
-          <p className="ml-3.5 mt-1 text-xs text-[var(--color-ink-soft)]">{summary}</p>
+          <p className="ml-4 mt-1 text-xs text-[var(--color-ink-soft)]">{summary}</p>
         )}
       </div>
       <button
@@ -950,7 +1038,9 @@ export function RuleRow({
           setRemoving(true);
           try {
             await fetch(`/api/account/rules/${ruleId}`, { method: "DELETE" });
-            window.location.reload();
+            // No reload — the polling refresh in AllDevicesSection will
+            // pick the change up within a few seconds.
+            window.dispatchEvent(new CustomEvent("braintech:state-changed"));
           } catch {
             setRemoving(false);
           }
