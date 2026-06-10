@@ -554,6 +554,76 @@ export async function POST(req: Request) {
         await sql`UPDATE chat_sessions SET pending_proposal = NULL WHERE session_id = ${sessionId};`;
         return "Pending proposal cancelled.";
       }
+      if (name === "remove_rule") {
+        if (!primary) return "error: no device linked";
+        const ruleId = String(i.rule_id ?? "").trim();
+        if (!ruleId) return "error: rule_id required";
+        // Match against this owner only — never let Bri touch someone
+        // else's rule from a hallucinated id.
+        const found = (await sql`
+          SELECT name FROM account_rules
+          WHERE rule_id = ${ruleId} AND owner_email = ${email} AND active = TRUE;
+        `) as { name: string }[];
+        if (found.length === 0) {
+          return `error: no active rule with id "${ruleId}" found for this account`;
+        }
+        const ruleName = found[0].name;
+        // Soft-delete: keep the row as a tombstone so assembleDesired can
+        // emit cleanup ops for the device on the next sync.
+        await sql`
+          UPDATE account_rules SET active = FALSE, updated_at = NOW()
+          WHERE rule_id = ${ruleId} AND owner_email = ${email};
+        `;
+        // Rebuild desired from every rule we've ever issued. Same dance
+        // as apply_pending_rule — the now-inactive rule contributes its
+        // cleanup ops; remaining active rules still apply.
+        const allRows = (await sql`
+          SELECT rule_id, rule_type, name, summary, params, ops, active
+          FROM account_rules WHERE owner_email = ${email} AND device_id = ${primary.device_id};
+        `) as RuleRow[];
+        const groupMacs = await loadGroupMacs(sql, email);
+        const scheduleBaselines = new Map<string, Record<string, number>>();
+        for (const r of allRows) {
+          if (r.rule_type !== "block_schedule_group" || !r.active) continue;
+          const sp = r.params as BlockScheduleGroupParams;
+          const macsForRule = groupMacs.get(sp.group_id) ?? [];
+          if (macsForRule.length === 0) continue;
+          const usage = (await sql`
+            SELECT mac::text AS mac, COUNT(DISTINCT bucket_start)::int AS minutes
+            FROM client_usage_minute
+            WHERE owner_email = ${email}
+              AND mac = ANY(${macsForRule}::text[])
+              AND app = ${sp.app_label}
+              AND bucket_start >= DATE_TRUNC('day', NOW())
+            GROUP BY mac;
+          `) as { mac: string; minutes: number }[];
+          const perMac: Record<string, number> = {};
+          for (const u of usage) perMac[u.mac.toLowerCase()] = Number(u.minutes);
+          scheduleBaselines.set(r.rule_id, perMac);
+        }
+        const allRules: AccountRule[] = await Promise.all(
+          allRows.map(async (r) => {
+            const base: AccountRule = {
+              rule_id: r.rule_id,
+              rule_type: r.rule_type,
+              params: r.params,
+              ops: r.ops,
+              name: r.name,
+              summary: r.summary ?? undefined,
+              active: r.active,
+            };
+            if (r.active) base.ops = await materializeOps(base, { groupMacs, scheduleBaselines });
+            return base;
+          }),
+        );
+        const desired = assembleDesired(allRules);
+        const newVersion = primary.desired_version + 1;
+        await sql`
+          UPDATE devices SET desired = ${JSON.stringify(desired)}::jsonb, desired_version = ${newVersion}, updated_at = NOW()
+          WHERE device_id = ${primary.device_id};
+        `;
+        return `Removed "${ruleName}" — cleanup will land within ~25s.`;
+      }
       if (name === "create_group") {
         const groupName = String(i.name ?? "").trim().slice(0, 64);
         if (!groupName) return "error: name required";

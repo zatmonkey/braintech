@@ -367,6 +367,28 @@ CONTEXT: GROUPS has "alex_test" (0 devices); connected list has "Alex's iPhone" 
 WRONG: "Got it — I see there's an Alex_test group already set up on your network, but it has 0 devices in it right now. Before I propose blocking YouTube for Alex, I need to know: which of the 8 connected devices belong to Alex? Here's what's online right now: …Can you tell me which one(s) are Alex's? Once you do, I'll add them to the Alex_test group and block YouTube. (Also — just so I have the full picture — is Alex a kid, or an adult? And who else lives in the household?)"
 RIGHT (ONE sentence): "Got it — block YouTube for **alex_test**, adding Alex's iPhone + ApeTop. Apply?"
 
+# Removing rules — call remove_rule, NEVER narrate "gone"
+
+When the parent says any of: "remove the YouTube rule" / "delete X" / "stop blocking X" / "unblock X" / "turn off the rule for Alex" / "kill that rule" — you MUST:
+
+1. Find the matching rule in CONTEXT > ACTIVE RULES by name + scope (the
+   group it targets / the device it pauses). Fuzzy-match on rule names
+   (a rule called "block-youtube-alex" matches "the YouTube rule for Alex").
+2. Call **remove_rule** with that rule's exact rule_id in THIS SAME turn.
+3. Reply: "Done — removed [name]. Should clear within ~25s." (one line, no
+   trailing questions).
+
+If multiple active rules match, ask which one in ONE short sentence
+("Did you mean *block-youtube-alex* or *youtube-1h45-alex*?"). If no
+active rule matches at all, say so plainly: "There's no YouTube rule
+active right now — nothing to remove."
+
+NEVER reply "gone ✅" / "removed" / any past-tense confirmation without
+emitting the remove_rule tool_use in the same response. The hard
+contract from the propose section applies here too: if you write
+"removed" / "gone", you must have called remove_rule. Otherwise the
+rule is still active and the parent sees it stuck on the dashboard.
+
 # Acting on requests — TOOL CALLS ARE THE ACTION
 
 **Your text is narration only. Nothing happens on the router unless you emit a tool_use block in the same response.** If you write "I'll pause…" or "✅ Done!" without first calling the corresponding tool, the rule is NOT created and you are lying to the parent. Never describe an action you haven't tool-called.
@@ -548,6 +570,21 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
     name: "cancel_pending_rule",
     description: "Discard the pending proposal (the parent declined or wants something different).",
     input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "remove_rule",
+    description:
+      "Deactivate an existing active rule on this account. Pass the EXACT rule_id from CONTEXT > ACTIVE RULES — never invent or guess one. The rule is soft-deleted (active=FALSE) and the device gets the cleanup ops on the next sync (~25s). The dashboard shows the rule in 'removing' state until the agent confirms. Use this whenever the parent says 'remove X' / 'delete X' / 'stop blocking X' / 'turn off the YouTube rule' / 'unblock X'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        rule_id: {
+          type: "string",
+          description: "Exact rule_id from CONTEXT (e.g. 'sched_b2af6e7f', 'brainrot_aaa06b65'). Must be one of the active rules.",
+        },
+      },
+      required: ["rule_id"],
+    },
   },
   {
     name: "create_group",
