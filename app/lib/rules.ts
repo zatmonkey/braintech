@@ -656,9 +656,30 @@ export function nftBrainrotFile(ruleId: string, macs: string[]): string {
   lines.push(`}`);
   lines.push("");
 
-  // Chain: only reject when MAC ∈ kids AND dest ∈ blocked IPs. Anyone
-  // outside the MAC set (parents) keeps full access; any destination not
-  // in the IP set is unaffected (the rest of the internet still works).
+  // Prerouting NAT: HTTP (port 80) traffic from kid MACs going to blocked
+  // IPs gets DNAT'd to the captive server on 192.168.1.254:80. The captive
+  // server responds with a 302 to getbraintech.com/blocked?host=<original>
+  // so the kid sees a friendly page instead of a connection error. HTTPS
+  // (port 443) is NOT rewritten — HSTS makes that impossible without root
+  // cert installation. We DNAT v4 only; v6 captive isn't worth wiring.
+  const natChain = `${chain}_dnat`;
+  lines.push(`chain ${natChain} {`);
+  lines.push(`    type nat hook prerouting priority -100; policy accept;`);
+  if (macs.length > 0) {
+    lines.push(
+      `    ether saddr @${macSet} tcp dport 80 ip daddr @${ip4Set} dnat to 192.168.1.254:80 comment "bt:${ruleId} captive"`,
+    );
+  } else {
+    lines.push(`    # (no member MACs — chain is inert)`);
+  }
+  lines.push(`}`);
+  lines.push("");
+
+  // Forward filter: reject everything else from the MAC set to the IP sets.
+  // Port 80 traffic was already redirected in prerouting above; this catches
+  // port 443 (HTTPS) and any other port. Anyone outside the MAC set
+  // (parents) keeps full access; any destination not in the IP set is
+  // unaffected (the rest of the internet still works).
   lines.push(`chain ${chain} {`);
   lines.push(`    type filter hook forward priority -10; policy accept;`);
   if (macs.length > 0) {
