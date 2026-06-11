@@ -43,10 +43,10 @@ export default async function CalendarPage() {
       <header className="mb-8 flex items-end justify-between gap-4">
         <div>
           <a
-            href="/app"
+            href="/app/admin"
             className="text-xs uppercase tracking-wider text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
           >
-            ← Back to your braintech
+            ← Back to admin
           </a>
           <h1 className="serif mt-2 text-3xl tracking-tight sm:text-4xl">
             Content calendar
