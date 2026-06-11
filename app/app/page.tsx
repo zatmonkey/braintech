@@ -200,6 +200,10 @@ export default async function Dashboard() {
       rules: rules.map((r) => ({ ...r, credits_spent_today: 0 })),
       brainrot_minutes: groupMinutes,
       apps: groupApps,
+      // Earn totals hydrate from /api/account/state on the first poll
+      // (5s). Initial SSR shows 0 so the chip just reads "Earn log".
+      earn_passed_count: 0,
+      earn_total_minutes: 0,
     };
   });
   // Household minutes for the top-of-page Usage meter.

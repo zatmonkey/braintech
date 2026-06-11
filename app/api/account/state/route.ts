@@ -128,6 +128,26 @@ export async function GET() {
   // shape the dashboard surfaces to the parent: one row per kid/adult
   // with their name. Empty array when no groups have kind set yet.
   const personBalances = await loadPersonBalances(sql, email);
+
+  // Per-group earn summary: passed-quiz count + total credit earned.
+  // Powers the "Alex · 2 watched · +40m" chip on the group toolbar.
+  // Excludes ledger-only earns (manual grants from Bri) so the number
+  // matches what's clickable in the detail modal.
+  const earnSummaryRows = (await sql`
+    SELECT group_id::text AS group_id,
+           COUNT(*)::int AS passed_count,
+           COALESCE(SUM(credit_granted), 0)::int AS total_minutes
+    FROM earn_claims
+    WHERE owner_email = ${email}
+      AND group_id IS NOT NULL
+      AND passed = TRUE
+    GROUP BY group_id;
+  `) as { group_id: string; passed_count: number; total_minutes: number }[];
+  const earnSummaryByGroup = new Map(
+    earnSummaryRows.map(
+      (r) => [r.group_id, { passed_count: r.passed_count, total_minutes: r.total_minutes }] as const,
+    ),
+  );
   // Per-rule credits spent today (from spend_ack), so each schedule
   // rule card can say "+18 from credits today".
   const todaySpends = (await sql`
@@ -258,6 +278,7 @@ export async function GET() {
         if (gids.includes(g.group_id)) memberMacs.add(mac);
       }
       const labelByMac = new Map(labels.map((l) => [l.mac.toLowerCase(), l.name]));
+      const earn = earnSummaryByGroup.get(g.group_id);
       return {
         ...g,
         members: [...memberMacs].map((mac) => ({ mac, name: labelByMac.get(mac) ?? mac })),
@@ -272,6 +293,8 @@ export async function GET() {
           policy: policyByRule.get(r.rule_id),
           credits_spent_today: creditsSpentByRule.get(r.rule_id) ?? 0,
         })),
+        earn_passed_count: earn?.passed_count ?? 0,
+        earn_total_minutes: earn?.total_minutes ?? 0,
       };
     }),
     rules,

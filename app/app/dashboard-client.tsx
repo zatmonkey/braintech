@@ -479,6 +479,7 @@ export function AccountChat({ compact = false }: { compact?: boolean } = {}) {
 
 import { BrainrotMeter } from "./brainrot-meter";
 import { StatsModal } from "./stats-modal";
+import { EarnHistoryModal } from "./earn-history-modal";
 
 export type AppMinutes = { app: string; minutes: number };
 
@@ -534,6 +535,10 @@ type TabGroup = {
   }>;
   brainrot_minutes: number | null;
   apps: AppMinutes[];
+  // Per-group earn-quiz totals (passed claims only). Powers the "X
+  // earned" chip on the group toolbar; clicking it opens the audit modal.
+  earn_passed_count: number;
+  earn_total_minutes: number;
 };
 
 function sumApps(parts: AppMinutes[][]): AppMinutes[] {
@@ -606,6 +611,8 @@ export function AllDevicesSection({
             policy?: PolicyDecisionUI;
             credits_spent_today?: number;
           }>;
+          earn_passed_count?: number;
+          earn_total_minutes?: number;
         }>;
         credit_balance_by_mac?: Record<string, number>;
         usage?: {
@@ -648,6 +655,8 @@ export function AllDevicesSection({
               })),
               brainrot_minutes: newGroupMinutes,
               apps: newGroupApps,
+              earn_passed_count: g.earn_passed_count ?? 0,
+              earn_total_minutes: g.earn_total_minutes ?? 0,
             };
           });
         });
@@ -703,6 +712,10 @@ export function AllDevicesSection({
     minutes: null,
     apps: [],
   });
+  const [earnHistory, setEarnHistory] = useState<{
+    open: boolean;
+    group: TabGroup | null;
+  }>({ open: false, group: null });
 
   const filtered = selectedGroup
     ? items.filter((r) => r.group_ids.includes(selectedGroup))
@@ -762,6 +775,8 @@ export function AllDevicesSection({
             rules: [],
             brainrot_minutes: null,
             apps: [],
+            earn_passed_count: 0,
+            earn_total_minutes: 0,
           },
         ]);
         setNewGroupName("");
@@ -957,6 +972,17 @@ export function AllDevicesSection({
                 >
                   Stats
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setEarnHistory({ open: true, group: activeGroup })}
+                  title={`${activeGroup.earn_passed_count} videos passed · ${activeGroup.earn_total_minutes}m credit earned`}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-rule)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--color-ink)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                >
+                  <span aria-hidden>🧠</span>
+                  {activeGroup.earn_passed_count > 0
+                    ? `${activeGroup.earn_passed_count} earned · +${activeGroup.earn_total_minutes}m`
+                    : "Earn log"}
+                </button>
                 {!activeGroup.is_default && (
                   <button
                     type="button"
@@ -1083,6 +1109,11 @@ export function AllDevicesSection({
         subtitle={stats.subtitle}
         brainrotMinutes={stats.minutes}
         apps={stats.apps}
+      />
+      <EarnHistoryModal
+        open={earnHistory.open}
+        group={earnHistory.group}
+        onClose={() => setEarnHistory({ open: false, group: null })}
       />
     </div>
   );
