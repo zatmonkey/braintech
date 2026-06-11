@@ -6,9 +6,11 @@
  * /api/account/group-activity lazily on open and lets the parent
  * stamp 'OK' or 'Limit' per app via /api/account/app-classify.
  *
- * The classification doesn't enforce anything by itself — it records
- * the parent's view + silences the email-alert cron. Actual blocking
- * still goes through block_brainrot_group / schedule rules.
+ * The 'OK' button just records the verdict + silences the email alert.
+ * The 'Limit' button records the verdict THEN hands off to Bri with a
+ * prefilled rule draft the parent can customize and send. Actual
+ * blocking still goes through Bri's create_rule path — the
+ * classification just primes the conversation.
  */
 import { useCallback, useEffect, useState } from "react";
 
@@ -89,6 +91,27 @@ export function GroupActivityModal({
           ? rows.map((r) => (r.app === app ? { ...r, status, decided_at: new Date().toISOString() } : r))
           : rows,
       );
+      // 'Limit' is a decision, not enforcement. Hand off to Bri with a
+      // pre-filled rule draft so the parent can customize + actually
+      // ship a blocking rule. AccountChat listens for this event and
+      // focuses the input.
+      if (status === "limit") {
+        const row = apps?.find((r) => r.app === app);
+        const todayLabel = row ? `${row.minutes_today}m today` : "";
+        const weekLabel = row ? `${row.minutes_7d}m over 7 days` : "";
+        const usage =
+          todayLabel && weekLabel
+            ? ` (${todayLabel}, ${weekLabel})`
+            : "";
+        const draft = `Limit ${app} for ${group.name}${usage} — `;
+        // Close the modal first so the chat is visible, then prefill.
+        onClose();
+        setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent<string>("braintech:prefill-chat", { detail: draft }),
+          );
+        }, 50);
+      }
     } catch {
       setError("Network hiccup — try again.");
     } finally {

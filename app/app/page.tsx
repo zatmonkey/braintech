@@ -27,6 +27,7 @@ import {
 } from "./dashboard-client";
 import { InstallPrompt } from "./install-prompt";
 import { BrainrotMeter } from "./brainrot-meter";
+import { PushToggle } from "./push-toggle";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -232,6 +233,7 @@ export default async function Dashboard() {
         </div>
         <div className="flex items-center gap-3 text-sm text-[var(--color-ink-soft)]">
           <span className="hidden sm:inline">{email}</span>
+          <PushToggle />
           {isAdmin(email) ? (
             <Link
               href="/app/admin"

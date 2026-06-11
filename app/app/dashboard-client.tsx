@@ -964,21 +964,6 @@ export function AllDevicesSection({
                 </button>
                 <button
                   type="button"
-                  onClick={() =>
-                    setStats({
-                      open: true,
-                      title: activeGroup.name,
-                      subtitle: "Group · last 24h",
-                      minutes: activeGroup.brainrot_minutes,
-                      apps: activeGroup.apps,
-                    })
-                  }
-                  className="rounded-full border border-[var(--color-rule)] px-3 py-1.5 text-xs font-medium text-[var(--color-ink-soft)] transition hover:border-[var(--color-ink)] hover:text-[var(--color-ink)]"
-                >
-                  Stats
-                </button>
-                <button
-                  type="button"
                   onClick={() => setEarnHistory({ open: true, group: activeGroup })}
                   title={`${activeGroup.earn_passed_count} videos passed · ${activeGroup.earn_total_minutes}m credit earned`}
                   className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-rule)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--color-ink)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"

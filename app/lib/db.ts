@@ -406,6 +406,23 @@ export async function ensureAccountSchema(
     );
   `;
 
+  // Browser/PWA push subscriptions. One row per (endpoint), since the
+  // endpoint is the unique address the push service hands out and
+  // it stays stable across re-subscriptions. Multiple devices per
+  // owner are fine — we fan out to all of them.
+  await sql`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint     TEXT PRIMARY KEY,
+      owner_email  TEXT NOT NULL,
+      p256dh_key   TEXT NOT NULL,
+      auth_key     TEXT NOT NULL,
+      user_agent   TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS push_subscriptions_owner_idx ON push_subscriptions (owner_email);`;
+
   await sql`
     CREATE TABLE IF NOT EXISTS client_group_memberships (
       owner_email TEXT NOT NULL,

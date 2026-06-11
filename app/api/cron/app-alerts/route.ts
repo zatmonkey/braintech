@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSql, ensureDeviceSchema, ensureAccountSchema } from "@/app/lib/db";
 import { loadGroupActivity } from "@/app/lib/activity";
 import { sendAppDecisionEmail } from "@/app/lib/email";
+import { sendPushToOwner } from "@/app/lib/push";
 import { signAppDecisionToken } from "@/app/api/account/app-classify/route";
 
 export const runtime = "nodejs";
@@ -102,6 +103,7 @@ export async function GET(req: NextRequest) {
 
       const ok_url = decisionUrl(base, g.owner_email, g.group_id, a.app, "ok");
       const limit_url = decisionUrl(base, g.owner_email, g.group_id, a.app, "limit");
+      let anyDelivered = false;
       try {
         const sent = await sendAppDecisionEmail(g.owner_email, {
           person_name: g.person_name,
@@ -113,20 +115,43 @@ export async function GET(req: NextRequest) {
           limit_url,
           dashboard_url: `${base}/app`,
         });
-        if (sent.delivered) {
-          alertsSent++;
-          await sql`
-            INSERT INTO app_alert_log (owner_email, group_id, app, minutes_at_alert)
-            VALUES (${g.owner_email}, ${g.group_id}, ${a.app}, ${a.minutes_today})
-            ON CONFLICT (owner_email, group_id, app) DO UPDATE SET
-              alerted_at        = NOW(),
-              minutes_at_alert  = EXCLUDED.minutes_at_alert;
-          `;
-        } else {
-          alertsSkipped++;
-        }
+        if (sent.delivered) anyDelivered = true;
       } catch (err) {
-        console.error("[cron/app-alerts] send failed", err);
+        console.error("[cron/app-alerts] email send failed", err);
+      }
+      // Web Push to every PWA installation registered against the owner.
+      // Tag by (group, app) so a repeat collapses the notification on
+      // the device. Email + push fire together — both can be received,
+      // both honor the same alert_log dedupe.
+      try {
+        const push = await sendPushToOwner(sql, g.owner_email, {
+          title: `${g.person_name} on ${a.app}`,
+          body: `${a.minutes_today} min today · ${a.minutes_7d} min over 7d. Tap to decide.`,
+          url: `/app?classified=${encodeURIComponent(a.app)}`,
+          tag: `app-alert:${g.group_id}:${a.app}`,
+          data: {
+            group_id: g.group_id,
+            app: a.app,
+            ok_url,
+            limit_url,
+          },
+        });
+        if (push.sent > 0) anyDelivered = true;
+      } catch (err) {
+        console.error("[cron/app-alerts] push send failed", err);
+      }
+
+      if (anyDelivered) {
+        alertsSent++;
+        await sql`
+          INSERT INTO app_alert_log (owner_email, group_id, app, minutes_at_alert)
+          VALUES (${g.owner_email}, ${g.group_id}, ${a.app}, ${a.minutes_today})
+          ON CONFLICT (owner_email, group_id, app) DO UPDATE SET
+            alerted_at        = NOW(),
+            minutes_at_alert  = EXCLUDED.minutes_at_alert;
+        `;
+      } else {
+        alertsSkipped++;
       }
     }
   }

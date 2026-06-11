@@ -2,6 +2,17 @@
 
 import { useState } from "react";
 
+// Returns a safe in-app path to land on after login. Honors ?from= if
+// it's a same-origin path; falls back to /app. Defends against open
+// redirects (no //, no protocol).
+function safeFromParam(): string {
+  if (typeof window === "undefined") return "/app";
+  const raw = new URLSearchParams(window.location.search).get("from");
+  if (!raw) return "/app";
+  if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return "/app";
+  return raw;
+}
+
 export default function LoginPage() {
   const [step, setStep] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
@@ -47,7 +58,7 @@ export default function LoginPage() {
         setErr(data.error ?? "Something went wrong");
         return;
       }
-      window.location.href = "/app";
+      window.location.href = safeFromParam();
     } catch {
       setErr("Network error");
     } finally {
