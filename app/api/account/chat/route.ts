@@ -39,7 +39,7 @@ import {
   type IpSetSource,
 } from "@/app/lib/rules";
 import { loadGroupMacs } from "@/app/lib/groups";
-import { grantCredit } from "@/app/lib/credit-grant";
+import { grantCredit, deductCredit } from "@/app/lib/credit-grant";
 import { resolvePersonName } from "@/app/lib/persons";
 
 export const runtime = "nodejs";
@@ -602,6 +602,59 @@ export async function POST(req: Request) {
             note,
           );
           return `Granted ${minutes} min to ${who}. New balance: ${grant.new_balance} min.`;
+        } catch (err) {
+          return `error: ${(err as Error).message}`;
+        }
+      }
+      if (name === "deduct_credit") {
+        const minutes = Math.floor(Number(i.minutes ?? 0));
+        if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 1440) {
+          return "error: minutes must be between 1 and 1440";
+        }
+        const note = i.note ? String(i.note).slice(0, 200) : null;
+        const personName = i.person_name ? String(i.person_name).trim() : "";
+        const macInput = String(i.target_mac ?? "").toLowerCase().trim();
+        const macValid = /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(macInput);
+
+        let groupId: string | undefined;
+        let mac: string | undefined;
+        let who: string;
+        if (personName) {
+          const p = await resolvePersonName(sql, email, personName);
+          if (!p) {
+            return `error: no person matching "${personName}" — check CONTEXT > GROUPS.`;
+          }
+          groupId = p.group_id;
+          who = p.person_name;
+        } else if (macValid) {
+          const owns = (await sql`
+            SELECT 1 FROM client_last_seen
+            WHERE owner_email = ${email} AND mac = ${macInput} LIMIT 1;
+          `) as { 1: number }[];
+          if (owns.length === 0) {
+            return `error: no device with mac ${macInput} has been seen on this account`;
+          }
+          mac = macInput;
+          who = labels.get(macInput) ?? `device ${macInput}`;
+        } else {
+          return "error: pass either person_name or a valid target_mac";
+        }
+
+        try {
+          const result = await deductCredit(
+            sql,
+            email,
+            { group_id: groupId, mac },
+            minutes,
+            note,
+          );
+          if (result.deducted === 0) {
+            return `${who} has no credits to take. Balance: 0 min.`;
+          }
+          if (result.deducted < minutes) {
+            return `Took ${result.deducted} min from ${who} — that's all they had. New balance: ${result.new_balance} min.`;
+          }
+          return `Took ${result.deducted} min from ${who}. New balance: ${result.new_balance} min.`;
         } catch (err) {
           return `error: ${(err as Error).message}`;
         }

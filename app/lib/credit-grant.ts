@@ -44,6 +44,16 @@ export type GrantResult = {
   new_balance: number;
 };
 
+export type DeductResult = {
+  ok: true;
+  // How many minutes were actually removed (clamped at the current
+  // balance — we never go negative). Caller can compare against the
+  // requested amount to detect "tried to take 30 but only 12 were
+  // there".
+  deducted: number;
+  new_balance: number;
+};
+
 /**
  * Read the current "active earn session" map — every (mac → ends_at)
  * where ends_at is in the future. Empty map if none. Used to embed the
@@ -244,4 +254,80 @@ export async function grantCredit(
     SELECT balance_minutes FROM brain_credits WHERE owner_email = ${email} AND mac = ${mac};
   `) as { balance_minutes: number }[];
   return { ok: true, new_balance: after[0]?.balance_minutes ?? 0 };
+}
+
+/**
+ * Remove brain credit from a kid. Mirrors grantCredit's target shape
+ * (group_id or mac) and clamps at the current balance — we never let
+ * a kid go to a negative pool. Records a negative delta_minutes row
+ * with source='manual_deduct' so the ledger reads cleanly without
+ * mixing into "all grants" filters.
+ *
+ * Returns the actual minutes removed (may be less than requested if
+ * the balance was insufficient) so Bri can phrase the reply honestly
+ * ("Took 12 of the 30 you asked for — that's all they had").
+ */
+export async function deductCredit(
+  sql: NeonQueryFunction<false, false>,
+  email: string,
+  target: { group_id?: string; mac?: string },
+  minutes: number,
+  note: string | null,
+): Promise<DeductResult> {
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    throw new Error("deduct minutes must be a positive integer");
+  }
+  let groupId = target.group_id ?? null;
+  let mac = target.mac ?? null;
+
+  if (!mac && groupId) {
+    mac = await primaryMacForGroup(sql, email, groupId);
+    if (!mac) {
+      throw new Error(
+        `cannot deduct credit: group ${groupId} has no member devices yet`,
+      );
+    }
+  }
+  if (!mac) {
+    throw new Error("cannot deduct credit: need group_id or mac");
+  }
+  if (!groupId) {
+    const rows = (await sql`
+      SELECT cgm.group_id::text AS group_id
+      FROM client_group_memberships cgm
+      WHERE cgm.owner_email = ${email} AND cgm.mac = ${mac}
+      ORDER BY cgm.created_at ASC LIMIT 1;
+    `) as { group_id: string }[];
+    groupId = rows[0]?.group_id ?? null;
+  }
+
+  // Read-clamp-write. Concurrent deducts could in theory race the
+  // balance below zero; in practice manual grants/deducts come from a
+  // single human path and the spend telemetry never reads this. The
+  // GREATEST(0, …) in the UPDATE catches any actual underflow.
+  const before = (await sql`
+    SELECT balance_minutes FROM brain_credits
+    WHERE owner_email = ${email} AND mac = ${mac};
+  `) as { balance_minutes: number }[];
+  if (before.length === 0) {
+    // No row at all — nothing to deduct, no harm done.
+    return { ok: true, deducted: 0, new_balance: 0 };
+  }
+  const currentBalance = Number(before[0].balance_minutes);
+  const deducted = Math.min(minutes, currentBalance);
+  const newBalance = currentBalance - deducted;
+
+  await sql`
+    UPDATE brain_credits
+       SET balance_minutes = GREATEST(0, ${newBalance}),
+           updated_at      = NOW(),
+           group_id        = COALESCE(group_id, ${groupId})
+     WHERE owner_email = ${email} AND mac = ${mac};
+  `;
+  await sql`
+    INSERT INTO brain_credit_ledger (owner_email, mac, group_id, delta_minutes, source, rule_id, note)
+    VALUES (${email}, ${mac}, ${groupId}, ${-deducted}, 'manual_deduct', NULL, ${note});
+  `;
+  await rematerializePolicies(sql, email);
+  return { ok: true, deducted, new_balance: newBalance };
 }

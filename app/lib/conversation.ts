@@ -371,11 +371,21 @@ RIGHT (ONE sentence): "Got it — block YouTube for **alex_test**, adding Alex's
 
 When the parent says any of: "give Maya 30 min" / "reward Alex with 20 min for reading" / "add 15 minutes to Theo's account" / "she earned 20 minutes" — you MUST:
 
-1. Find the kid's device from CONTEXT (label match → group-with-one-member → ask if ambiguous).
-2. Call **grant_credit** with target_mac + minutes (+ optional note). The credits go into a per-MAC pool; the on-device policy engine automatically spends them when the kid's schedule rule hits its daily quota.
+1. Resolve the kid's name from CONTEXT > GROUPS (kind='kid') — pass person_name to grant_credit. Only fall back to target_mac if the parent specifically named a device.
+2. Call **grant_credit** with minutes (+ optional note). Credits live on the person — the on-device engine spends them automatically when the kid's schedule rule hits its daily quota.
 3. Reply: "Done — added [N] min to [kid's name]'s pool. They'll kick in once today's [N min] runs out." One line.
 
 NEVER reply "added" / "done" without emitting the grant_credit tool_use in the same response. Same hard contract as remove_rule.
+
+# Removing brain credits — call deduct_credit, NEVER narrate "took"
+
+When the parent says any of: "take 30 min off Alex" / "Maya loses her 20 minutes" / "undo that grant" / "reset Theo's credits" / "he doesn't deserve those minutes" — you MUST:
+
+1. Resolve person_name from CONTEXT > GROUPS.
+2. Call **deduct_credit** with POSITIVE minutes (the verb implies the sign). The deduction clamps at the current balance — never goes negative.
+3. Reply based on the tool's result. If the deducted amount is less than the requested amount, say so honestly ("Took 12 of the 30 you asked for — that's all they had"). Don't pretend you removed more than you did.
+
+NEVER reply "took" / "removed" without emitting the deduct_credit tool_use in the same response.
 
 # Removing rules — call remove_rule, NEVER narrate "gone"
 
@@ -603,6 +613,33 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
         note: {
           type: "string",
           description: "Optional short audit note. e.g. 'Khan lesson on fractions', '20 min reading'.",
+        },
+      },
+      required: ["minutes"],
+    },
+  },
+  {
+    name: "deduct_credit",
+    description:
+      "Remove brain credit minutes from a kid's pool. Use this when the parent says 'take 30 minutes off Alex', 'Maya loses her 20 min', 'undo that grant', 'reset Theo's credits'. Always pass POSITIVE minutes — the verb implies the sign. The deduction clamps at the current balance (we never go negative); if the parent asks to take more than the kid has, the reply should be honest about how much actually came out. Prefer person_name; target_mac is a fallback. Doesn't change any rule — just the pool.",
+    input_schema: {
+      type: "object",
+      properties: {
+        person_name: {
+          type: "string",
+          description: "Kid's name from CONTEXT > GROUPS. Case-insensitive match.",
+        },
+        target_mac: {
+          type: "string",
+          description: "Fallback: MAC of a specific device. Use only when person_name isn't available.",
+        },
+        minutes: {
+          type: "number",
+          description: "Positive minutes to remove. Will be clamped at current balance.",
+        },
+        note: {
+          type: "string",
+          description: "Optional short audit note. e.g. 'didn't finish chores', 'cancelled the lesson'.",
         },
       },
       required: ["minutes"],
