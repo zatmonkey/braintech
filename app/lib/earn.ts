@@ -80,38 +80,65 @@ function client(): Anthropic {
 
 const MODEL = "claude-sonnet-4-6";
 
-export type Question = { q: string };
+/**
+ * One quiz question. Two shapes:
+ *   - kind="mc"   → 4 choices, server-known correct index
+ *   - kind="open" → free-text reflection, scored leniently by Claude
+ *
+ * The video flow emits exactly 2 MC + 1 open, in that order. Non-video
+ * activities (currently all "coming soon") still get 3 short-answer.
+ */
+export type Question =
+  | { q: string; kind?: "open" }
+  | { q: string; kind: "mc"; choices: string[]; answer_index: number };
+
+function ageTier(age: number | null | undefined): string {
+  if (age == null) return "a curious kid (age unknown, pitch around 10-12)";
+  if (age <= 8) return `an early-elementary kid (age ${age})`;
+  if (age <= 11) return `a late-elementary kid (age ${age})`;
+  if (age <= 14) return `a middle-school kid (age ${age})`;
+  return `a high-school-aged kid (age ${age})`;
+}
 
 export async function generateQuiz(
   activity: ActivityType,
   subject: string,
   /**
    * For activity="video": pass the video's title + speaker. The kid
-   * just watched it embedded; the quiz should probe SPECIFIC moments
-   * to verify they actually watched (not just hit play in another tab).
+   * just finished watching; the quiz mixes 2 multiple-choice (verifies
+   * they watched) + 1 open reflection (rewards thinking, not recall).
    */
   videoMeta?: { title: string; speaker: string; source: string },
+  /**
+   * Optional kid age — drives difficulty pitch in the prompt.
+   */
+  age?: number | null,
 ): Promise<Question[]> {
   const cfg = ACTIVITIES[activity];
   if (!cfg) throw new Error(`unknown activity: ${activity}`);
   let system: string;
   if (activity === "video" && videoMeta) {
     system = [
-      `You are an even-handed evaluator helping a child claim "brain credits" toward screen time by proving they actually watched a video (not just hit play in another tab).`,
+      `You are writing a brief quiz that lets a kid claim brain credits after watching a video. The goal is NOT to test memorization — it's to confirm engagement and reward reflection.`,
       ``,
       `The child just finished watching:`,
       `  Title: ${videoMeta.title}`,
       `  Speaker: ${videoMeta.speaker}`,
       `  Source: ${videoMeta.source}`,
       ``,
-      `Write EXACTLY THREE short, OPEN-ENDED questions about SPECIFIC moments / claims / examples from THIS video. Rules:`,
-      `  - No multiple choice (too easy to fake).`,
-      `  - Each question should probe a moment from a different part of the video (early, middle, late) so skipping ahead fails the quiz.`,
-      `  - Anchor on something concrete: an example the speaker gave, a number they cited, a story they told, a turn in the argument.`,
-      `  - A kid who watched can answer in 1–3 sentences. A kid who didn't watch will give vague answers and fail.`,
-      `  - DON'T ask "what's the video about?" — that's answerable from the title.`,
+      `Pitch the difficulty for ${ageTier(age)}.`,
       ``,
-      `Output JSON. No prose, no markdown. Schema: {"questions":[{"q":"..."},{"q":"..."},{"q":"..."}]}`,
+      `Output EXACTLY THREE questions, in this order:`,
+      `  1. MULTIPLE CHOICE — about a SPECIFIC moment, example, or claim from the early-to-middle of the video. 4 choices, exactly one correct. Plausible distractors (no "obviously dumb" options). Avoid length tells — don't make the correct answer the longest.`,
+      `  2. MULTIPLE CHOICE — same constraints, but about a moment, claim, or turn in the middle-to-late part of the video.`,
+      `  3. OPEN-ENDED REFLECTION — invite a personal answer about what the kid learned, noticed, or wondered. The point is to make them think. Easy to pass: any thoughtful, on-topic response counts.`,
+      ``,
+      `Output JSON only. No prose, no markdown. Schema:`,
+      `{"questions":[`,
+      `  {"q":"...","kind":"mc","choices":["A","B","C","D"],"answer_index":0},`,
+      `  {"q":"...","kind":"mc","choices":["A","B","C","D"],"answer_index":2},`,
+      `  {"q":"...","kind":"open"}`,
+      `]}`,
     ].join("\n");
   } else {
     system = [
@@ -119,21 +146,19 @@ export async function generateQuiz(
       ``,
       `The child says they did: ${cfg.label} — "${subject}".`,
       ``,
-      `Write EXACTLY THREE short, level-appropriate, OPEN-ENDED comprehension questions about that specific subject. Rules:`,
-      `  - No multiple choice (too easy to fake).`,
-      `  - Questions must be answerable in 1–3 sentences by a kid who actually engaged.`,
-      `  - Pitch the level appropriately (early-elementary if the subject suggests it, middle-school if it's algebra/TED, etc.).`,
-      `  - Avoid questions the kid could answer from the title alone — probe a concept, an example, a feeling, a step.`,
-      `  - For reading: ask about a specific event, character motivation, or detail — not "what's it about?".`,
-      `  - For Khan / coding: ask about the *idea* not the exact UI ("what does a loop do?" not "what colour was the button?").`,
+      `Pitch the difficulty for ${ageTier(age)}.`,
       ``,
-      `Output JSON. No prose, no markdown. Schema: {"questions":[{"q":"..."},{"q":"..."},{"q":"..."}]}`,
+      `Write EXACTLY THREE short, OPEN-ENDED comprehension questions about that specific subject. Rules:`,
+      `  - Questions must be answerable in 1–3 sentences by a kid who actually engaged.`,
+      `  - Avoid questions the kid could answer from the title alone — probe a concept, an example, a feeling, a step.`,
+      ``,
+      `Output JSON. No prose, no markdown. Schema: {"questions":[{"q":"...","kind":"open"},{"q":"...","kind":"open"},{"q":"...","kind":"open"}]}`,
     ].join("\n");
   }
 
   const resp = await client().messages.create({
     model: MODEL,
-    max_tokens: 500,
+    max_tokens: 800,
     system,
     messages: [{ role: "user", content: "Generate the quiz now." }],
   });
@@ -147,7 +172,20 @@ export async function generateQuiz(
   if (!parsed?.questions || parsed.questions.length !== 3) {
     throw new Error("generator returned the wrong shape");
   }
-  return parsed.questions.map((q) => ({ q: String(q.q).slice(0, 280) }));
+  return parsed.questions.map((q) => {
+    if ((q as { kind?: string }).kind === "mc") {
+      const mc = q as { q: string; choices: string[]; answer_index: number };
+      const choices = (mc.choices ?? []).slice(0, 4).map((c) => String(c).slice(0, 200));
+      const ai = Math.max(0, Math.min(3, Number(mc.answer_index ?? 0)));
+      return {
+        q: String(mc.q).slice(0, 280),
+        kind: "mc" as const,
+        choices,
+        answer_index: ai,
+      };
+    }
+    return { q: String((q as { q: string }).q).slice(0, 280), kind: "open" as const };
+  });
 }
 
 export type ScoreResult = {
@@ -171,47 +209,81 @@ export async function scoreQuiz(
     throw new Error("questions / answers mismatch");
   }
 
-  const system = [
-    `You are scoring a child's answers to a 3-question quiz about ${cfg.label} — "${subject}".`,
-    ``,
-    `Be strict but fair. For each answer, decide if it shows real engagement with the specific material:`,
-    `  - PASS (1 point): on-topic, specific, demonstrates understanding or recall.`,
-    `  - FAIL (0 points): vague ("idk", "it was good"), off-topic, copy-paste of the question, gibberish.`,
-    `  - A short but correct answer counts as a pass — don't penalize brevity.`,
-    `  - A long answer that doesn't address the question is still a fail.`,
-    ``,
-    `After scoring all three, write ONE sentence of feedback the kid will see (kind but honest).`,
-    ``,
-    `Output JSON. No prose, no markdown. Schema:`,
-    `{"per_question":[0|1,0|1,0|1],"feedback":"..."}`,
-  ].join("\n");
+  // MC scoring is deterministic — exact-match against the stored
+  // answer_index. Open-ended scoring goes to Claude with a deliberately
+  // LENIENT rubric: the point of the reflection question is to make the
+  // kid think, not to test recall. Any thoughtful, on-topic response
+  // passes; only gibberish / blank / off-topic fails.
+  const perQ: number[] = new Array(questions.length).fill(0);
+  const openIndices: number[] = [];
 
-  const userBlock = questions
-    .map(
-      (q, i) =>
-        `Q${i + 1}: ${q.q}\nA${i + 1}: ${(answers[i] ?? "").slice(0, 1200)}`,
-    )
-    .join("\n\n");
+  for (let i = 0; i < questions.length; i++) {
+    const q = questions[i];
+    const a = String(answers[i] ?? "").trim();
+    if ((q as { kind?: string }).kind === "mc") {
+      const mc = q as { choices: string[]; answer_index: number };
+      // Frontend sends the chosen choice text (canonical) — match against
+      // both the text of the correct choice AND the index as a string
+      // so either contract works.
+      const correctText = (mc.choices?.[mc.answer_index] ?? "").trim();
+      if (a && (a === correctText || a === String(mc.answer_index))) {
+        perQ[i] = 1;
+      }
+    } else {
+      openIndices.push(i);
+    }
+  }
 
-  const resp = await client().messages.create({
-    model: MODEL,
-    max_tokens: 500,
-    system,
-    messages: [{ role: "user", content: userBlock }],
-  });
-  const text = resp.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
-  const json = stripCodeFence(text);
-  const parsed = JSON.parse(json) as {
-    per_question: number[];
-    feedback: string;
-  };
-  const perQ: number[] = (parsed.per_question ?? [])
-    .slice(0, 3)
-    .map((n) => (Number(n) === 1 ? 1 : 0));
+  let feedback = "";
+  if (openIndices.length > 0) {
+    const system = [
+      `You are scoring the OPEN-ENDED reflection answers from a kid who just watched a video and is claiming brain credits.`,
+      ``,
+      `Subject: ${cfg.label} — "${subject}".`,
+      ``,
+      `The reflection is meant to reward thinking, not test memorization. Be LENIENT:`,
+      `  - PASS (1 point): any thoughtful, on-topic response. Personal opinions, half-formed thoughts, "I noticed that..." — all PASS. Short answers PASS if they're on-topic.`,
+      `  - FAIL (0 points): only fail if the answer is BLANK, GIBBERISH, totally off-topic, or just copy-pastes the question.`,
+      `  - When in doubt, pass. The point is to encourage engagement.`,
+      ``,
+      `Also write ONE sentence of friendly feedback the kid will see (kind, never preachy).`,
+      ``,
+      `Output JSON only. Schema: {"per_question":[0|1, ...],"feedback":"..."}`,
+      `  - per_question MUST have exactly ${openIndices.length} entries, in the order the questions appear below.`,
+    ].join("\n");
+
+    const userBlock = openIndices
+      .map(
+        (i, idx) =>
+          `Q${idx + 1}: ${questions[i].q}\nA${idx + 1}: ${String(answers[i] ?? "").slice(0, 1200)}`,
+      )
+      .join("\n\n");
+
+    const resp = await client().messages.create({
+      model: MODEL,
+      max_tokens: 400,
+      system,
+      messages: [{ role: "user", content: userBlock }],
+    });
+    const text = resp.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+    const json = stripCodeFence(text);
+    const parsed = JSON.parse(json) as {
+      per_question: number[];
+      feedback: string;
+    };
+    const openScores: number[] = (parsed.per_question ?? [])
+      .slice(0, openIndices.length)
+      .map((n) => (Number(n) === 1 ? 1 : 0));
+    openIndices.forEach((qi, oi) => {
+      perQ[qi] = openScores[oi] ?? 0;
+    });
+    feedback = String(parsed.feedback ?? "").slice(0, 240);
+  }
+
   let score = 0;
   for (const v of perQ) score += v;
   return {
@@ -219,7 +291,7 @@ export async function scoreQuiz(
     max_score: 3,
     passed: score === 3,
     partial: score === 2,
-    feedback: String(parsed.feedback ?? "").slice(0, 240),
+    feedback,
   };
 }
 

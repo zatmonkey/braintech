@@ -87,24 +87,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let questions;
-  try {
-    questions = await generateQuiz(
-      activity,
-      subject,
-      video
-        ? { title: video.title, speaker: video.speaker, source: video.source }
-        : undefined,
-    );
-  } catch (e) {
-    return NextResponse.json(
-      { ok: false, reason: "generator failed", message: (e as Error).message },
-      { status: 502 },
-    );
-  }
-
-  const claimId = `claim_${randomBytes(6).toString("hex")}`;
-
   // Self-hosted videos play from our Blob bucket on the same origin as
   // the page — YouTube can stay blocked the whole time. No earn-session
   // punch-through, no 30-second policy-push wait. active_until stays NULL.
@@ -132,6 +114,25 @@ export async function POST(req: NextRequest) {
       );
     }
   }
+
+  let questions;
+  try {
+    questions = await generateQuiz(
+      activity,
+      subject,
+      video
+        ? { title: video.title, speaker: video.speaker, source: video.source }
+        : undefined,
+      person?.age ?? null,
+    );
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, reason: "generator failed", message: (e as Error).message },
+      { status: 502 },
+    );
+  }
+
+  const claimId = `claim_${randomBytes(6).toString("hex")}`;
 
   await sql`
     INSERT INTO earn_claims (

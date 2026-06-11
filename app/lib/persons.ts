@@ -22,6 +22,8 @@ export type Person = {
   group_id: string;
   name: string;
   kind: "kid" | "adult" | null;
+  // Optional age for the kid. Drives the earn-quiz difficulty tier.
+  age: number | null;
 };
 
 export async function resolveMacToPerson(
@@ -36,7 +38,7 @@ export async function resolveMacToPerson(
   //   4. the default group
   // CASE-based ORDER BY keeps it one query rather than four.
   const rows = (await sql`
-    SELECT g.group_id, g.name, g.person_name, g.kind, g.is_default
+    SELECT g.group_id, g.name, g.person_name, g.kind, g.age, g.is_default
     FROM account_groups g
     JOIN client_group_memberships m
       ON m.owner_email = g.owner_email AND m.group_id = g.group_id
@@ -51,6 +53,7 @@ export async function resolveMacToPerson(
     name: string;
     person_name: string | null;
     kind: string | null;
+    age: number | null;
     is_default: boolean;
   }[];
   if (rows.length === 0) return null;
@@ -59,6 +62,7 @@ export async function resolveMacToPerson(
     group_id: r.group_id,
     name: (r.person_name && r.person_name.trim()) || r.name,
     kind: r.kind === "kid" || r.kind === "adult" ? r.kind : null,
+    age: r.age == null ? null : Number(r.age),
   };
 }
 

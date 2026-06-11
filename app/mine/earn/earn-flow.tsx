@@ -1,9 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 type ActivityKey = "khan" | "reading" | "ted" | "coding" | "video";
+
+/**
+ * Quiz question shape. The video flow gets 2 MC + 1 open; non-video
+ * activities (all coming-soon today) still get 3 open. Server is the
+ * source of truth — UI never needs to know answer_index, just choices.
+ */
+type QuestionUI =
+  | { q: string; kind?: "open" }
+  | { q: string; kind: "mc"; choices: string[] };
 
 type CatalogVideoUI = {
   id: string;
@@ -84,7 +93,7 @@ type Step =
       kind: "video-watch";
       video: CatalogVideoUI;
       claim_id: string;
-      questions: { q: string }[];
+      questions: QuestionUI[];
       credit_pass: number;
       credit_partial: number;
     }
@@ -93,7 +102,7 @@ type Step =
       kind: "quiz";
       claim_id: string;
       activity: ActivityKey;
-      questions: { q: string }[];
+      questions: QuestionUI[];
       activity_label: string;
       credit_pass: number;
       credit_partial: number;
@@ -137,7 +146,7 @@ export function EarnFlow({ mac }: { mac: string }) {
       const data = (await res.json()) as {
         ok: boolean;
         claim_id?: string;
-        questions?: { q: string }[];
+        questions?: QuestionUI[];
         credit_pass?: number;
         credit_partial?: number;
         asset_url?: string;
@@ -176,7 +185,7 @@ export function EarnFlow({ mac }: { mac: string }) {
       const data = (await res.json()) as {
         ok: boolean;
         claim_id?: string;
-        questions?: { q: string }[];
+        questions?: QuestionUI[];
         activity_label?: string;
         credit_pass?: number;
         credit_partial?: number;
@@ -397,33 +406,77 @@ export function EarnFlow({ mac }: { mac: string }) {
           {step.credit_partial}; less than that earns 0.
         </p>
         <ol className="mt-6 space-y-5">
-          {step.questions.map((q, i) => (
-            <li key={i}>
-              <label className="block">
+          {step.questions.map((q, i) => {
+            const isMC = (q as { kind?: string }).kind === "mc";
+            return (
+              <li key={i}>
                 <div className="text-sm font-semibold text-[var(--color-ink)]">
                   {i + 1}. {q.q}
                 </div>
-                <textarea
-                  value={answers[i]}
-                  onChange={(e) =>
-                    setAnswers((a) => {
-                      const next = [...a];
-                      next[i] = e.target.value;
-                      return next;
-                    })
-                  }
-                  maxLength={1200}
-                  rows={3}
-                  placeholder="Your answer…"
-                  className="mt-2 w-full rounded-2xl border border-[var(--color-rule)] bg-white p-3 text-base outline-none focus:border-[var(--color-ink)]"
-                />
-              </label>
-            </li>
-          ))}
+                {isMC ? (
+                  <div className="mt-2 space-y-2">
+                    {(q as { choices: string[] }).choices.map((choice) => {
+                      const selected = answers[i] === choice;
+                      return (
+                        <label
+                          key={choice}
+                          className={
+                            "flex cursor-pointer items-start gap-3 rounded-2xl border p-3 transition " +
+                            (selected
+                              ? "border-[var(--color-accent)] bg-[var(--color-accent)]/5"
+                              : "border-[var(--color-rule)] bg-white hover:border-[var(--color-accent)]")
+                          }
+                        >
+                          <input
+                            type="radio"
+                            name={`q${i}`}
+                            value={choice}
+                            checked={selected}
+                            onChange={() =>
+                              setAnswers((a) => {
+                                const next = [...a];
+                                next[i] = choice;
+                                return next;
+                              })
+                            }
+                            className="mt-1 accent-[var(--color-accent)]"
+                          />
+                          <span className="text-sm leading-snug text-[var(--color-ink)]">
+                            {choice}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <label className="block">
+                    <textarea
+                      value={answers[i]}
+                      onChange={(e) =>
+                        setAnswers((a) => {
+                          const next = [...a];
+                          next[i] = e.target.value;
+                          return next;
+                        })
+                      }
+                      maxLength={1200}
+                      rows={3}
+                      placeholder="What's one thing you learned, noticed, or wondered?"
+                      className="mt-2 w-full rounded-2xl border border-[var(--color-rule)] bg-white p-3 text-base outline-none focus:border-[var(--color-ink)]"
+                    />
+                  </label>
+                )}
+              </li>
+            );
+          })}
         </ol>
         <button
           type="button"
-          disabled={answers.every((a) => a.trim().length < 2)}
+          disabled={step.questions.some((q, i) => {
+            const isMC = (q as { kind?: string }).kind === "mc";
+            if (isMC) return !answers[i];
+            return (answers[i] ?? "").trim().length < 2;
+          })}
           onClick={() => submitQuiz(step.claim_id)}
           className="mt-6 w-full rounded-full bg-[var(--color-ink)] py-3 font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)] disabled:opacity-40"
         >
@@ -655,6 +708,25 @@ function VideoWatch({
   onFinished: () => void;
 }) {
   const [ended, setEnded] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Highest time the kid has actually watched up to. Updated on
+  // timeupdate during real playback. Any seek beyond this gets snapped
+  // back — fast-forward is blocked; rewinding is fine.
+  const watchedToRef = useRef<number>(0);
+
+  function onTimeUpdate(e: React.SyntheticEvent<HTMLVideoElement>) {
+    const t = e.currentTarget.currentTime;
+    if (t > watchedToRef.current) watchedToRef.current = t;
+  }
+
+  function onSeeking(e: React.SyntheticEvent<HTMLVideoElement>) {
+    const v = e.currentTarget;
+    // Allow a 1s leeway so normal scrubbing micro-jumps aren't punished.
+    const max = watchedToRef.current + 1;
+    if (v.currentTime > max) {
+      v.currentTime = watchedToRef.current;
+    }
+  }
 
   return (
     <div className="mt-8">
@@ -672,16 +744,22 @@ function VideoWatch({
         {video.speaker} · {formatDuration(video.duration_seconds)} · up to +{video.credit_pass}m credit
       </p>
       <video
+        ref={videoRef}
         src={video.asset_url}
         controls
         playsInline
         preload="auto"
+        controlsList="nodownload noplaybackrate"
+        onContextMenu={(e) => e.preventDefault()}
         onEnded={() => setEnded(true)}
+        onTimeUpdate={onTimeUpdate}
+        onSeeking={onSeeking}
         className="mt-4 aspect-video w-full overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-black"
       />
       <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
-        Watch all the way to the end — the questions ask about specific
-        moments. Skipping ahead won&rsquo;t work.
+        Watch all the way to the end. You can rewind, but skipping ahead
+        snaps you back to where you were — the questions ask about
+        specific moments.
       </p>
       <button
         type="button"

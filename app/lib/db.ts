@@ -364,10 +364,13 @@ export async function ensureAccountSchema(
   // Group identity: which individual this group represents. `kind` is
   // 'kid' | 'adult' | NULL (NULL = generic, e.g. "iot" or "guests").
   // `person_name` is the name shown to Bri + on the dashboard ("alex_test",
-  // "Dad"). These together make a group function as a person record —
+  // "Dad"). `age` is used by the earn-quiz generator to pitch the
+  // difficulty level (and could feed the catalog age-gate later).
+  // These together make a group function as a person record —
   // earnings are individual, so they hang off the group.
   await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS kind TEXT;`;
   await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS person_name TEXT;`;
+  await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS age INTEGER;`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS client_group_memberships (
