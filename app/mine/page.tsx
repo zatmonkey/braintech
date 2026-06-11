@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getSql, ensureDeviceSchema, ensureAccountSchema } from "@/app/lib/db";
+import { resolveMacToPerson, type Person } from "@/app/lib/persons";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -21,6 +22,13 @@ type Rule = {
   group_name?: string;
 };
 
+type SiblingDevice = {
+  mac: string;
+  label: string | null;
+  is_me: boolean;
+  seen_recently: boolean;
+};
+
 type MineResponse =
   | {
       ok: true;
@@ -29,6 +37,16 @@ type MineResponse =
       groups: { group_id: string; name: string }[];
       rules: Rule[];
       seen_recently: boolean;
+      // Set when MAC belongs to a kid/adult group — flips the page to
+      // the warm portal layout. NULL → existing technical device view.
+      person: Person | null;
+      // For kid portal: every device in the kid's group with its label,
+      // so they can see what's tied to their profile.
+      siblings: SiblingDevice[];
+      // For kid portal: balance + lifetime earn stats.
+      credit_balance: number;
+      earn_passed_count: number;
+      earn_total_minutes: number;
     }
   | { ok: false; reason: string };
 
@@ -127,6 +145,55 @@ async function lookupMine(mac: string): Promise<MineResponse> {
     }
   }
 
+  // Person resolution — kid/adult group means render the warm portal.
+  const person = await resolveMacToPerson(sql, owner, mac);
+
+  let siblings: SiblingDevice[] = [];
+  let creditBalance = 0;
+  let earnPassed = 0;
+  let earnMinutes = 0;
+  if (person) {
+    // Every MAC in this person's group, with labels + recent-seen flag.
+    const sibRows = (await sql`
+      SELECT cgm.mac::text AS mac,
+             COALESCE(cl.name, cls.hostname) AS label,
+             cls.last_seen
+      FROM client_group_memberships cgm
+      LEFT JOIN client_labels cl
+        ON cl.owner_email = cgm.owner_email AND cl.mac = cgm.mac
+      LEFT JOIN client_last_seen cls
+        ON cls.owner_email = cgm.owner_email AND cls.mac = cgm.mac
+      WHERE cgm.owner_email = ${owner} AND cgm.group_id = ${person.group_id};
+    `) as { mac: string; label: string | null; last_seen: string | null }[];
+    siblings = sibRows.map((s) => ({
+      mac: s.mac,
+      label: s.label,
+      is_me: s.mac.toLowerCase() === mac,
+      seen_recently:
+        !!s.last_seen &&
+        Date.now() - new Date(s.last_seen).getTime() < 5 * 60 * 1000,
+    }));
+
+    // Balance for the person — stamped on brain_credits via group_id.
+    const bal = (await sql`
+      SELECT COALESCE(SUM(balance_minutes), 0)::int AS balance
+      FROM brain_credits
+      WHERE owner_email = ${owner} AND group_id = ${person.group_id};
+    `) as { balance: number }[];
+    creditBalance = Number(bal[0]?.balance ?? 0);
+
+    const earnRow = (await sql`
+      SELECT COUNT(*)::int AS passed,
+             COALESCE(SUM(credit_granted), 0)::int AS minutes
+      FROM earn_claims
+      WHERE owner_email = ${owner}
+        AND group_id = ${person.group_id}
+        AND passed = TRUE;
+    `) as { passed: number; minutes: number }[];
+    earnPassed = Number(earnRow[0]?.passed ?? 0);
+    earnMinutes = Number(earnRow[0]?.minutes ?? 0);
+  }
+
   return {
     ok: true,
     mac,
@@ -134,6 +201,11 @@ async function lookupMine(mac: string): Promise<MineResponse> {
     groups: groupRows,
     rules: visible,
     seen_recently: seenRecently,
+    person,
+    siblings,
+    credit_balance: creditBalance,
+    earn_passed_count: earnPassed,
+    earn_total_minutes: earnMinutes,
   };
 }
 
@@ -165,161 +237,67 @@ export default async function MinePage({
       </nav>
 
       <section className="mx-auto w-full max-w-3xl flex-1 px-6 py-10 sm:py-14">
-        <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
-          This device on the home Wi-Fi
-        </div>
-        <h1 className="serif mt-4 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
-          What&rsquo;s set up here.
-        </h1>
-
         {!macOk && (
-          <div className="mt-8 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
-            <p className="text-[var(--color-ink-soft)]">
-              We couldn&rsquo;t identify this device. Try typing{" "}
-              <code className="rounded bg-[var(--color-cream)] px-1.5 py-0.5 text-sm">
-                http://brain
-              </code>{" "}
-              from a device on your home Wi-Fi — the Braintech box will
-              redirect you back here with the right device.
-            </p>
-          </div>
-        )}
-
-        {data?.ok === false && (
-          <div className="mt-8 rounded-2xl border border-[var(--color-rule)] bg-white p-5 text-[var(--color-ink-soft)]">
-            We couldn&rsquo;t look up this device right now. Try refreshing,
-            or sign in at{" "}
-            <Link href="/app" className="text-[var(--color-accent)] underline">
-              /app
-            </Link>{" "}
-            to manage rules.
-          </div>
-        )}
-
-        {data?.ok === true && (
           <>
-            {/* Identity */}
+            <h1 className="serif text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
+              Who are you?
+            </h1>
             <div className="mt-8 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
-              <div className="flex items-baseline justify-between gap-3">
-                <div className="font-semibold text-[var(--color-ink)]">
-                  {data.label ?? "Unnamed device"}
-                </div>
-                <span
-                  className={`text-xs font-medium uppercase tracking-wider ${
-                    data.seen_recently
-                      ? "text-emerald-700"
-                      : "text-[var(--color-ink-soft)]"
-                  }`}
-                >
-                  {data.seen_recently ? "Connected now" : "Recently seen"}
-                </span>
-              </div>
-              <div className="mt-1 font-mono text-xs text-[var(--color-ink-soft)]">
-                {data.mac}
-              </div>
-              {data.groups.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  <span className="text-[var(--color-ink-soft)]">In group:</span>
-                  {data.groups.map((g) => (
-                    <span
-                      key={g.group_id}
-                      className="rounded-full bg-[var(--color-cream)] px-2 py-0.5 font-medium uppercase tracking-wider"
-                    >
-                      {g.name}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Earn-credits CTA — only visible to the kid, on the device
-                that just hit /mine. Tap to start the quiz flow. */}
-            <Link
-              href={`/mine/earn?mac=${data.mac}`}
-              className="mt-4 flex items-center justify-between gap-4 rounded-2xl border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/5 p-5 transition hover:border-[var(--color-accent)] hover:bg-[var(--color-accent)]/10"
-            >
-              <div className="min-w-0">
-                <div className="font-semibold text-[var(--color-ink)]">
-                  🧠 Earn brain credits
-                </div>
-                <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-                  Show what you learned — Khan, reading, TED, coding. Pass
-                  the quiz, credits get spent automatically when you hit
-                  your daily limit on YouTube / TikTok / Roblox.
-                </p>
-              </div>
-              <div
-                aria-hidden
-                className="grid size-10 shrink-0 place-items-center rounded-full bg-[var(--color-ink)] text-[var(--color-cream)]"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  className="size-5"
-                >
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </div>
-            </Link>
-
-            {/* Rules affecting this device */}
-            <div className="mt-6">
-              <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
-                What&rsquo;s active for this device
-              </div>
-              {data.rules.length === 0 ? (
-                <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5 text-[var(--color-ink-soft)]">
-                  Nothing is being filtered for this device right now.
-                  Normal internet, no rules in place. 👍
-                </div>
-              ) : (
-                <ul className="mt-3 space-y-3">
-                  {data.rules.map((r) => (
-                    <li
-                      key={r.rule_id}
-                      className="rounded-2xl border border-[var(--color-rule)] bg-white p-5"
-                    >
-                      <div className="flex items-baseline justify-between gap-3">
-                        <span className="font-semibold text-[var(--color-ink)]">
-                          {r.name}
-                        </span>
-                        <span className="text-xs uppercase tracking-wider text-[var(--color-ink-soft)]">
-                          {scopeLabel(r.scope, r.group_name)}
-                        </span>
-                      </div>
-                      {r.summary && (
-                        <p className="mt-1.5 text-sm text-[var(--color-ink-soft)]">
-                          {r.summary}
-                        </p>
-                      )}
-                      <div className="mt-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-accent)]">
-                        {r.rule_type.replace(/_/g, " ")}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <p className="text-[var(--color-ink-soft)]">
+                We couldn&rsquo;t identify this device. Try typing{" "}
+                <code className="rounded bg-[var(--color-cream)] px-1.5 py-0.5 text-sm">
+                  http://brain
+                </code>{" "}
+                from a device on your home Wi-Fi — the Braintech box will
+                redirect you back here with the right device.
+              </p>
             </div>
           </>
         )}
 
+        {data?.ok === false && (
+          <>
+            <h1 className="serif text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
+              Hmm.
+            </h1>
+            <div className="mt-8 rounded-2xl border border-[var(--color-rule)] bg-white p-5 text-[var(--color-ink-soft)]">
+              We couldn&rsquo;t look up this device right now. Try refreshing,
+              or sign in at{" "}
+              <Link href="/app" className="text-[var(--color-accent)] underline">
+                /app
+              </Link>{" "}
+              to manage rules.
+            </div>
+          </>
+        )}
+
+        {data?.ok === true && data.person ? (
+          <KidPortal data={data} />
+        ) : null}
+
+        {data?.ok === true && !data.person ? (
+          <DeviceView data={data} />
+        ) : null}
+
         {/* Bottom note */}
-        <div className="mt-12 rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]/40 p-5 text-sm leading-relaxed text-[var(--color-ink-soft)]">
-          <p>
-            Want to change something here? Sign in to your dashboard at{" "}
-            <Link
-              href="/app"
-              className="font-medium text-[var(--color-accent)] hover:underline"
-            >
-              getbraintech.com/app
-            </Link>{" "}
-            and adjust the rule — or text Bri (&ldquo;unlock YouTube for an
-            hour&rdquo; works).
-          </p>
-        </div>
+        {data?.ok === true ? (
+          <div className="mt-12 rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]/40 p-5 text-sm leading-relaxed text-[var(--color-ink-soft)]">
+            <p>
+              {data.person
+                ? "Want to change something here? Ask a parent — they can adjust the rules at "
+                : "Want to change something here? Sign in to your dashboard at "}
+              <Link
+                href="/app"
+                className="font-medium text-[var(--color-accent)] hover:underline"
+              >
+                getbraintech.com/app
+              </Link>
+              {data.person
+                ? " — or you can ask Bri."
+                : " and adjust the rule — or text Bri (“unlock YouTube for an hour” works)."}
+            </p>
+          </div>
+        ) : null}
       </section>
 
       <footer className="border-t border-[var(--color-rule)] bg-white">
@@ -350,4 +328,250 @@ function scopeLabel(scope: Rule["scope"], groupName?: string): string {
   if (scope === "group" && groupName) return `Via ${groupName} group`;
   if (scope === "group") return "Via group";
   return "Whole network";
+}
+
+/**
+ * KidPortal — warm header, balance hero, my devices, my rules in plain
+ * English. Rendered when the visiting MAC belongs to a kid/adult group.
+ */
+function KidPortal({
+  data,
+}: {
+  data: Extract<MineResponse, { ok: true }>;
+}) {
+  const person = data.person!;
+  const greet =
+    person.kind === "kid" ? "Hi" : person.kind === "adult" ? "Hello" : "Hey";
+
+  return (
+    <>
+      <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
+        Your Braintech
+      </div>
+      <h1 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
+        {greet}, {person.name}.
+      </h1>
+      <p className="mt-3 text-base text-[var(--color-ink-soft)]">
+        {data.seen_recently
+          ? "You're on the home Wi-Fi right now."
+          : "Last time you were on the home Wi-Fi, this is what was set up."}
+      </p>
+
+      {/* Brain credits hero — the kid's headline number. */}
+      <div className="mt-8 overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-white">
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-3 p-6 sm:p-7">
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
+              Brain credits
+            </div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="serif text-5xl tracking-[-0.02em] text-[var(--color-ink)] sm:text-6xl">
+                {data.credit_balance}
+              </span>
+              <span className="text-base text-[var(--color-ink-soft)]">
+                min
+              </span>
+            </div>
+            <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
+              {data.credit_balance > 0
+                ? "Spent automatically when you hit your daily limit."
+                : "Earn more by watching a video and passing the quiz."}
+            </p>
+          </div>
+          <Link
+            href={`/mine/earn?mac=${data.mac}`}
+            className="inline-flex items-center gap-2 rounded-full bg-[var(--color-ink)] px-4 py-2.5 text-sm font-medium text-[var(--color-cream)] transition hover:bg-[var(--color-accent)]"
+          >
+            🧠 Earn more
+            <span aria-hidden>→</span>
+          </Link>
+        </div>
+        {data.earn_passed_count > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-rule)] bg-[var(--color-cream)]/40 px-6 py-3 text-xs text-[var(--color-ink-soft)]">
+            <span>
+              You&rsquo;ve earned{" "}
+              <strong className="text-[var(--color-ink)]">
+                {data.earn_total_minutes} min
+              </strong>{" "}
+              from{" "}
+              <strong className="text-[var(--color-ink)]">
+                {data.earn_passed_count}{" "}
+                {data.earn_passed_count === 1 ? "video" : "videos"}
+              </strong>
+              .
+            </span>
+          </div>
+        ) : null}
+      </div>
+
+      {/* My devices */}
+      <div className="mt-8">
+        <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
+          Your devices
+        </div>
+        <ul className="mt-3 space-y-2">
+          {data.siblings.map((s) => (
+            <li
+              key={s.mac}
+              className="flex items-center justify-between gap-3 rounded-2xl border border-[var(--color-rule)] bg-white px-4 py-3"
+            >
+              <div className="min-w-0">
+                <div className="truncate font-medium text-[var(--color-ink)]">
+                  {s.label ?? s.mac}
+                  {s.is_me ? (
+                    <span className="ml-2 rounded-full bg-[var(--color-accent)]/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent)]">
+                      this one
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-0.5 font-mono text-xs text-[var(--color-ink-soft)]">
+                  {s.mac}
+                </div>
+              </div>
+              <span
+                className={
+                  "shrink-0 text-xs font-medium uppercase tracking-wider " +
+                  (s.seen_recently
+                    ? "text-emerald-700"
+                    : "text-[var(--color-ink-soft)]")
+                }
+              >
+                {s.seen_recently ? "Online" : "Offline"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* My rules — in plain English */}
+      <div className="mt-8">
+        <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
+          Your rules
+        </div>
+        {data.rules.length === 0 ? (
+          <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5 text-[var(--color-ink-soft)]">
+            No rules are limiting you right now. 👍
+          </div>
+        ) : (
+          <ul className="mt-3 space-y-3">
+            {data.rules.map((r) => (
+              <li
+                key={r.rule_id}
+                className="rounded-2xl border border-[var(--color-rule)] bg-white p-5"
+              >
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-semibold text-[var(--color-ink)]">
+                    {r.name}
+                  </span>
+                  <span className="text-xs uppercase tracking-wider text-[var(--color-ink-soft)]">
+                    {scopeLabel(r.scope, r.group_name)}
+                  </span>
+                </div>
+                {r.summary ? (
+                  <p className="mt-1.5 text-sm text-[var(--color-ink-soft)]">
+                    {r.summary}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * DeviceView — the original technical layout, used for MACs not tied to
+ * a kid/adult group (IoT, guest devices, family-shared things without
+ * person attribution).
+ */
+function DeviceView({
+  data,
+}: {
+  data: Extract<MineResponse, { ok: true }>;
+}) {
+  return (
+    <>
+      <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
+        This device on the home Wi-Fi
+      </div>
+      <h1 className="serif mt-4 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
+        What&rsquo;s set up here.
+      </h1>
+
+      {/* Identity */}
+      <div className="mt-8 rounded-2xl border border-[var(--color-rule)] bg-white p-5">
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="font-semibold text-[var(--color-ink)]">
+            {data.label ?? "Unnamed device"}
+          </div>
+          <span
+            className={`text-xs font-medium uppercase tracking-wider ${
+              data.seen_recently
+                ? "text-emerald-700"
+                : "text-[var(--color-ink-soft)]"
+            }`}
+          >
+            {data.seen_recently ? "Connected now" : "Recently seen"}
+          </span>
+        </div>
+        <div className="mt-1 font-mono text-xs text-[var(--color-ink-soft)]">
+          {data.mac}
+        </div>
+        {data.groups.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            <span className="text-[var(--color-ink-soft)]">In group:</span>
+            {data.groups.map((g) => (
+              <span
+                key={g.group_id}
+                className="rounded-full bg-[var(--color-cream)] px-2 py-0.5 font-medium uppercase tracking-wider"
+              >
+                {g.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Rules affecting this device */}
+      <div className="mt-6">
+        <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-ink-soft)]">
+          What&rsquo;s active for this device
+        </div>
+        {data.rules.length === 0 ? (
+          <div className="mt-3 rounded-2xl border border-[var(--color-rule)] bg-white p-5 text-[var(--color-ink-soft)]">
+            Nothing is being filtered for this device right now. Normal
+            internet, no rules in place. 👍
+          </div>
+        ) : (
+          <ul className="mt-3 space-y-3">
+            {data.rules.map((r) => (
+              <li
+                key={r.rule_id}
+                className="rounded-2xl border border-[var(--color-rule)] bg-white p-5"
+              >
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-semibold text-[var(--color-ink)]">
+                    {r.name}
+                  </span>
+                  <span className="text-xs uppercase tracking-wider text-[var(--color-ink-soft)]">
+                    {scopeLabel(r.scope, r.group_name)}
+                  </span>
+                </div>
+                {r.summary && (
+                  <p className="mt-1.5 text-sm text-[var(--color-ink-soft)]">
+                    {r.summary}
+                  </p>
+                )}
+                <div className="mt-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-accent)]">
+                  {r.rule_type.replace(/_/g, " ")}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
+  );
 }
