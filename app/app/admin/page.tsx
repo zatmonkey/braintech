@@ -95,13 +95,13 @@ export default async function AdminHub() {
           stat={contentStat}
         />
         <AdminCard
-          href="/admin/earn"
+          href="/app/admin/earn"
           title="Earn content"
           summary="TED / TED-Ed catalog kids can watch to earn brain credits."
           stat={earnStat}
         />
         <AdminCard
-          href="/admin/business"
+          href="/app/admin/business"
           title="Business"
           summary="Revenue, funnel, A/B, recent orders + signups."
           stat={businessStat}

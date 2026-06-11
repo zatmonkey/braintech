@@ -60,7 +60,7 @@ export default async function BusinessAdmin() {
     <main className="mx-auto w-full max-w-5xl px-6 py-10 sm:py-14">
       <header className="mb-8">
         <Link
-          href="/admin"
+          href="/app/admin"
           className="text-xs uppercase tracking-wider text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]"
         >
           ← Admin
