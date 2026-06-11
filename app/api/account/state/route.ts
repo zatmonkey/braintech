@@ -17,6 +17,7 @@ import {
   loadTopAppsByMac,
   sumAppMinutes,
 } from "@/app/lib/groups";
+import { loadPersonBalances } from "@/app/lib/persons";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -114,8 +115,8 @@ export async function GET() {
     };
     next_window_at?: string;
   };
-  // Brain-credit balances per device. Cheap query, joined into the
-  // device row payload so the dashboard can show "🧠 45 min" per MAC.
+  // Brain-credit balances per device. The engine still spends per-MAC,
+  // so this map stays for the policy decision panel.
   const credits = (await sql`
     SELECT mac::text AS mac, balance_minutes
     FROM brain_credits WHERE owner_email = ${email};
@@ -123,6 +124,10 @@ export async function GET() {
   const creditBalanceByMac = new Map(
     credits.map((c) => [c.mac.toLowerCase(), Number(c.balance_minutes)]),
   );
+  // Per-person balances — "earnings are for individuals". This is the
+  // shape the dashboard surfaces to the parent: one row per kid/adult
+  // with their name. Empty array when no groups have kind set yet.
+  const personBalances = await loadPersonBalances(sql, email);
   // Per-rule credits spent today (from spend_ack), so each schedule
   // rule card can say "+18 from credits today".
   const todaySpends = (await sql`
@@ -229,6 +234,7 @@ export async function GET() {
       per_mac_apps: appsByMacObj,
     },
     credit_balance_by_mac: Object.fromEntries(creditBalanceByMac),
+    credit_balance_by_person: personBalances,
     devices: devices.map((d) => ({
       device_id: d.device_id,
       label: d.label,

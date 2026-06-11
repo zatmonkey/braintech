@@ -39,6 +39,8 @@ import {
   type IpSetSource,
 } from "@/app/lib/rules";
 import { loadGroupMacs } from "@/app/lib/groups";
+import { grantCredit } from "@/app/lib/credit-grant";
+import { resolvePersonName } from "@/app/lib/persons";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -555,127 +557,54 @@ export async function POST(req: Request) {
         return "Pending proposal cancelled.";
       }
       if (name === "grant_credit") {
-        const mac = String(i.target_mac ?? "").toLowerCase().trim();
-        if (!/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(mac)) {
-          return "error: target_mac must be a valid MAC address";
-        }
         const minutes = Math.floor(Number(i.minutes ?? 0));
         if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 1440) {
           return "error: minutes must be between 1 and 1440";
         }
         const note = i.note ? String(i.note).slice(0, 200) : null;
-        // Verify the MAC belongs to this owner (refuse to grant credit to
-        // someone else's device from a hallucinated id).
-        const owns = (await sql`
-          SELECT 1 FROM client_last_seen
-          WHERE owner_email = ${email} AND mac = ${mac} LIMIT 1;
-        `) as { 1: number }[];
-        if (owns.length === 0) {
-          return `error: no device with mac ${mac} has been seen on this account`;
-        }
-        // Append ledger + bump denormalized balance atomically.
-        await sql`
-          INSERT INTO brain_credit_ledger (owner_email, mac, delta_minutes, source, rule_id, note)
-          VALUES (${email}, ${mac}, ${minutes}, 'manual', NULL, ${note});
-        `;
-        await sql`
-          INSERT INTO brain_credits (owner_email, mac, balance_minutes)
-          VALUES (${email}, ${mac}, ${minutes})
-          ON CONFLICT (owner_email, mac) DO UPDATE SET
-            balance_minutes = brain_credits.balance_minutes + EXCLUDED.balance_minutes,
-            updated_at = NOW();
-        `;
-        // Push the updated balance to the device by re-materializing
-        // active schedule rules. Their policy.json embeds the per-MAC
-        // balance so the on-device engine sees the new value within
-        // the next sync (~25s).
-        if (primary) {
-          const allRows = (await sql`
-            SELECT rule_id, rule_type, name, summary, params, ops, active
-            FROM account_rules WHERE owner_email = ${email} AND device_id = ${primary.device_id};
-          `) as RuleRow[];
-          const hasActiveSchedule = allRows.some(
-            (r) => r.active && r.rule_type === "block_schedule_group",
-          );
-          if (hasActiveSchedule) {
-            const groupMacs = await loadGroupMacs(sql, email);
-            const scheduleBaselines = new Map<string, Record<string, number>>();
-            for (const r of allRows) {
-              if (r.rule_type !== "block_schedule_group" || !r.active) continue;
-              const sp = r.params as BlockScheduleGroupParams;
-              const macsForRule = groupMacs.get(sp.group_id) ?? [];
-              if (macsForRule.length === 0) continue;
-              const usage = (await sql`
-                SELECT mac::text AS mac, COUNT(DISTINCT bucket_start)::int AS minutes
-                FROM client_usage_minute
-                WHERE owner_email = ${email}
-                  AND mac = ANY(${macsForRule}::text[])
-                  AND app = ${sp.app_label}
-                  AND bucket_start >= DATE_TRUNC('day', NOW())
-                GROUP BY mac;
-              `) as { mac: string; minutes: number }[];
-              const perMac: Record<string, number> = {};
-              for (const u of usage) perMac[u.mac.toLowerCase()] = Number(u.minutes);
-              scheduleBaselines.set(r.rule_id, perMac);
-            }
-            // Per-MAC credit balances for everyone the active schedule
-            // rules might apply to.
-            const allRuleMacs = new Set<string>();
-            for (const r of allRows) {
-              if (!r.active || r.rule_type !== "block_schedule_group") continue;
-              const sp = r.params as BlockScheduleGroupParams;
-              for (const m of groupMacs.get(sp.group_id) ?? []) {
-                allRuleMacs.add(m);
-              }
-            }
-            const creditBalances = new Map<string, number>();
-            if (allRuleMacs.size > 0) {
-              const balances = (await sql`
-                SELECT mac::text AS mac, balance_minutes
-                FROM brain_credits
-                WHERE owner_email = ${email}
-                  AND mac = ANY(${[...allRuleMacs]}::text[]);
-              `) as { mac: string; balance_minutes: number }[];
-              for (const b of balances) {
-                creditBalances.set(b.mac.toLowerCase(), Number(b.balance_minutes));
-              }
-            }
-            const allRules: AccountRule[] = await Promise.all(
-              allRows.map(async (r) => {
-                const base: AccountRule = {
-                  rule_id: r.rule_id,
-                  rule_type: r.rule_type,
-                  params: r.params,
-                  ops: r.ops,
-                  name: r.name,
-                  summary: r.summary ?? undefined,
-                  active: r.active,
-                };
-                if (r.active) {
-                  base.ops = await materializeOps(base, {
-                    groupMacs,
-                    scheduleBaselines,
-                    creditBalances,
-                  });
-                }
-                return base;
-              }),
-            );
-            const desired = assembleDesired(allRules);
-            const newVersion = primary.desired_version + 1;
-            await sql`
-              UPDATE devices SET desired = ${JSON.stringify(desired)}::jsonb, desired_version = ${newVersion}, updated_at = NOW()
-              WHERE device_id = ${primary.device_id};
-            `;
+        const personName = i.person_name ? String(i.person_name).trim() : "";
+        const macInput = String(i.target_mac ?? "").toLowerCase().trim();
+        const macValid = /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(macInput);
+
+        // Resolve the target. Prefer person_name (so credit follows the
+        // person across devices); fall back to target_mac.
+        let groupId: string | undefined;
+        let mac: string | undefined;
+        let who: string;
+        if (personName) {
+          const p = await resolvePersonName(sql, email, personName);
+          if (!p) {
+            return `error: no person matching "${personName}" — check CONTEXT > GROUPS for a kid/adult with that name, or set one up first.`;
           }
+          groupId = p.group_id;
+          who = p.person_name;
+        } else if (macValid) {
+          const owns = (await sql`
+            SELECT 1 FROM client_last_seen
+            WHERE owner_email = ${email} AND mac = ${macInput} LIMIT 1;
+          `) as { 1: number }[];
+          if (owns.length === 0) {
+            return `error: no device with mac ${macInput} has been seen on this account`;
+          }
+          mac = macInput;
+          who = labels.get(macInput) ?? `device ${macInput}`;
+        } else {
+          return "error: pass either person_name or a valid target_mac";
         }
-        // Fetch updated balance for the reply.
-        const after = (await sql`
-          SELECT balance_minutes FROM brain_credits WHERE owner_email = ${email} AND mac = ${mac};
-        `) as { balance_minutes: number }[];
-        const label = labels.get(mac);
-        const who = label ? `${label}` : `device ${mac}`;
-        return `Granted ${minutes} min to ${who}. New balance: ${after[0]?.balance_minutes ?? minutes} min.`;
+
+        try {
+          const grant = await grantCredit(
+            sql,
+            email,
+            { group_id: groupId, mac },
+            minutes,
+            "manual",
+            note,
+          );
+          return `Granted ${minutes} min to ${who}. New balance: ${grant.new_balance} min.`;
+        } catch (err) {
+          return `error: ${(err as Error).message}`;
+        }
       }
       if (name === "remove_rule") {
         if (!primary) return "error: no device linked";

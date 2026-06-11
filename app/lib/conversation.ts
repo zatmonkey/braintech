@@ -584,13 +584,17 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
   {
     name: "grant_credit",
     description:
-      "Award brain credits to a specific kid's device. Credits add to a per-MAC pool that's spent automatically when any schedule rule hits its daily quota — the kid gets a few more minutes of YouTube/TikTok/etc. instead of being blocked. Use this when the parent says 'Maya did her Khan lesson, give her 20 minutes' / 'reward Alex with 30 min for reading' / 'give Theo 15 more minutes today'. You decide the MAC by matching the kid's name against CONTEXT (device labels, group memberships, household memory). Source defaults to 'manual'; pass 'note' for a short audit-log entry the parent will see.",
+      "Award brain credits to a kid (or any household individual). Credits live on the person — when any of their devices hits a schedule rule's daily quota, the engine spends from this pool and they get a few more minutes of YouTube/TikTok/etc. instead of being blocked. Use this when the parent says 'Maya did her Khan lesson, give her 20 minutes' / 'reward Alex with 30 min for reading'. Prefer `person_name` (e.g. 'alex', 'Maya') — that's the kid's name from CONTEXT > GROUPS, and survives the kid switching devices. Only fall back to `target_mac` when you're grant-by-device for a reason (e.g. the parent specifically said 'on the iPad'). Pass `note` for a short audit-log line the parent will see.",
     input_schema: {
       type: "object",
       properties: {
+        person_name: {
+          type: "string",
+          description: "Kid's name (or adult's) — matched case-insensitively against CONTEXT > GROUPS (kind='kid' wins ties). Preferred over target_mac.",
+        },
         target_mac: {
           type: "string",
-          description: "MAC of the device receiving credits. Match the kid's name → device by checking CONTEXT (a labelled device, or a group with one member). If ambiguous, ask which device before granting.",
+          description: "Fallback: MAC of a specific device receiving credits. Use only when person_name doesn't fit (e.g. credit a specific device, or the kid has no kid-group set yet).",
         },
         minutes: {
           type: "number",
@@ -601,7 +605,7 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
           description: "Optional short audit note. e.g. 'Khan lesson on fractions', '20 min reading'.",
         },
       },
-      required: ["target_mac", "minutes"],
+      required: ["minutes"],
     },
   },
   {

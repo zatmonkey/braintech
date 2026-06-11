@@ -468,6 +468,50 @@ export async function ensureAccountSchema(
     );
   `;
 
+  // "Earnings are for individuals" — credits hang off the person, not
+  // the device. We add group_id (the person identifier — see persons.ts)
+  // to brain_credits and the ledger so the dashboard can show one balance
+  // per kid even when the kid eventually has multiple devices. The PK
+  // stays on (owner_email, mac) for now because the on-device engine
+  // still consumes credits keyed by MAC; the engine refactor is a
+  // separate change. New grants stamp group_id; older rows are
+  // back-filled from current group membership.
+  await sql`ALTER TABLE brain_credits ADD COLUMN IF NOT EXISTS group_id TEXT;`;
+  await sql`ALTER TABLE brain_credit_ledger ADD COLUMN IF NOT EXISTS group_id TEXT;`;
+  await sql`ALTER TABLE brain_credit_spend_ack ADD COLUMN IF NOT EXISTS group_id TEXT;`;
+  // Backfill from the current group membership. Single SQL statement
+  // per table — idempotent because of the `WHERE group_id IS NULL`
+  // guard; a row that's already been stamped never gets touched.
+  await sql`
+    UPDATE brain_credits bc
+    SET group_id = (
+      SELECT cgm.group_id FROM client_group_memberships cgm
+      WHERE cgm.owner_email = bc.owner_email AND cgm.mac = bc.mac
+      ORDER BY cgm.created_at ASC LIMIT 1
+    )
+    WHERE bc.group_id IS NULL;
+  `;
+  await sql`
+    UPDATE brain_credit_ledger bcl
+    SET group_id = (
+      SELECT cgm.group_id FROM client_group_memberships cgm
+      WHERE cgm.owner_email = bcl.owner_email AND cgm.mac = bcl.mac
+      ORDER BY cgm.created_at ASC LIMIT 1
+    )
+    WHERE bcl.group_id IS NULL;
+  `;
+  await sql`
+    UPDATE brain_credit_spend_ack ack
+    SET group_id = (
+      SELECT cgm.group_id FROM client_group_memberships cgm
+      WHERE cgm.owner_email = ack.owner_email AND cgm.mac = ack.mac
+      ORDER BY cgm.created_at ASC LIMIT 1
+    )
+    WHERE ack.group_id IS NULL;
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS brain_credits_owner_group_idx ON brain_credits (owner_email, group_id) WHERE group_id IS NOT NULL;`;
+  await sql`CREATE INDEX IF NOT EXISTS brain_credit_ledger_owner_group_idx ON brain_credit_ledger (owner_email, group_id, created_at DESC) WHERE group_id IS NOT NULL;`;
+
   // Earn claims — every kid-initiated request to convert a learning
   // activity into brain credits. One row per claim, regardless of pass/
   // fail; the scoring decision lives on the row. The quiz questions +

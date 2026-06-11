@@ -26,6 +26,7 @@ import {
   type Op,
 } from "@/app/lib/rules";
 import { loadGroupMacs } from "@/app/lib/groups";
+import { primaryMacForGroup } from "@/app/lib/persons";
 
 type DeviceRow = { device_id: string; desired_version: number };
 type RuleRow = {
@@ -171,10 +172,24 @@ export async function rematerializePolicies(
   `;
 }
 
+/**
+ * Grant credit to a person (identified by group_id) or directly to a
+ * device (identified by MAC). The storage row is still keyed by
+ * (owner_email, mac) — the on-device engine spends per-MAC — but every
+ * row gets stamped with a group_id so the dashboard, Bri's reply text,
+ * and a future per-group engine all read one balance per person.
+ *
+ * - If only group_id is supplied, we resolve to that group's primary
+ *   MAC (the device the credit will physically land on).
+ * - If only mac is supplied, we resolve the group from current
+ *   membership and stamp it on the row. Backwards-compatible path.
+ * - If both are supplied, we trust the caller (used when the caller has
+ *   already resolved both, e.g. /api/account/earn/submit).
+ */
 export async function grantCredit(
   sql: NeonQueryFunction<false, false>,
   email: string,
-  mac: string,
+  target: { group_id?: string; mac?: string },
   minutes: number,
   source:
     | "manual"
@@ -186,15 +201,42 @@ export async function grantCredit(
     | "learning_dns",
   note: string | null,
 ): Promise<GrantResult> {
+  let groupId = target.group_id ?? null;
+  let mac = target.mac ?? null;
+
+  if (!mac && groupId) {
+    mac = await primaryMacForGroup(sql, email, groupId);
+    if (!mac) {
+      throw new Error(
+        `cannot grant credit: group ${groupId} has no member devices yet`,
+      );
+    }
+  }
+  if (!mac) {
+    throw new Error("cannot grant credit: need group_id or mac");
+  }
+  if (!groupId) {
+    // Back-compat: caller passed a MAC only. Look up the group it
+    // belongs to so the ledger row carries person attribution.
+    const rows = (await sql`
+      SELECT cgm.group_id::text AS group_id
+      FROM client_group_memberships cgm
+      WHERE cgm.owner_email = ${email} AND cgm.mac = ${mac}
+      ORDER BY cgm.created_at ASC LIMIT 1;
+    `) as { group_id: string }[];
+    groupId = rows[0]?.group_id ?? null;
+  }
+
   await sql`
-    INSERT INTO brain_credit_ledger (owner_email, mac, delta_minutes, source, rule_id, note)
-    VALUES (${email}, ${mac}, ${minutes}, ${source}, NULL, ${note});
+    INSERT INTO brain_credit_ledger (owner_email, mac, group_id, delta_minutes, source, rule_id, note)
+    VALUES (${email}, ${mac}, ${groupId}, ${minutes}, ${source}, NULL, ${note});
   `;
   await sql`
-    INSERT INTO brain_credits (owner_email, mac, balance_minutes)
-    VALUES (${email}, ${mac}, ${minutes})
+    INSERT INTO brain_credits (owner_email, mac, group_id, balance_minutes)
+    VALUES (${email}, ${mac}, ${groupId}, ${minutes})
     ON CONFLICT (owner_email, mac) DO UPDATE SET
       balance_minutes = brain_credits.balance_minutes + EXCLUDED.balance_minutes,
+      group_id = COALESCE(brain_credits.group_id, EXCLUDED.group_id),
       updated_at = NOW();
   `;
   await rematerializePolicies(sql, email);

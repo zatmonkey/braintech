@@ -18,8 +18,11 @@ const instrumentSerif = Instrument_Serif({
   subsets: ["latin"],
 });
 
+// Falsy-coalesce so an env file with NEXT_PUBLIC_SITE_URL="" (which
+// vercel env pull writes when the prod value is blank) doesn't crash
+// metadataBase: new URL("") with ERR_INVALID_URL.
 const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ??
+  process.env.NEXT_PUBLIC_SITE_URL ||
   (process.env.VERCEL_PROJECT_PRODUCTION_URL
     ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
     : "https://getbraintech.com");

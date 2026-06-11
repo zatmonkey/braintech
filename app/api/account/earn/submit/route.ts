@@ -49,11 +49,12 @@ export async function POST(req: NextRequest) {
   await ensureAccountSchema(sql);
 
   const rows = (await sql`
-    SELECT owner_email, mac, activity_type, subject, questions, scored_at
+    SELECT owner_email, mac, group_id, activity_type, subject, questions, scored_at
     FROM earn_claims WHERE claim_id = ${claimId};
   `) as {
     owner_email: string;
     mac: string;
+    group_id: string | null;
     activity_type: string;
     subject: string;
     questions: { q: string }[];
@@ -117,7 +118,7 @@ export async function POST(req: NextRequest) {
     const grant = await grantCredit(
       sql,
       claim.owner_email,
-      claim.mac,
+      { mac: claim.mac, group_id: claim.group_id ?? undefined },
       granted,
       sourceTag,
       note,

@@ -80,3 +80,103 @@ export async function loadWatchedVideoIds(
   `) as { video_id: string }[];
   return new Set(rows.map((r) => r.video_id));
 }
+
+/**
+ * Find the primary MAC for a group — the device credits land on. We pick
+ * the FIRST MAC by membership.created_at so the choice is stable across
+ * grants (the kid doesn't lose a balance just because they switched
+ * devices). Returns null if the group has no member MACs.
+ *
+ * The "primary MAC" is an implementation detail: brain_credits is still
+ * keyed by (owner_email, mac), but we stamp group_id on the row so
+ * displays and the engine refactor (later) can treat balance as per-
+ * person.
+ */
+export async function primaryMacForGroup(
+  sql: NeonQueryFunction<false, false>,
+  email: string,
+  group_id: string,
+): Promise<string | null> {
+  const rows = (await sql`
+    SELECT mac::text AS mac
+    FROM client_group_memberships
+    WHERE owner_email = ${email} AND group_id = ${group_id}
+    ORDER BY created_at ASC LIMIT 1;
+  `) as { mac: string }[];
+  return rows[0]?.mac.toLowerCase() ?? null;
+}
+
+export type PersonBalance = {
+  group_id: string;
+  name: string;
+  kind: "kid" | "adult" | null;
+  balance_minutes: number;
+};
+
+/**
+ * Per-person credit balances for the household. Sums brain_credits rows
+ * by their stamped group_id (rows without a group_id are excluded —
+ * they belong to devices we couldn't attribute to a person). Joins
+ * account_groups to surface display info.
+ */
+export async function loadPersonBalances(
+  sql: NeonQueryFunction<false, false>,
+  email: string,
+): Promise<PersonBalance[]> {
+  const rows = (await sql`
+    SELECT
+      bc.group_id::text AS group_id,
+      COALESCE(NULLIF(g.person_name, ''), g.name) AS name,
+      g.kind,
+      SUM(bc.balance_minutes)::int AS balance_minutes
+    FROM brain_credits bc
+    JOIN account_groups g
+      ON g.owner_email = bc.owner_email AND g.group_id = bc.group_id
+    WHERE bc.owner_email = ${email} AND bc.group_id IS NOT NULL
+    GROUP BY bc.group_id, g.person_name, g.name, g.kind;
+  `) as {
+    group_id: string;
+    name: string;
+    kind: string | null;
+    balance_minutes: number;
+  }[];
+  return rows.map((r) => ({
+    group_id: r.group_id,
+    name: r.name,
+    kind: r.kind === "kid" || r.kind === "adult" ? r.kind : null,
+    balance_minutes: Number(r.balance_minutes),
+  }));
+}
+
+/**
+ * Resolve a human person name (or partial match) to a group_id. Used by
+ * Bri's grant_credit tool so a parent can say "grant 30 min to alex"
+ * instead of typing a MAC. Case-insensitive contains-match — picks the
+ * first one when ambiguous (the kid kind beats the adult kind in the
+ * order).
+ */
+export async function resolvePersonName(
+  sql: NeonQueryFunction<false, false>,
+  email: string,
+  name: string,
+): Promise<{ group_id: string; person_name: string } | null> {
+  const needle = name.trim();
+  if (!needle) return null;
+  const like = `%${needle.toLowerCase()}%`;
+  const rows = (await sql`
+    SELECT group_id, COALESCE(NULLIF(person_name, ''), name) AS person_name
+    FROM account_groups
+    WHERE owner_email = ${email}
+      AND (
+        LOWER(COALESCE(person_name, '')) LIKE ${like}
+        OR LOWER(name) LIKE ${like}
+      )
+    ORDER BY
+      CASE kind WHEN 'kid' THEN 0 WHEN 'adult' THEN 1 ELSE 2 END,
+      is_default ASC,
+      created_at ASC
+    LIMIT 1;
+  `) as { group_id: string; person_name: string }[];
+  if (rows.length === 0) return null;
+  return rows[0];
+}
