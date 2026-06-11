@@ -3,10 +3,13 @@ import { getSql, ensureSmsSchema } from "@/app/lib/db";
 import { twilioConfigured, sendSms } from "@/app/lib/twilio";
 import { generateOpener } from "@/app/lib/conversation";
 import { sendCapiLead, readMetaCookies } from "@/app/lib/meta-capi";
+import { sendDiscountEmail } from "@/app/lib/email";
 import {
   DISCOUNT_COOKIE,
   DISCOUNT_COUPON_ID,
 } from "@/app/lib/stripe";
+
+const DISCOUNT_PERCENT_OFF = 10;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -247,6 +250,17 @@ export async function POST(req: Request) {
   // Only text people who explicitly opted in (consent is optional, never required).
   if (smsConsent) {
     await startSmsConversation(phone, email);
+  }
+
+  // Discount confirmation email. Best-effort: if Resend fails we still
+  // return ok=true so the cookie + landing-page success state still
+  // function. Privacy policy promises this email so a silent skip is a
+  // bug (the original landing-page copy "Check your inbox..." was
+  // already in market before this got wired up).
+  try {
+    await sendDiscountEmail(email, { percentOff: DISCOUNT_PERCENT_OFF });
+  } catch (err) {
+    console.error("[waitlist] discount email send threw", err);
   }
 
   // Set the discount cookie so /api/checkout applies the Stripe coupon on
