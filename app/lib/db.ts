@@ -361,6 +361,13 @@ export async function ensureAccountSchema(
   await sql`CREATE INDEX IF NOT EXISTS account_groups_owner_idx ON account_groups(owner_email);`;
   await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE;`;
   await sql`ALTER TABLE client_labels ADD COLUMN IF NOT EXISTS group_id TEXT;`;
+  // Group identity: which individual this group represents. `kind` is
+  // 'kid' | 'adult' | NULL (NULL = generic, e.g. "iot" or "guests").
+  // `person_name` is the name shown to Bri + on the dashboard ("alex_test",
+  // "Dad"). These together make a group function as a person record —
+  // earnings are individual, so they hang off the group.
+  await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS kind TEXT;`;
+  await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS person_name TEXT;`;
 
   await sql`
     CREATE TABLE IF NOT EXISTS client_group_memberships (
@@ -494,8 +501,23 @@ export async function ensureAccountSchema(
   `;
   // For DBs that pre-date the active_until column.
   await sql`ALTER TABLE earn_claims ADD COLUMN IF NOT EXISTS active_until TIMESTAMPTZ;`;
+  // Group-aware earn rows. `group_id` is the individual the claim was made
+  // for (the kid, not the device). `video_id` is the catalog video id for
+  // activity_type='video' — lets us answer "what has alex watched?" via a
+  // single index lookup instead of parsing the `subject` text.
+  await sql`ALTER TABLE earn_claims ADD COLUMN IF NOT EXISTS group_id TEXT;`;
+  await sql`ALTER TABLE earn_claims ADD COLUMN IF NOT EXISTS video_id TEXT;`;
   await sql`CREATE INDEX IF NOT EXISTS earn_claims_owner_mac_idx ON earn_claims (owner_email, mac, created_at DESC);`;
   await sql`CREATE INDEX IF NOT EXISTS earn_claims_active_idx ON earn_claims (owner_email, mac, active_until) WHERE active_until IS NOT NULL;`;
+  // Watch-history lookup for the catalog UI: "did this group already
+  // pass quiz X?". Partial-indexed on passed-or-null since unscored
+  // claims still hide the video from the picker (one attempt in flight
+  // shouldn't reappear).
+  await sql`
+    CREATE INDEX IF NOT EXISTS earn_claims_group_video_idx
+      ON earn_claims (owner_email, group_id, video_id)
+      WHERE group_id IS NOT NULL AND video_id IS NOT NULL;
+  `;
   accountSchemaReady = true;
 }
 

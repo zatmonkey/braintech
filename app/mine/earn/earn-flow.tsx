@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
 type ActivityKey = "khan" | "reading" | "ted" | "coding" | "video";
@@ -12,8 +12,10 @@ type CatalogVideoUI = {
   source: string;
   youtube_id: string;
   duration_seconds: number;
+  asset_url: string;
   blurb: string;
   credit_pass: number;
+  watched: boolean;
 };
 
 const ACTIVITIES: Array<{
@@ -70,19 +72,6 @@ type Step =
   | { kind: "pick" }
   | { kind: "describe"; activity: ActivityKey }
   | { kind: "video-catalog" }
-  // Punch-through window is being created server-side. While we wait,
-  // the server has also generated the quiz so it's ready the moment
-  // the kid finishes watching. Holds questions until we hand off to
-  // "video-watch".
-  | {
-      kind: "video-prepare";
-      video: CatalogVideoUI;
-      ready_at_ms: number;
-      claim_id: string;
-      questions: { q: string }[];
-      credit_pass: number;
-      credit_partial: number;
-    }
   | {
       kind: "video-watch";
       video: CatalogVideoUI;
@@ -125,13 +114,11 @@ export function EarnFlow({ mac }: { mac: string }) {
   const [subject, setSubject] = useState("");
   const [answers, setAnswers] = useState<string[]>(["", "", ""]);
 
-  // Kid picked a video → server creates an earn session (punch-through
-  // for the YouTube block) AND generates the quiz up-front. While the
-  // agent's next sync (~25s) installs the punch-through on the router,
-  // we show a 30s "Setting up..." countdown. By the time the countdown
-  // ends, YouTube is reachable on the kid's MAC even if their normal
-  // quota was exhausted.
-  async function prepareVideoSession(video: CatalogVideoUI) {
+  // Kid picked a video → server generates the quiz up-front and registers
+  // the claim. Videos are self-hosted from Vercel Blob, so YouTube can
+  // stay blocked the whole session — no policy push, no countdown. Goes
+  // straight to the watch step.
+  async function startVideoSession(video: CatalogVideoUI) {
     setStep({ kind: "generating", activity: "video", subject: video.title });
     try {
       const res = await fetch("/api/account/earn/start", {
@@ -145,7 +132,7 @@ export function EarnFlow({ mac }: { mac: string }) {
         questions?: { q: string }[];
         credit_pass?: number;
         credit_partial?: number;
-        ready_at?: number;
+        asset_url?: string;
         message?: string;
         reason?: string;
       };
@@ -158,9 +145,8 @@ export function EarnFlow({ mac }: { mac: string }) {
       }
       setAnswers(["", "", ""]);
       setStep({
-        kind: "video-prepare",
-        video,
-        ready_at_ms: data.ready_at ?? Date.now() + 30_000,
+        kind: "video-watch",
+        video: { ...video, asset_url: data.asset_url ?? video.asset_url },
         claim_id: data.claim_id,
         questions: data.questions,
         credit_pass: data.credit_pass ?? 0,
@@ -335,28 +321,9 @@ export function EarnFlow({ mac }: { mac: string }) {
   if (step.kind === "video-catalog") {
     return (
       <VideoCatalog
+        mac={mac}
         onBack={() => setStep({ kind: "pick" })}
-        onPick={(v) => prepareVideoSession(v)}
-      />
-    );
-  }
-
-  if (step.kind === "video-prepare") {
-    return (
-      <VideoPrepare
-        video={step.video}
-        readyAtMs={step.ready_at_ms}
-        onReady={() =>
-          setStep({
-            kind: "video-watch",
-            video: step.video,
-            claim_id: step.claim_id,
-            questions: step.questions,
-            credit_pass: step.credit_pass,
-            credit_partial: step.credit_partial,
-          })
-        }
-        onCancel={() => setStep({ kind: "video-catalog" })}
+        onPick={(v) => startVideoSession(v)}
       />
     );
   }
@@ -530,27 +497,49 @@ function Loading({ label, sub }: { label: string; sub?: string }) {
   );
 }
 
-/* Video catalog — fetches once, renders 6 hand-picked videos as Netflix-
- * style cards. Kid taps one to start watching. */
+/* Video catalog — fetches once with ?mac so the server can decorate each
+ * entry with `watched: bool`. Watched cards get a "✓ watched" badge and
+ * are non-tappable; the kid has to pick a new one to earn credit. */
 function VideoCatalog({
+  mac,
   onBack,
   onPick,
 }: {
+  mac: string;
   onBack: () => void;
   onPick: (v: CatalogVideoUI) => void;
 }) {
   const [videos, setVideos] = useState<CatalogVideoUI[] | null>(null);
+  const [personName, setPersonName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/account/earn/start", { method: "GET" })
+    fetch(`/api/account/earn/start?mac=${encodeURIComponent(mac)}`, {
+      method: "GET",
+    })
       .then((r) => r.json())
-      .then((data: { ok: boolean; videos?: CatalogVideoUI[] }) => {
-        if (data.ok && data.videos) setVideos(data.videos);
-        else setError("Couldn't load the video list — try again.");
+      .then((data: {
+        ok: boolean;
+        videos?: CatalogVideoUI[];
+        person?: { name: string } | null;
+      }) => {
+        if (data.ok && data.videos) {
+          setVideos(data.videos);
+          setPersonName(data.person?.name ?? null);
+        } else {
+          setError("Couldn't load the video list — try again.");
+        }
       })
       .catch(() => setError("Network hiccup — try again."));
-  }, []);
+  }, [mac]);
+
+  // Sort unwatched first, then watched. Inside each bucket keep server order.
+  const sortedVideos = videos
+    ? [...videos].sort((a, b) =>
+        a.watched === b.watched ? 0 : a.watched ? 1 : -1,
+      )
+    : null;
+  const watchedCount = videos?.filter((v) => v.watched).length ?? 0;
 
   return (
     <div className="mt-8">
@@ -567,20 +556,31 @@ function VideoCatalog({
       <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
         Watch it all the way through, then answer 3 short questions about it.
       </p>
+      {personName && watchedCount > 0 ? (
+        <p className="mt-2 text-xs font-medium text-[var(--color-accent)]">
+          {personName} · {watchedCount} watched so far
+        </p>
+      ) : null}
       {error && (
         <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
           {error}
         </div>
       )}
       {videos === null && !error && <Loading label="Loading videos…" />}
-      {videos && (
+      {videos && videos.length === 0 && !error && (
+        <div className="mt-6 rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)] p-4 text-sm text-[var(--color-ink-soft)]">
+          The video library is being prepared. Check back in a minute.
+        </div>
+      )}
+      {sortedVideos && sortedVideos.length > 0 && (
         <ul className="mt-6 space-y-3">
-          {videos.map((v) => (
+          {sortedVideos.map((v) => (
             <li key={v.id}>
               <button
                 type="button"
-                onClick={() => onPick(v)}
-                className="flex w-full items-center gap-4 rounded-2xl border border-[var(--color-rule)] bg-white p-3 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-accent)]/5 sm:p-4"
+                onClick={() => !v.watched && onPick(v)}
+                disabled={v.watched}
+                className="flex w-full items-center gap-4 rounded-2xl border border-[var(--color-rule)] bg-white p-3 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-accent)]/5 disabled:cursor-default disabled:bg-[var(--color-cream)]/50 disabled:opacity-60 disabled:hover:border-[var(--color-rule)] disabled:hover:bg-[var(--color-cream)]/50 sm:p-4"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -601,9 +601,15 @@ function VideoCatalog({
                     {v.blurb}
                   </p>
                 </div>
-                <span className="shrink-0 rounded-full bg-[var(--color-accent)]/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent)]">
-                  +{v.credit_pass}m
-                </span>
+                {v.watched ? (
+                  <span className="shrink-0 rounded-full bg-[var(--color-ink)]/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-ink-soft)]">
+                    ✓ watched
+                  </span>
+                ) : (
+                  <span className="shrink-0 rounded-full bg-[var(--color-accent)]/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-accent)]">
+                    +{v.credit_pass}m
+                  </span>
+                )}
               </button>
             </li>
           ))}
@@ -613,95 +619,11 @@ function VideoCatalog({
   );
 }
 
-/* Video prepare — the 30s "Setting up your earn session..." countdown
- * shown while the server's policy push propagates to the router. By the
- * time the timer hits zero, the on-device engine has the punch-through
- * for this kid's MAC and YouTube will load even if the quota was
- * exhausted. We could in theory poll the agent to confirm the apply
- * landed, but the agent's sync interval (~25s) is the only mechanism
- * that matters; 30s is a safe ceiling. */
-function VideoPrepare({
-  video,
-  readyAtMs,
-  onReady,
-  onCancel,
-}: {
-  video: CatalogVideoUI;
-  readyAtMs: number;
-  onReady: () => void;
-  onCancel: () => void;
-}) {
-  const totalMs = Math.max(0, readyAtMs - Date.now());
-  const [remaining, setRemaining] = useState(totalMs);
-  useEffect(() => {
-    if (remaining <= 0) {
-      onReady();
-      return;
-    }
-    const t = setInterval(() => {
-      const r = Math.max(0, readyAtMs - Date.now());
-      setRemaining(r);
-      if (r <= 0) {
-        clearInterval(t);
-        onReady();
-      }
-    }, 250);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readyAtMs]);
-
-  const total = Math.max(1, totalMs);
-  const pct = Math.round(100 - (remaining / total) * 100);
-  const seconds = Math.ceil(remaining / 1000);
-
-  return (
-    <div className="mt-8 rounded-2xl border border-[var(--color-rule)] bg-white p-6">
-      <div className="flex items-center gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={`https://i.ytimg.com/vi/${video.youtube_id}/mqdefault.jpg`}
-          alt=""
-          width={80}
-          height={45}
-          className="aspect-video w-20 shrink-0 rounded-lg bg-[var(--color-cream)] object-cover"
-        />
-        <div className="min-w-0">
-          <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-accent)]">
-            Setting up your earn session…
-          </div>
-          <div className="mt-0.5 truncate font-semibold text-[var(--color-ink)]">
-            {video.title}
-          </div>
-        </div>
-      </div>
-      <div className="mt-5 h-2 w-full overflow-hidden rounded-full bg-[var(--color-cream)]">
-        <div
-          className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-200"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <div className="mt-3 flex items-center justify-between text-xs text-[var(--color-ink-soft)]">
-        <span>
-          Telling the Braintech box to unlock YouTube for this video so it can load.
-        </span>
-        <span className="ml-3 shrink-0 font-mono">{seconds}s</span>
-      </div>
-      <button
-        type="button"
-        onClick={onCancel}
-        className="mt-5 text-xs text-[var(--color-ink-soft)] underline hover:text-[var(--color-ink)]"
-      >
-        Cancel and pick a different video
-      </button>
-    </div>
-  );
-}
-
-/* Video watch — embedded YouTube iframe. Uses the IFrame API to detect
- * when the kid finishes the video, at which point the quiz can start.
- * Skipping ahead doesn't fire the "ended" event, so the quiz won't
- * launch — and even if they could trigger it, the questions probe
- * specific moments so a skipped watch fails. */
+/* Video watch — self-hosted MP4 from Vercel Blob. The native <video>
+ * `ended` event tells us when the kid finishes; seeking the scrubber
+ * past the end won't fire it (browsers only emit `ended` when playback
+ * naturally reaches the end). Quiz questions also probe specific
+ * moments so a skipped watch fails the score. */
 function VideoWatch({
   video,
   onBack,
@@ -711,58 +633,7 @@ function VideoWatch({
   onBack: () => void;
   onFinished: () => void;
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const [ended, setEnded] = useState(false);
-
-  useEffect(() => {
-    // Lazy-load YouTube IFrame API once per page.
-    if (!document.getElementById("yt-iframe-api")) {
-      const tag = document.createElement("script");
-      tag.id = "yt-iframe-api";
-      tag.src = "https://www.youtube.com/iframe_api";
-      document.head.appendChild(tag);
-    }
-    let player: { destroy: () => void } | null = null;
-    function build() {
-      if (!containerRef.current) return;
-      // Clear any prior render so re-mounts don't stack iframes.
-      containerRef.current.innerHTML = "<div id='yt-player'></div>";
-      const w = window as unknown as {
-        YT?: {
-          Player: new (
-            id: string,
-            opts: Record<string, unknown>,
-          ) => { destroy: () => void };
-          PlayerState: { ENDED: number };
-        };
-      };
-      if (!w.YT?.Player) {
-        setTimeout(build, 250);
-        return;
-      }
-      player = new w.YT.Player("yt-player", {
-        videoId: video.youtube_id,
-        playerVars: {
-          rel: 0,
-          modestbranding: 1,
-          playsinline: 1,
-        },
-        events: {
-          onStateChange: (e: { data: number }) => {
-            if (e.data === w.YT!.PlayerState.ENDED) setEnded(true);
-          },
-        },
-      });
-    }
-    build();
-    return () => {
-      try {
-        player?.destroy();
-      } catch {
-        /* ignore */
-      }
-    };
-  }, [video.youtube_id]);
 
   return (
     <div className="mt-8">
@@ -779,8 +650,12 @@ function VideoWatch({
       <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
         {video.speaker} · {formatDuration(video.duration_seconds)} · up to +{video.credit_pass}m credit
       </p>
-      <div
-        ref={containerRef}
+      <video
+        src={video.asset_url}
+        controls
+        playsInline
+        preload="auto"
+        onEnded={() => setEnded(true)}
         className="mt-4 aspect-video w-full overflow-hidden rounded-2xl border border-[var(--color-rule)] bg-black"
       />
       <p className="mt-3 text-xs text-[var(--color-ink-soft)]">

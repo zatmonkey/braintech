@@ -18,7 +18,7 @@ import {
 } from "@/app/lib/db";
 import { generateQuiz, ACTIVITIES, type ActivityType } from "@/app/lib/earn";
 import { videoById, VIDEO_CATALOG } from "@/app/lib/video-catalog";
-import { rematerializePolicies } from "@/app/lib/credit-grant";
+import { resolveMacToPerson, loadWatchedVideoIds } from "@/app/lib/persons";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -105,34 +105,44 @@ export async function POST(req: NextRequest) {
 
   const claimId = `claim_${randomBytes(6).toString("hex")}`;
 
-  // Earn-session window for video activity: kid needs to watch the
-  // whole video + finish the 3 questions. Budget = video duration +
-  // 15 min quiz buffer. While active, the on-device engine punches
-  // through every schedule rule for this kid's MAC so the embed loads
-  // even when YouTube is otherwise blocked. Session minutes count
-  // toward the daily quota via the normal DNS path — abuse means the
-  // kid burns their own day's allowance for nothing.
-  let activeUntil: Date | null = null;
-  let readyAtMs = 0;
-  if (activity === "video" && video) {
-    activeUntil = new Date(Date.now() + (video.duration_seconds + 15 * 60) * 1000);
-    // 30s headroom for the agent's next sync to land + chain to settle.
-    readyAtMs = Date.now() + 30_000;
-  }
-  await sql`
-    INSERT INTO earn_claims (claim_id, owner_email, mac, activity_type, subject, questions, active_until)
-    VALUES (${claimId}, ${email}, ${mac}, ${activity}, ${subject}, ${JSON.stringify(questions)}::jsonb, ${activeUntil});
-  `;
+  // Self-hosted videos play from our Blob bucket on the same origin as
+  // the page — YouTube can stay blocked the whole time. No earn-session
+  // punch-through, no 30-second policy-push wait. active_until stays NULL.
+  const person = await resolveMacToPerson(sql, email, mac);
 
-  // Push the fresh policy (including the new earn-session entry for
-  // this MAC) so the agent picks it up on its next ~25s sync.
-  if (activeUntil) {
-    try {
-      await rematerializePolicies(sql, email);
-    } catch (err) {
-      console.error("[earn/start] rematerialize failed", err);
+  // Server-side duplicate guard: each video earns credit once per person.
+  // The catalog UI hides watched videos already; this stops a kid who
+  // edits the request from re-earning by faking the body.
+  if (video && person) {
+    const dup = (await sql`
+      SELECT 1 FROM earn_claims
+      WHERE owner_email = ${email} AND group_id = ${person.group_id}
+        AND video_id = ${video.id}
+      LIMIT 1;
+    `) as { "?column?": number }[];
+    if (dup.length > 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          reason: "already watched",
+          message: "You already watched this one — pick a different video to earn more.",
+        },
+        { status: 409 },
+      );
     }
   }
+
+  await sql`
+    INSERT INTO earn_claims (
+      claim_id, owner_email, mac, activity_type, subject, questions,
+      group_id, video_id
+    )
+    VALUES (
+      ${claimId}, ${email}, ${mac}, ${activity}, ${subject},
+      ${JSON.stringify(questions)}::jsonb,
+      ${person?.group_id ?? null}, ${video?.id ?? null}
+    );
+  `;
 
   return NextResponse.json({
     ok: true,
@@ -143,20 +153,52 @@ export async function POST(req: NextRequest) {
     // For video activity: use the per-video values (longer talks earn more).
     credit_pass: video?.credit_pass ?? ACTIVITIES[activity].credit_pass,
     credit_partial: video?.credit_partial ?? ACTIVITIES[activity].credit_partial,
-    // For video activity: when the punch-through will land. The kid's UI
-    // shows a "Setting up your earn session…" screen until this time so
-    // the YouTube iframe doesn't try to load while still blocked.
-    ready_at: readyAtMs || undefined,
-    active_until: activeUntil?.toISOString(),
+    // For the video player: serve straight from our Blob bucket.
+    asset_url: video?.asset_url,
+    duration_seconds: video?.duration_seconds,
+    person: person ? { name: person.name, kind: person.kind } : null,
   });
 }
 
 // GET: kid hits this on /mine/earn → returns the curated catalog so the
 // picker can render thumbnails + durations + credit amounts. Public; no
 // auth required (the catalog isn't sensitive).
-export async function GET() {
+//
+// Optional ?mac=<mac> decorates each entry with `watched: bool` based on
+// the group the MAC belongs to — gives the picker the "✓ watched" badge.
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const mac = (url.searchParams.get("mac") ?? "").toLowerCase().trim();
+
+  let watched = new Set<string>();
+  let person: { name: string; kind: "kid" | "adult" | null } | null = null;
+  if (/^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(mac)) {
+    const sql = getSql();
+    if (sql) {
+      try {
+        await ensureDeviceSchema(sql);
+        await ensureAccountSchema(sql);
+        const owners = (await sql`
+          SELECT owner_email FROM client_last_seen WHERE mac = ${mac}
+          ORDER BY last_seen DESC LIMIT 1;
+        `) as { owner_email: string }[];
+        if (owners.length > 0) {
+          const email = owners[0].owner_email;
+          const p = await resolveMacToPerson(sql, email, mac);
+          if (p) {
+            person = { name: p.name, kind: p.kind };
+            watched = await loadWatchedVideoIds(sql, email, p.group_id);
+          }
+        }
+      } catch (err) {
+        console.error("[earn/start GET] decorate failed", err);
+      }
+    }
+  }
+
   return NextResponse.json({
     ok: true,
+    person,
     videos: VIDEO_CATALOG.map((v) => ({
       id: v.id,
       title: v.title,
@@ -164,11 +206,13 @@ export async function GET() {
       source: v.source,
       youtube_id: v.youtube_id,
       duration_seconds: v.duration_seconds,
+      asset_url: v.asset_url,
       blurb: v.blurb,
       topics: v.topics,
       age_min: v.age_min,
       credit_pass: v.credit_pass,
       credit_partial: v.credit_partial,
+      watched: watched.has(v.id),
     })),
   });
 }
