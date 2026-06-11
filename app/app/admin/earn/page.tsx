@@ -23,7 +23,7 @@ function fmtDuration(seconds: number): string {
 export default async function EarnAdmin() {
   const store = await cookies();
   const email = verifySession(store.get(sessionCookie.name)?.value);
-  if (!email) redirect("/login?from=/admin/earn");
+  if (!email) redirect("/login?from=/app/admin/earn");
   if (!isAdmin(email)) redirect("/app");
 
   const sql = getSql();

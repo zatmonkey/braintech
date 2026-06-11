@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import type { Metadata } from "next";
-import { verifySession, sessionCookie } from "@/app/lib/auth";
+import { verifySession, sessionCookie, isAdmin } from "@/app/lib/auth";
 import {
   getSql,
   ensureDeviceSchema,
@@ -227,6 +228,14 @@ export default async function Dashboard() {
         </div>
         <div className="flex items-center gap-3 text-sm text-[var(--color-ink-soft)]">
           <span className="hidden sm:inline">{email}</span>
+          {isAdmin(email) ? (
+            <Link
+              href="/app/admin"
+              className="rounded-md border border-[var(--color-rule)] bg-white px-2 py-1 text-xs font-medium text-[var(--color-ink)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+            >
+              Admin
+            </Link>
+          ) : null}
           <LogoutButton />
         </div>
       </header>

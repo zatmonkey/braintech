@@ -34,7 +34,7 @@ export const metadata: Metadata = {
 export default async function BusinessAdmin() {
   const store = await cookies();
   const email = verifySession(store.get(sessionCookie.name)?.value);
-  if (!email) redirect("/login?from=/admin/business");
+  if (!email) redirect("/login?from=/app/admin/business");
   if (!isAdmin(email)) redirect("/app");
 
   const sql = getSql();

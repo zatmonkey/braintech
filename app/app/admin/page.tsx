@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 export default async function AdminHub() {
   const store = await cookies();
   const email = verifySession(store.get(sessionCookie.name)?.value);
-  if (!email) redirect("/login?from=/admin");
+  if (!email) redirect("/login?from=/app/admin");
   if (!isAdmin(email)) redirect("/app");
 
   const sql = getSql();
