@@ -883,6 +883,14 @@ export function policyBlockUnlessJson(
    * fresh server pushes (or telemetry round-trips) update it.
    */
   creditByMac: Record<string, number> = {},
+  /**
+   * Per-MAC active earn-session expiry (RFC3339). While now < value the
+   * engine punches through every quota / window for that MAC — used so
+   * a kid can load the YouTube earn-video iframe when YouTube would
+   * otherwise be blocked by this rule. Cleared by a fresh push when
+   * the quiz is scored.
+   */
+  earnSessionsByMac: Record<string, string> = {},
 ): string {
   const today = new Date().toISOString().slice(0, 10);
   const baselineByDay: Record<string, Record<string, number>> = {};
@@ -892,6 +900,7 @@ export function policyBlockUnlessJson(
   const doc: BlockUnlessPolicy & {
     baseline_by_day?: Record<string, Record<string, number>>;
     credit_balance_by_mac?: Record<string, number>;
+    earn_session_until_by_mac?: Record<string, string>;
   } = {
     kind: "block_unless",
     rule_id: ruleId,
@@ -904,6 +913,9 @@ export function policyBlockUnlessJson(
     updated_at: new Date().toISOString(),
     ...(Object.keys(baselineByDay).length > 0 ? { baseline_by_day: baselineByDay } : {}),
     ...(Object.keys(creditByMac).length > 0 ? { credit_balance_by_mac: creditByMac } : {}),
+    ...(Object.keys(earnSessionsByMac).length > 0
+      ? { earn_session_until_by_mac: earnSessionsByMac }
+      : {}),
   };
   return JSON.stringify(doc, null, 2) + "\n";
 }
@@ -977,6 +989,16 @@ export type MaterializeContext = {
    * minutes to extend the kid's quota by when they hit it.
    */
   creditBalances?: Map<string, number>;
+  /**
+   * Active earn-session expiries per MAC (lowercase keys, RFC3339
+   * timestamps). While the current time is below the value, the
+   * on-device engine punches through every quota/window for that MAC
+   * — used to let kids watch the embedded earn-video when their
+   * normal YouTube quota is exhausted. Cleared on quiz submit or
+   * expiry; sessions consume minutes against the day's usage so abuse
+   * self-throttles.
+   */
+  earnSessions?: Map<string, string>;
 };
 
 /**
@@ -1059,6 +1081,16 @@ export async function materializeOps(
         if (v !== undefined) creditByMac[m.toLowerCase()] = v;
       }
     }
+    // Active earn sessions for this rule's MACs (RFC3339 expiry). While
+    // the session is live the on-device engine punches through every
+    // quota/window for that MAC so the embedded earn-video can load.
+    const earnByMac: Record<string, string> = {};
+    if (ctx.earnSessions) {
+      for (const m of macs) {
+        const v = ctx.earnSessions.get(m.toLowerCase());
+        if (v) earnByMac[m.toLowerCase()] = v;
+      }
+    }
     const policyContent = policyBlockUnlessJson(
       rule.rule_id,
       p.app_label,
@@ -1068,6 +1100,7 @@ export async function materializeOps(
       p.allow_quotas ?? [],
       baseline,
       creditByMac,
+      earnByMac,
     );
     const nftPath = brainrotNftPath(rule.rule_id);
     const brainrotPath = brainrotJsonPath(rule.rule_id);

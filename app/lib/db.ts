@@ -482,10 +482,20 @@ export async function ensureAccountSchema(
       passed          BOOLEAN,
       credit_granted  INTEGER NOT NULL DEFAULT 0,
       created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      scored_at       TIMESTAMPTZ
+      scored_at       TIMESTAMPTZ,
+      -- For activity_type="video": while NOW() < active_until, the kid's
+      -- MAC gets a punch-through from the on-device policy engine — allow
+      -- regardless of quota or window — so the YouTube embed can actually
+      -- load when YouTube is otherwise blocked. Set on insert to
+      -- NOW() + video_duration + 15min; cleared early when the quiz lands.
+      -- Session minutes still count toward usage so abuse self-throttles.
+      active_until    TIMESTAMPTZ
     );
   `;
+  // For DBs that pre-date the active_until column.
+  await sql`ALTER TABLE earn_claims ADD COLUMN IF NOT EXISTS active_until TIMESTAMPTZ;`;
   await sql`CREATE INDEX IF NOT EXISTS earn_claims_owner_mac_idx ON earn_claims (owner_email, mac, created_at DESC);`;
+  await sql`CREATE INDEX IF NOT EXISTS earn_claims_active_idx ON earn_claims (owner_email, mac, active_until) WHERE active_until IS NOT NULL;`;
   accountSchemaReady = true;
 }
 

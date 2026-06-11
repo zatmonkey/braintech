@@ -21,7 +21,7 @@ import {
   ensureAccountSchema,
 } from "@/app/lib/db";
 import { scoreQuiz, ACTIVITIES, type ActivityType } from "@/app/lib/earn";
-import { grantCredit } from "@/app/lib/credit-grant";
+import { grantCredit, rematerializePolicies } from "@/app/lib/credit-grant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -89,6 +89,9 @@ export async function POST(req: NextRequest) {
   if (result.passed) granted = cfg.credit_pass;
   else if (result.partial) granted = cfg.credit_partial;
 
+  // Mark scored + close the earn session (if any). For video claims
+  // this revokes the punch-through early — the kid is done watching,
+  // they shouldn't keep unrestricted access while answering.
   await sql`
     UPDATE earn_claims SET
       answers        = ${JSON.stringify(answers)}::jsonb,
@@ -96,7 +99,8 @@ export async function POST(req: NextRequest) {
       max_score      = ${result.max_score},
       passed         = ${result.passed},
       credit_granted = ${granted},
-      scored_at      = NOW()
+      scored_at      = NOW(),
+      active_until   = NULL
     WHERE claim_id = ${claimId};
   `;
 
@@ -107,7 +111,8 @@ export async function POST(req: NextRequest) {
         | "earn_khan"
         | "earn_reading"
         | "earn_ted"
-        | "earn_coding";
+        | "earn_coding"
+        | "earn_video";
     const note = `${cfg.label}: ${claim.subject.slice(0, 80)} (${result.score}/${result.max_score})`;
     const grant = await grantCredit(
       sql,
@@ -119,6 +124,14 @@ export async function POST(req: NextRequest) {
     );
     newBalance = grant.new_balance;
   } else {
+    // No grant means grantCredit's rematerialize didn't run, but we still
+    // need to push fresh policy so the agent picks up the cleared
+    // active_until and resumes enforcement.
+    try {
+      await rematerializePolicies(sql, claim.owner_email);
+    } catch (err) {
+      console.error("[earn/submit] rematerialize failed", err);
+    }
     const bal = (await sql`
       SELECT balance_minutes FROM brain_credits WHERE owner_email = ${claim.owner_email} AND mac = ${claim.mac};
     `) as { balance_minutes: number }[];

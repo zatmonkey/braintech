@@ -18,6 +18,7 @@ import {
 } from "@/app/lib/db";
 import { generateQuiz, ACTIVITIES, type ActivityType } from "@/app/lib/earn";
 import { videoById, VIDEO_CATALOG } from "@/app/lib/video-catalog";
+import { rematerializePolicies } from "@/app/lib/credit-grant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -103,10 +104,35 @@ export async function POST(req: NextRequest) {
   }
 
   const claimId = `claim_${randomBytes(6).toString("hex")}`;
+
+  // Earn-session window for video activity: kid needs to watch the
+  // whole video + finish the 3 questions. Budget = video duration +
+  // 15 min quiz buffer. While active, the on-device engine punches
+  // through every schedule rule for this kid's MAC so the embed loads
+  // even when YouTube is otherwise blocked. Session minutes count
+  // toward the daily quota via the normal DNS path — abuse means the
+  // kid burns their own day's allowance for nothing.
+  let activeUntil: Date | null = null;
+  let readyAtMs = 0;
+  if (activity === "video" && video) {
+    activeUntil = new Date(Date.now() + (video.duration_seconds + 15 * 60) * 1000);
+    // 30s headroom for the agent's next sync to land + chain to settle.
+    readyAtMs = Date.now() + 30_000;
+  }
   await sql`
-    INSERT INTO earn_claims (claim_id, owner_email, mac, activity_type, subject, questions)
-    VALUES (${claimId}, ${email}, ${mac}, ${activity}, ${subject}, ${JSON.stringify(questions)}::jsonb);
+    INSERT INTO earn_claims (claim_id, owner_email, mac, activity_type, subject, questions, active_until)
+    VALUES (${claimId}, ${email}, ${mac}, ${activity}, ${subject}, ${JSON.stringify(questions)}::jsonb, ${activeUntil});
   `;
+
+  // Push the fresh policy (including the new earn-session entry for
+  // this MAC) so the agent picks it up on its next ~25s sync.
+  if (activeUntil) {
+    try {
+      await rematerializePolicies(sql, email);
+    } catch (err) {
+      console.error("[earn/start] rematerialize failed", err);
+    }
+  }
 
   return NextResponse.json({
     ok: true,
@@ -117,6 +143,11 @@ export async function POST(req: NextRequest) {
     // For video activity: use the per-video values (longer talks earn more).
     credit_pass: video?.credit_pass ?? ACTIVITIES[activity].credit_pass,
     credit_partial: video?.credit_partial ?? ACTIVITIES[activity].credit_partial,
+    // For video activity: when the punch-through will land. The kid's UI
+    // shows a "Setting up your earn session…" screen until this time so
+    // the YouTube iframe doesn't try to load while still blocked.
+    ready_at: readyAtMs || undefined,
+    active_until: activeUntil?.toISOString(),
   });
 }
 

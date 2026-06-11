@@ -267,6 +267,10 @@ type PolicyDecision struct {
 	// Credits already spent for this rule today across all member MACs.
 	// 0 when no quota has been exhausted yet today.
 	CreditsSpentToday int `json:"credits_spent_today,omitempty"`
+	// True when an earn-session punch-through is keeping this rule in
+	// allow state. Surfaced so the dashboard can say "Allowing — earn
+	// session active" instead of the misleading "under quota".
+	EarnSessionActive bool `json:"earn_session_active,omitempty"`
 }
 
 type DecisionWindow struct {
@@ -363,6 +367,13 @@ type policyDoc struct {
 	// reports the spend via telemetry so the server's ledger catches up.
 	// Refreshed on every server push (any grant via Bri triggers one).
 	CreditBalanceByMac map[string]int `json:"credit_balance_by_mac,omitempty"`
+	// EarnSessionUntilByMac is the punch-through for the embedded
+	// earn-video flow. While now < value, the engine allows the MAC
+	// regardless of quota/window — needed so the kid can actually load
+	// the YouTube iframe in /mine/earn/video when YouTube is otherwise
+	// blocked by this rule. Cleared by a fresh server push when the
+	// quiz lands, or expires naturally on its own.
+	EarnSessionUntilByMac map[string]string `json:"earn_session_until_by_mac,omitempty"`
 }
 
 type timeWindow struct {
@@ -481,6 +492,26 @@ func evaluate(doc *policyDoc, now time.Time) (decision, PolicyDecision) {
 	if doc.Kind != "block_unless" {
 		report.Decision = string(decisionEnforce)
 		return decisionEnforce, report
+	}
+	// Earn-session punch-through — if ANY of the rule's MACs is in an
+	// active earn session (i.e. the kid just clicked Watch on a video in
+	// /mine/earn), the engine allows the whole rule for this tick. The
+	// session minutes still tick into the daily quota counter via the
+	// usual DNS path, so this is a trade not a free pass.
+	for _, mac := range doc.MACs {
+		expiry, ok := doc.EarnSessionUntilByMac[strings.ToLower(mac)]
+		if !ok || expiry == "" {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339, expiry)
+		if err != nil {
+			continue
+		}
+		if now.Before(t) {
+			report.Decision = string(decisionAllow)
+			report.EarnSessionActive = true
+			return decisionAllow, report
+		}
 	}
 	if len(doc.AllowWindows) == 0 && len(doc.AllowQuotas) == 0 {
 		report.Decision = string(decisionEnforce)

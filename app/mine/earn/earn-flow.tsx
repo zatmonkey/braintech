@@ -70,7 +70,27 @@ type Step =
   | { kind: "pick" }
   | { kind: "describe"; activity: ActivityKey }
   | { kind: "video-catalog" }
-  | { kind: "video-watch"; video: CatalogVideoUI }
+  // Punch-through window is being created server-side. While we wait,
+  // the server has also generated the quiz so it's ready the moment
+  // the kid finishes watching. Holds questions until we hand off to
+  // "video-watch".
+  | {
+      kind: "video-prepare";
+      video: CatalogVideoUI;
+      ready_at_ms: number;
+      claim_id: string;
+      questions: { q: string }[];
+      credit_pass: number;
+      credit_partial: number;
+    }
+  | {
+      kind: "video-watch";
+      video: CatalogVideoUI;
+      claim_id: string;
+      questions: { q: string }[];
+      credit_pass: number;
+      credit_partial: number;
+    }
   | { kind: "generating"; activity: ActivityKey; subject: string }
   | {
       kind: "quiz";
@@ -105,7 +125,13 @@ export function EarnFlow({ mac }: { mac: string }) {
   const [subject, setSubject] = useState("");
   const [answers, setAnswers] = useState<string[]>(["", "", ""]);
 
-  async function startVideoQuiz(video: CatalogVideoUI) {
+  // Kid picked a video → server creates an earn session (punch-through
+  // for the YouTube block) AND generates the quiz up-front. While the
+  // agent's next sync (~25s) installs the punch-through on the router,
+  // we show a 30s "Setting up..." countdown. By the time the countdown
+  // ends, YouTube is reachable on the kid's MAC even if their normal
+  // quota was exhausted.
+  async function prepareVideoSession(video: CatalogVideoUI) {
     setStep({ kind: "generating", activity: "video", subject: video.title });
     try {
       const res = await fetch("/api/account/earn/start", {
@@ -117,26 +143,26 @@ export function EarnFlow({ mac }: { mac: string }) {
         ok: boolean;
         claim_id?: string;
         questions?: { q: string }[];
-        activity_label?: string;
         credit_pass?: number;
         credit_partial?: number;
+        ready_at?: number;
         message?: string;
         reason?: string;
       };
       if (!data.ok || !data.claim_id || !data.questions) {
         setStep({
           kind: "error",
-          message: data.message ?? data.reason ?? "Couldn't generate the quiz — try again.",
+          message: data.message ?? data.reason ?? "Couldn't set up your video — try again.",
         });
         return;
       }
       setAnswers(["", "", ""]);
       setStep({
-        kind: "quiz",
+        kind: "video-prepare",
+        video,
+        ready_at_ms: data.ready_at ?? Date.now() + 30_000,
         claim_id: data.claim_id,
-        activity: "video",
         questions: data.questions,
-        activity_label: data.activity_label ?? "Video",
         credit_pass: data.credit_pass ?? 0,
         credit_partial: data.credit_partial ?? 0,
       });
@@ -248,6 +274,7 @@ export function EarnFlow({ mac }: { mac: string }) {
                   setStep({ kind: "describe", activity: a.key });
                 }
               }}
+              data-activity={a.key}
               className="rounded-2xl border border-[var(--color-rule)] bg-white p-4 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-accent)]/5"
             >
               <div className="flex items-center justify-between">
@@ -309,7 +336,27 @@ export function EarnFlow({ mac }: { mac: string }) {
     return (
       <VideoCatalog
         onBack={() => setStep({ kind: "pick" })}
-        onPick={(v) => setStep({ kind: "video-watch", video: v })}
+        onPick={(v) => prepareVideoSession(v)}
+      />
+    );
+  }
+
+  if (step.kind === "video-prepare") {
+    return (
+      <VideoPrepare
+        video={step.video}
+        readyAtMs={step.ready_at_ms}
+        onReady={() =>
+          setStep({
+            kind: "video-watch",
+            video: step.video,
+            claim_id: step.claim_id,
+            questions: step.questions,
+            credit_pass: step.credit_pass,
+            credit_partial: step.credit_partial,
+          })
+        }
+        onCancel={() => setStep({ kind: "video-catalog" })}
       />
     );
   }
@@ -319,7 +366,17 @@ export function EarnFlow({ mac }: { mac: string }) {
       <VideoWatch
         video={step.video}
         onBack={() => setStep({ kind: "video-catalog" })}
-        onFinished={() => startVideoQuiz(step.video)}
+        onFinished={() =>
+          setStep({
+            kind: "quiz",
+            claim_id: step.claim_id,
+            activity: "video",
+            questions: step.questions,
+            activity_label: "Video",
+            credit_pass: step.credit_pass,
+            credit_partial: step.credit_partial,
+          })
+        }
       />
     );
   }
@@ -552,6 +609,90 @@ function VideoCatalog({
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/* Video prepare — the 30s "Setting up your earn session..." countdown
+ * shown while the server's policy push propagates to the router. By the
+ * time the timer hits zero, the on-device engine has the punch-through
+ * for this kid's MAC and YouTube will load even if the quota was
+ * exhausted. We could in theory poll the agent to confirm the apply
+ * landed, but the agent's sync interval (~25s) is the only mechanism
+ * that matters; 30s is a safe ceiling. */
+function VideoPrepare({
+  video,
+  readyAtMs,
+  onReady,
+  onCancel,
+}: {
+  video: CatalogVideoUI;
+  readyAtMs: number;
+  onReady: () => void;
+  onCancel: () => void;
+}) {
+  const totalMs = Math.max(0, readyAtMs - Date.now());
+  const [remaining, setRemaining] = useState(totalMs);
+  useEffect(() => {
+    if (remaining <= 0) {
+      onReady();
+      return;
+    }
+    const t = setInterval(() => {
+      const r = Math.max(0, readyAtMs - Date.now());
+      setRemaining(r);
+      if (r <= 0) {
+        clearInterval(t);
+        onReady();
+      }
+    }, 250);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readyAtMs]);
+
+  const total = Math.max(1, totalMs);
+  const pct = Math.round(100 - (remaining / total) * 100);
+  const seconds = Math.ceil(remaining / 1000);
+
+  return (
+    <div className="mt-8 rounded-2xl border border-[var(--color-rule)] bg-white p-6">
+      <div className="flex items-center gap-3">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={`https://i.ytimg.com/vi/${video.youtube_id}/mqdefault.jpg`}
+          alt=""
+          width={80}
+          height={45}
+          className="aspect-video w-20 shrink-0 rounded-lg bg-[var(--color-cream)] object-cover"
+        />
+        <div className="min-w-0">
+          <div className="text-xs font-medium uppercase tracking-wider text-[var(--color-accent)]">
+            Setting up your earn session…
+          </div>
+          <div className="mt-0.5 truncate font-semibold text-[var(--color-ink)]">
+            {video.title}
+          </div>
+        </div>
+      </div>
+      <div className="mt-5 h-2 w-full overflow-hidden rounded-full bg-[var(--color-cream)]">
+        <div
+          className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-200"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="mt-3 flex items-center justify-between text-xs text-[var(--color-ink-soft)]">
+        <span>
+          Telling the Braintech box to unlock YouTube for this video so it can load.
+        </span>
+        <span className="ml-3 shrink-0 font-mono">{seconds}s</span>
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="mt-5 text-xs text-[var(--color-ink-soft)] underline hover:text-[var(--color-ink)]"
+      >
+        Cancel and pick a different video
+      </button>
     </div>
   );
 }
