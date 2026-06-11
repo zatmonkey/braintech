@@ -102,6 +102,13 @@ function Nav({ variation }: { variation: Variation }) {
           vs Bark & Circle
         </a>
         <a
+          href="/login"
+          data-cta="nav-login"
+          className="text-sm text-[var(--color-ink-soft)] transition hover:text-[var(--color-ink)]"
+        >
+          Sign in
+        </a>
+        <a
           href="#waitlist"
           data-cta="nav"
           data-variation={variation.id}

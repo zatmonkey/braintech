@@ -58,7 +58,7 @@ export default async function Start({
       data-variation={variation.id}
       data-page="start"
     >
-      {/* Minimal header — logo only; no nav competing with the form. */}
+      {/* Minimal header — logo + sign-in only; no nav competing with the form. */}
       <header className="mx-auto flex w-full max-w-3xl items-center justify-between px-6 py-6">
         <a href="/" className="flex items-center gap-2" aria-label="Braintech">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -70,6 +70,13 @@ export default async function Start({
             className="size-7 rounded-md"
           />
           <span className="font-semibold tracking-tight">braintech</span>
+        </a>
+        <a
+          href="/login"
+          data-cta="nav-login"
+          className="text-sm text-[var(--color-ink-soft)] transition hover:text-[var(--color-ink)]"
+        >
+          Sign in
         </a>
       </header>
 
