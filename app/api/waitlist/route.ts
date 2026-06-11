@@ -258,7 +258,10 @@ export async function POST(req: Request) {
   // bug (the original landing-page copy "Check your inbox..." was
   // already in market before this got wired up).
   try {
-    await sendDiscountEmail(email, { percentOff: DISCOUNT_PERCENT_OFF });
+    await sendDiscountEmail(email, {
+      percentOff: DISCOUNT_PERCENT_OFF,
+      couponId: DISCOUNT_COUPON_ID,
+    });
   } catch (err) {
     console.error("[waitlist] discount email send threw", err);
   }

@@ -55,12 +55,15 @@ export async function sendOtpEmail(
  */
 export async function sendDiscountEmail(
   to: string,
-  opts: { percentOff: number },
+  opts: { percentOff: number; couponId: string },
 ): Promise<{ delivered: boolean }> {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM ?? "Braintech <onboarding@resend.dev>";
   const site = process.env.NEXT_PUBLIC_SITE_URL ?? "https://getbraintech.com";
-  const buyUrl = `${site}/#hero`;
+  // /buy reads `email` to prefill the input and `dc` to activate the
+  // discount card + pass the coupon to /api/checkout (no cookie needed,
+  // works cross-device).
+  const buyUrl = `${site}/buy?email=${encodeURIComponent(to)}&dc=${encodeURIComponent(opts.couponId)}`;
   const pct = opts.percentOff;
   if (!key) {
     console.log(`[email] DEV MODE — discount confirmation for ${to} (${pct}% off, set RESEND_API_KEY to send real email)`);

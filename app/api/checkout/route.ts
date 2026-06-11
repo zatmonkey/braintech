@@ -34,6 +34,11 @@ export async function POST(req: Request) {
     phone?: string;
     variation?: string;
     mode?: "deposit" | "purchase";
+    // Optional body-level coupon — used by /buy when the visitor lands
+    // from the discount-confirmation email on a browser without the
+    // bt_discount cookie. Validated against the active coupon below;
+    // forged values silently drop to full price.
+    coupon?: string | null;
   };
   try {
     body = (await req.json()) as typeof body;
@@ -81,8 +86,14 @@ export async function POST(req: Request) {
   const discountCookie = req.headers
     .get("cookie")
     ?.match(new RegExp(`(?:^|;\\s*)${DISCOUNT_COOKIE}=([^;]+)`))?.[1];
+  // Body-level coupon (from /buy email link) takes precedence over the
+  // cookie. Same validation — either path applies the active coupon or
+  // nothing.
+  const bodyCoupon = (body.coupon ?? "").trim();
   const couponId =
-    discountCookie === DISCOUNT_COUPON_ID ? DISCOUNT_COUPON_ID : null;
+    bodyCoupon === DISCOUNT_COUPON_ID || discountCookie === DISCOUNT_COUPON_ID
+      ? DISCOUNT_COUPON_ID
+      : null;
 
   try {
     const isPurchase = mode === "purchase";
