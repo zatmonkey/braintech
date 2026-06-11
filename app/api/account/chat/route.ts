@@ -606,6 +606,33 @@ export async function POST(req: Request) {
           return `error: ${(err as Error).message}`;
         }
       }
+      if (name === "classify_app") {
+        const personName = String(i.person_name ?? "").trim();
+        const app = String(i.app ?? "").slice(0, 80).trim();
+        const status = String(i.status ?? "") as "ok" | "limit";
+        if (!personName) return "error: person_name required";
+        if (!app) return "error: app required";
+        if (status !== "ok" && status !== "limit") {
+          return "error: status must be 'ok' or 'limit'";
+        }
+        const p = await resolvePersonName(sql, email, personName);
+        if (!p) {
+          return `error: no person matching "${personName}". Check CONTEXT > GROUPS.`;
+        }
+        await sql`
+          INSERT INTO app_classifications (owner_email, group_id, app, status, decided_by)
+          VALUES (${email}, ${p.group_id}, ${app}, ${status}, 'bri')
+          ON CONFLICT (owner_email, group_id, app) DO UPDATE SET
+            status     = EXCLUDED.status,
+            decided_by = EXCLUDED.decided_by,
+            updated_at = NOW();
+        `;
+        await sql`
+          DELETE FROM app_alert_log
+          WHERE owner_email = ${email} AND group_id = ${p.group_id} AND app = ${app};
+        `;
+        return `Marked ${app} as ${status === "ok" ? "OK" : "needs limiting"} for ${p.person_name}.`;
+      }
       if (name === "remove_rule") {
         if (!primary) return "error: no device linked";
         const ruleId = String(i.rule_id ?? "").trim();

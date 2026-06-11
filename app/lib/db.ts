@@ -372,6 +372,40 @@ export async function ensureAccountSchema(
   await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS person_name TEXT;`;
   await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS age INTEGER;`;
 
+  // Per-household per-group app decision log. Tracks the parent's call
+  // on whether the kid is allowed to spend time on each app. `status` is
+  // 'ok' (parent has decided it's fine — won't trigger alerts), 'limit'
+  // (parent flagged it — engine + Bri can suggest a rule), or NULL
+  // (never decided). Joined with client_usage_minute by app name to
+  // drive the per-group activity view + the daily alert cron.
+  await sql`
+    CREATE TABLE IF NOT EXISTS app_classifications (
+      owner_email  TEXT NOT NULL,
+      group_id     TEXT NOT NULL,
+      app          TEXT NOT NULL,
+      status       TEXT NOT NULL,    -- 'ok' | 'limit'
+      decided_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      decided_by   TEXT,             -- 'parent' | 'bri' | 'email'
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (owner_email, group_id, app)
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS app_class_owner_group_idx ON app_classifications (owner_email, group_id);`;
+
+  // Alert log: dedupes the "alex started on something new" email so the
+  // parent doesn't get one every hour for the same app. Keyed by the
+  // same triple; alerted_at is the last time we emailed about it.
+  await sql`
+    CREATE TABLE IF NOT EXISTS app_alert_log (
+      owner_email   TEXT NOT NULL,
+      group_id      TEXT NOT NULL,
+      app           TEXT NOT NULL,
+      alerted_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      minutes_at_alert INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (owner_email, group_id, app)
+    );
+  `;
+
   await sql`
     CREATE TABLE IF NOT EXISTS client_group_memberships (
       owner_email TEXT NOT NULL,

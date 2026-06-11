@@ -609,6 +609,30 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "classify_app",
+    description:
+      "Record the household's decision on whether an app is OK or needs limiting for a specific kid. Use this whenever the parent says 'Roblox is fine for Alex' / 'block TikTok for Maya' / 'I'm OK with him on Discord' / 'don't want her on Snapchat'. Status 'ok' means parent is happy with current usage (won't trigger alerts when usage grows); 'limit' flags it so we can suggest a rule. The kid is identified by person_name (matched against CONTEXT > GROUPS where kind='kid'); the app must match a name the agent reports in usage (e.g. 'Roblox', 'TikTok', 'YouTube'). Doesn't create or modify any blocking rule by itself — use block_brainrot_group or a custom rule if the parent wants enforcement.",
+    input_schema: {
+      type: "object",
+      properties: {
+        person_name: {
+          type: "string",
+          description: "Kid's name from CONTEXT > GROUPS. Case-insensitive match.",
+        },
+        app: {
+          type: "string",
+          description: "App name as it appears in CONTEXT > USAGE (e.g. 'YouTube', 'Roblox', 'Discord').",
+        },
+        status: {
+          type: "string",
+          enum: ["ok", "limit"],
+          description: "'ok' = parent endorses current usage; 'limit' = parent flagged it.",
+        },
+      },
+      required: ["person_name", "app", "status"],
+    },
+  },
+  {
     name: "remove_rule",
     description:
       "Deactivate an existing active rule on this account. Pass the EXACT rule_id from CONTEXT > ACTIVE RULES — never invent or guess one. The rule is soft-deleted (active=FALSE) and the device gets the cleanup ops on the next sync (~25s). The dashboard shows the rule in 'removing' state until the agent confirms. Use this whenever the parent says 'remove X' / 'delete X' / 'stop blocking X' / 'turn off the YouTube rule' / 'unblock X'.",

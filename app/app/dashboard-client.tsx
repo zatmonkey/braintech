@@ -480,6 +480,7 @@ export function AccountChat({ compact = false }: { compact?: boolean } = {}) {
 import { BrainrotMeter } from "./brainrot-meter";
 import { StatsModal } from "./stats-modal";
 import { EarnHistoryModal } from "./earn-history-modal";
+import { GroupActivityModal } from "./group-activity-modal";
 
 export type AppMinutes = { app: string; minutes: number };
 
@@ -713,6 +714,10 @@ export function AllDevicesSection({
     apps: [],
   });
   const [earnHistory, setEarnHistory] = useState<{
+    open: boolean;
+    group: TabGroup | null;
+  }>({ open: false, group: null });
+  const [groupActivity, setGroupActivity] = useState<{
     open: boolean;
     group: TabGroup | null;
   }>({ open: false, group: null });
@@ -983,6 +988,15 @@ export function AllDevicesSection({
                     ? `${activeGroup.earn_passed_count} earned · +${activeGroup.earn_total_minutes}m`
                     : "Earn log"}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setGroupActivity({ open: true, group: activeGroup })}
+                  title="Per-app activity over 7 days + classify OK/Limit"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-rule)] bg-white px-3 py-1.5 text-xs font-medium text-[var(--color-ink)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                >
+                  <span aria-hidden>📊</span>
+                  Activity
+                </button>
                 {!activeGroup.is_default && (
                   <button
                     type="button"
@@ -1114,6 +1128,11 @@ export function AllDevicesSection({
         open={earnHistory.open}
         group={earnHistory.group}
         onClose={() => setEarnHistory({ open: false, group: null })}
+      />
+      <GroupActivityModal
+        open={groupActivity.open}
+        group={groupActivity.group}
+        onClose={() => setGroupActivity({ open: false, group: null })}
       />
     </div>
   );
