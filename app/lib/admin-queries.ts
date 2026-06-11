@@ -29,7 +29,7 @@ export async function loadHubStats(
 ): Promise<HubStats> {
   const [contentRow, watchedRow, revenueRows, signupsRow] = (await Promise.all([
     sql`
-      SELECT EXTRACT(DAY FROM (MIN(scheduled_for) - CURRENT_DATE))::int AS days
+      SELECT (MIN(scheduled_for) - CURRENT_DATE)::int AS days
       FROM content_calendar
       WHERE posted_at IS NULL
         AND scheduled_for >= CURRENT_DATE;
