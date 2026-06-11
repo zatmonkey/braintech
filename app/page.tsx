@@ -13,8 +13,9 @@ import { getVariation, type Variation } from "./variations";
 import {
   pricingForCountry,
   type Pricing,
-  discountedPurchase,
 } from "./lib/pricing";
+import { DISCOUNT_COUPON_ID } from "./lib/stripe";
+import { BuyNowCard } from "./buy-now-card";
 import {
   foundingScarcity,
   FOUNDING_BATCH_N,
@@ -54,6 +55,11 @@ export default async function Home({
     "US";
   const pricing = pricingForCountry(country);
 
+  // Show the discounted price + "10% off · locked in" in the buy-now card
+  // if the visitor has already claimed the discount earlier on the page.
+  const discountActive =
+    cookieStore.get("bt_discount")?.value === DISCOUNT_COUPON_ID;
+
   return (
     <main className="flex flex-1 flex-col" data-variation={variation.id}>
       <Nav variation={variation} />
@@ -68,7 +74,7 @@ export default async function Home({
           for this audience are both a conversion killer (sniff-test) and
           an FTC compliance risk under the 2024 Endorsement Guides. When
           real quotes exist, just put <Testimonials /> back in. */}
-      <Pricing variation={variation} pricing={pricing} />
+      <Pricing variation={variation} pricing={pricing} discountActive={discountActive} />
       <FAQ />
       <Footer country={pricing.country} />
       <ChatWidget />
@@ -585,11 +591,12 @@ function Examples() {
 function Pricing({
   variation,
   pricing,
+  discountActive,
 }: {
   variation: Variation;
   pricing: Pricing;
+  discountActive: boolean;
 }) {
-  const discounted = discountedPurchase(pricing, 10);
   return (
     <section
       id="waitlist"
@@ -598,7 +605,7 @@ function Pricing({
       <div className="grid items-start gap-12 lg:grid-cols-[1fr_1.1fr] lg:gap-16">
         <div>
           <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--color-accent)]">
-            Founding pricing
+            Buy now
           </div>
           <h2 className="serif mt-3 text-4xl leading-[1.05] tracking-[-0.02em] sm:text-5xl">
             {pricing.purchaseLabel.replace("/yr", "")} for year one.
@@ -606,11 +613,9 @@ function Pricing({
             Device included.
           </h2>
           <p className="mt-5 text-lg text-[var(--color-ink-soft)]">
-            Drop your email — we&rsquo;ll send you{" "}
-            <strong>10% off your founding spot</strong>{" "}
-            ({pricing.purchaseLabel.replace("/yr", "")} →{" "}
-            {discounted.label.replace("/yr", "")}). Your subscription starts
-            the day your device ships. Cancel any time before renewal.
+            Order today, plug it in when it arrives, and text Bri your house
+            rules. Your subscription starts the day your device ships —
+            30-day refund, cancel any time before renewal.
           </p>
           <p className="mt-4 text-sm font-medium text-[var(--color-accent)]">
             {foundingScarcity()}
@@ -639,7 +644,11 @@ function Pricing({
           </p>
         </div>
         <div>
-          <HeroWaitlist variation={variation} pricing={pricing} />
+          <BuyNowCard
+            variation={variation.id}
+            pricing={pricing}
+            discountActive={discountActive}
+          />
         </div>
       </div>
     </section>
