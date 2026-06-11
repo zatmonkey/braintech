@@ -67,16 +67,17 @@ export async function loadWatchedVideoIds(
   email: string,
   group_id: string,
 ): Promise<Set<string>> {
-  // Any earn_claim with this video_id counts, scored or in-flight. An
-  // unfinished attempt should still hide the entry — we don't want the
-  // kid to spawn parallel claims for the same video as a way around the
-  // 6/day rate limit.
+  // "Watched" = passed the quiz. An in-flight or failed attempt does NOT
+  // hide the entry — the kid can restart from the beginning and try
+  // again. (Daily rate limit in earn/start still caps the total churn at
+  // 6 attempts per device per day.)
   const rows = (await sql`
     SELECT DISTINCT video_id::text AS video_id
     FROM earn_claims
     WHERE owner_email = ${email}
       AND group_id = ${group_id}
-      AND video_id IS NOT NULL;
+      AND video_id IS NOT NULL
+      AND passed = TRUE;
   `) as { video_id: string }[];
   return new Set(rows.map((r) => r.video_id));
 }

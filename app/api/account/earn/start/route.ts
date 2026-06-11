@@ -111,13 +111,14 @@ export async function POST(req: NextRequest) {
   const person = await resolveMacToPerson(sql, email, mac);
 
   // Server-side duplicate guard: each video earns credit once per person.
-  // The catalog UI hides watched videos already; this stops a kid who
-  // edits the request from re-earning by faking the body.
+  // "Already earned" = a previous claim that PASSED the quiz; failed or
+  // abandoned attempts don't lock the video, so the kid can start fresh
+  // from the beginning. Matches loadWatchedVideoIds.
   if (video && person) {
     const dup = (await sql`
       SELECT 1 FROM earn_claims
       WHERE owner_email = ${email} AND group_id = ${person.group_id}
-        AND video_id = ${video.id}
+        AND video_id = ${video.id} AND passed = TRUE
       LIMIT 1;
     `) as { "?column?": number }[];
     if (dup.length > 0) {
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest) {
         {
           ok: false,
           reason: "already watched",
-          message: "You already watched this one — pick a different video to earn more.",
+          message: "You already earned credit for this one — pick a different video to earn more.",
         },
         { status: 409 },
       );

@@ -25,6 +25,10 @@ const ACTIVITIES: Array<{
   prompt: string;
   example: string;
   pass: number;
+  // Only the video flow is live today. Everything else renders as a
+  // visible-but-disabled "Coming soon" card so kids see what's on the
+  // way without being able to start a quiz we can't grade well yet.
+  coming_soon?: boolean;
 }> = [
   {
     key: "video",
@@ -41,6 +45,7 @@ const ACTIVITIES: Array<{
     prompt: "What did you work on? (Khan)",
     example: "fractions, photosynthesis, the Industrial Revolution",
     pass: 20,
+    coming_soon: true,
   },
   {
     key: "reading",
@@ -49,6 +54,7 @@ const ACTIVITIES: Array<{
     prompt: "What did you read?",
     example: "Harry Potter chapter 3, The Lightning Thief pages 40–80",
     pass: 25,
+    coming_soon: true,
   },
   {
     key: "ted",
@@ -57,6 +63,7 @@ const ACTIVITIES: Array<{
     prompt: "Which TED talk?",
     example: "the talk title, or the speaker's name",
     pass: 30,
+    coming_soon: true,
   },
   {
     key: "coding",
@@ -65,6 +72,7 @@ const ACTIVITIES: Array<{
     prompt: "What did you build or learn?",
     example: "Scratch — animated a fish, Code.org loops lesson",
     pass: 25,
+    coming_soon: true,
   },
 ];
 
@@ -252,7 +260,10 @@ export function EarnFlow({ mac }: { mac: string }) {
             <button
               key={a.key}
               type="button"
+              disabled={a.coming_soon}
+              aria-disabled={a.coming_soon}
               onClick={() => {
+                if (a.coming_soon) return;
                 setSubject("");
                 if (a.key === "video") {
                   setStep({ kind: "video-catalog" });
@@ -261,13 +272,23 @@ export function EarnFlow({ mac }: { mac: string }) {
                 }
               }}
               data-activity={a.key}
-              className="rounded-2xl border border-[var(--color-rule)] bg-white p-4 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-accent)]/5"
+              className={
+                a.coming_soon
+                  ? "cursor-not-allowed rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]/40 p-4 text-left opacity-50"
+                  : "rounded-2xl border border-[var(--color-rule)] bg-white p-4 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-accent)]/5"
+              }
             >
               <div className="flex items-center justify-between">
                 <div className="text-2xl">{a.emoji}</div>
-                <span className="text-xs font-medium text-[var(--color-accent)]">
-                  up to +{a.pass}m
-                </span>
+                {a.coming_soon ? (
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-ink-soft)]">
+                    Coming soon
+                  </span>
+                ) : (
+                  <span className="text-xs font-medium text-[var(--color-accent)]">
+                    up to +{a.pass}m
+                  </span>
+                )}
               </div>
               <div className="mt-2 font-semibold text-[var(--color-ink)]">
                 {a.label}
