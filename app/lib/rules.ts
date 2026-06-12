@@ -120,7 +120,12 @@ export type RuleParams =
  * a root-domain set; dnsmasq matches subdomains.
  */
 export const BRAINROT_DOMAINS_BY_APP: Record<string, string[]> = {
-  youtube: ["youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "youtube-nocookie.com", "ggpht.com", "yt.be"],
+  // NOTE: googlevideo.com and ggpht.com are deliberately EXCLUDED — they
+  // also serve Google Photos / Drive video previews and thumbnails, so
+  // blocking them breaks Photos. youtube.com + youtu.be + ytimg.com is
+  // enough to gate the web app, search, and player load; an already-
+  // playing video may keep streaming until its session breaks.
+  youtube: ["youtube.com", "youtu.be", "ytimg.com", "youtube-nocookie.com", "yt.be"],
   instagram: ["instagram.com", "cdninstagram.com", "ig.me", "threads.net"],
   tiktok: ["tiktok.com", "tiktokcdn.com", "tiktokv.com", "musical.ly", "bytedance.com", "byteoversea.com"],
   snapchat: ["snapchat.com", "snap.com", "sc-cdn.net"],
