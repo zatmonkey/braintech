@@ -113,22 +113,55 @@ export type RuleParams =
  *  - reddit included because of its addictive feed; remove if a kid uses
  *    it for school research.
  */
-export const DEFAULT_BRAINROT_DOMAINS: string[] = [
-  // YouTube
-  "youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "youtube-nocookie.com", "ggpht.com", "yt.be",
-  // Instagram + Threads
-  "instagram.com", "cdninstagram.com", "ig.me", "threads.net",
-  // TikTok
-  "tiktok.com", "tiktokcdn.com", "tiktokv.com", "musical.ly", "bytedance.com", "byteoversea.com",
-  // Snapchat
-  "snapchat.com", "snap.com", "sc-cdn.net",
-  // Reddit
-  "reddit.com", "redd.it", "redditstatic.com", "redditmedia.com",
-  // Twitter / X
-  "twitter.com", "x.com", "t.co", "twimg.com",
-  // Twitch
-  "twitch.tv", "ttvnw.net", "jtvnw.net",
-];
+/**
+ * Per-app domain bundles. Used by block_schedule_group, which scopes to a
+ * single app (`app_label`). Keys are lowercase; lookup is case-insensitive
+ * and tolerant of common aliases (see brainrotDomainsForApp). Each list is
+ * a root-domain set; dnsmasq matches subdomains.
+ */
+export const BRAINROT_DOMAINS_BY_APP: Record<string, string[]> = {
+  youtube: ["youtube.com", "youtu.be", "ytimg.com", "googlevideo.com", "youtube-nocookie.com", "ggpht.com", "yt.be"],
+  instagram: ["instagram.com", "cdninstagram.com", "ig.me", "threads.net"],
+  tiktok: ["tiktok.com", "tiktokcdn.com", "tiktokv.com", "musical.ly", "bytedance.com", "byteoversea.com"],
+  snapchat: ["snapchat.com", "snap.com", "sc-cdn.net"],
+  reddit: ["reddit.com", "redd.it", "redditstatic.com", "redditmedia.com"],
+  twitter: ["twitter.com", "x.com", "t.co", "twimg.com"],
+  twitch: ["twitch.tv", "ttvnw.net", "jtvnw.net"],
+};
+
+/**
+ * Aggregate "block all infinite-scroll feeds" list. Used by
+ * block_brainrot_group (entire group → all brainrot apps). Computed from
+ * the per-app map so the two stay in sync.
+ */
+export const DEFAULT_BRAINROT_DOMAINS: string[] = Object.values(
+  BRAINROT_DOMAINS_BY_APP,
+).flat();
+
+/**
+ * Resolve an `app_label` (as the parent / Bri uses it — "YouTube", "tiktok",
+ * "X / Twitter") to its domain bundle. Returns undefined if the label
+ * doesn't match a known app; callers should fall back appropriately.
+ */
+export function brainrotDomainsForApp(appLabel: string): string[] | undefined {
+  const key = appLabel.trim().toLowerCase();
+  if (BRAINROT_DOMAINS_BY_APP[key]) return BRAINROT_DOMAINS_BY_APP[key];
+  // Common aliases the model / parent might use
+  const aliases: Record<string, keyof typeof BRAINROT_DOMAINS_BY_APP> = {
+    x: "twitter",
+    "x.com": "twitter",
+    "x / twitter": "twitter",
+    "twitter/x": "twitter",
+    "yt": "youtube",
+    "ig": "instagram",
+    "insta": "instagram",
+    "threads": "instagram",
+    "tt": "tiktok",
+    "snap": "snapchat",
+  };
+  const aliased = aliases[key];
+  return aliased ? BRAINROT_DOMAINS_BY_APP[aliased] : undefined;
+}
 
 export interface AccountRule {
   rule_id: string;
@@ -1064,7 +1097,12 @@ export async function materializeOps(
   if (rule.rule_type === "block_schedule_group") {
     const p = rule.params as BlockScheduleGroupParams;
     const macs = ctx.groupMacs?.get(p.group_id) ?? [];
-    const domains = p.domains?.length ? p.domains : DEFAULT_BRAINROT_DOMAINS;
+    // Schedule rules are scoped to ONE app — derive the domain list from
+    // app_label so a "limit YouTube" rule doesn't also block Twitter, IG,
+    // TikTok, etc. when the kid burns through their quota.
+    const domains = p.domains?.length
+      ? p.domains
+      : brainrotDomainsForApp(p.app_label) ?? DEFAULT_BRAINROT_DOMAINS;
     // Schedule rules use the SAME nft chain + IP sets as block_brainrot_group,
     // but the MAC set starts empty — the on-device policy engine populates
     // it when the schedule says "enforce" and clears it when "allow".
