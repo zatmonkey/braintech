@@ -76,7 +76,9 @@ export async function POST(req: NextRequest) {
   }
   const owner = owners[0].owner_email;
 
-  // 2) Hard guard: already attached to a kid/adult group → refuse.
+  // 2) Hard guard: already attached to any person group → refuse.
+  // ("Person group" = any non-default group; default 'All devices'
+  // isn't a person, so being a member of it doesn't count.)
   const already = (await sql`
     SELECT g.group_id
     FROM client_group_memberships cgm
@@ -84,7 +86,7 @@ export async function POST(req: NextRequest) {
       ON g.group_id = cgm.group_id AND g.owner_email = cgm.owner_email
     WHERE cgm.owner_email = ${owner}
       AND cgm.mac = ${mac}
-      AND g.kind IN ('kid', 'adult')
+      AND g.is_default = FALSE
     LIMIT 1;
   `) as { group_id: string }[];
   if (already.length > 0) {
@@ -106,7 +108,7 @@ export async function POST(req: NextRequest) {
       SELECT 1 FROM account_groups
       WHERE owner_email = ${owner}
         AND group_id = ${id}
-        AND kind IN ('kid', 'adult')
+        AND is_default = FALSE
       LIMIT 1;
     `) as { 1: number }[];
     if (ok.length === 0) {

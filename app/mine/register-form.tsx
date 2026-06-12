@@ -17,7 +17,9 @@ import { useState } from "react";
 type AvailableGroup = {
   group_id: string;
   name: string;
-  kind: "kid" | "adult";
+  // null when the group was created before the kind field existed
+  // (or by hand without setting it). We still treat it as a person.
+  kind: "kid" | "adult" | null;
 };
 
 export function RegisterForm({
@@ -125,9 +127,11 @@ export function RegisterForm({
                         {g.name}
                       </span>
                     </div>
-                    <span className="rounded-full bg-[var(--color-cream)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-ink-soft)]">
-                      {g.kind}
-                    </span>
+                    {g.kind ? (
+                      <span className="rounded-full bg-[var(--color-cream)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-ink-soft)]">
+                        {g.kind}
+                      </span>
+                    ) : null}
                   </label>
                 </li>
               );

@@ -33,7 +33,10 @@ type SiblingDevice = {
 type AvailableGroup = {
   group_id: string;
   name: string;
-  kind: "kid" | "adult";
+  // null when the household created the group before the kind field
+  // was added (or just never set it). The picker treats every
+  // non-default group as a person regardless.
+  kind: "kid" | "adult" | null;
 };
 
 type MineResponse =
@@ -206,23 +209,25 @@ async function lookupMine(mac: string): Promise<MineResponse> {
     earnMinutes = Number(earnRow[0]?.minutes ?? 0);
   }
 
-  // For the self-registration form: which kid/adult groups already
-  // exist that this device can join? Only relevant when person is null.
+  // For the self-registration form: every household group is a
+  // person (kid, adult, or just a named bucket created before kinds
+  // existed). We surface them all here; only the default "All devices"
+  // bucket is excluded since that's a system group, not someone.
   let availableGroups: AvailableGroup[] = [];
   if (!person) {
     const ag = (await sql`
       SELECT g.group_id, COALESCE(NULLIF(g.person_name, ''), g.name) AS name, g.kind
       FROM account_groups g
       WHERE g.owner_email = ${owner}
-        AND g.kind IN ('kid', 'adult')
+        AND g.is_default = FALSE
       ORDER BY
-        CASE g.kind WHEN 'kid' THEN 0 ELSE 1 END,
+        CASE g.kind WHEN 'kid' THEN 0 WHEN 'adult' THEN 1 ELSE 2 END,
         g.created_at ASC;
-    `) as { group_id: string; name: string; kind: string }[];
+    `) as { group_id: string; name: string; kind: string | null }[];
     availableGroups = ag.map((g) => ({
       group_id: g.group_id,
       name: g.name,
-      kind: g.kind === "adult" ? "adult" : "kid",
+      kind: g.kind === "kid" || g.kind === "adult" ? g.kind : null,
     }));
   }
 
