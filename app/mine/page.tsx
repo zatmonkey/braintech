@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { getSql, ensureDeviceSchema, ensureAccountSchema } from "@/app/lib/db";
 import { resolveMacToPerson, type Person } from "@/app/lib/persons";
+import { RegisterForm } from "./register-form";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,16 +30,24 @@ type SiblingDevice = {
   seen_recently: boolean;
 };
 
+type AvailableGroup = {
+  group_id: string;
+  name: string;
+  kind: "kid" | "adult";
+};
+
 type MineResponse =
   | {
       ok: true;
       mac: string;
       label: string | null;
+      hostname: string | null;
       groups: { group_id: string; name: string }[];
       rules: Rule[];
       seen_recently: boolean;
       // Set when MAC belongs to a kid/adult group — flips the page to
-      // the warm portal layout. NULL → existing technical device view.
+      // the warm portal layout. NULL → either NeedsRegistration (no
+      // person yet) or DeviceView (only generic groups).
       person: Person | null;
       // For kid portal: every device in the kid's group with its label,
       // so they can see what's tied to their profile.
@@ -47,6 +56,9 @@ type MineResponse =
       credit_balance: number;
       earn_passed_count: number;
       earn_total_minutes: number;
+      // For registration form (only relevant when person is null):
+      // existing kid/adult groups in the household the visitor can join.
+      available_groups: AvailableGroup[];
     }
   | { ok: false; reason: string };
 
@@ -194,10 +206,31 @@ async function lookupMine(mac: string): Promise<MineResponse> {
     earnMinutes = Number(earnRow[0]?.minutes ?? 0);
   }
 
+  // For the self-registration form: which kid/adult groups already
+  // exist that this device can join? Only relevant when person is null.
+  let availableGroups: AvailableGroup[] = [];
+  if (!person) {
+    const ag = (await sql`
+      SELECT g.group_id, COALESCE(NULLIF(g.person_name, ''), g.name) AS name, g.kind
+      FROM account_groups g
+      WHERE g.owner_email = ${owner}
+        AND g.kind IN ('kid', 'adult')
+      ORDER BY
+        CASE g.kind WHEN 'kid' THEN 0 ELSE 1 END,
+        g.created_at ASC;
+    `) as { group_id: string; name: string; kind: string }[];
+    availableGroups = ag.map((g) => ({
+      group_id: g.group_id,
+      name: g.name,
+      kind: g.kind === "adult" ? "adult" : "kid",
+    }));
+  }
+
   return {
     ok: true,
     mac,
     label,
+    hostname,
     groups: groupRows,
     rules: visible,
     seen_recently: seenRecently,
@@ -206,6 +239,7 @@ async function lookupMine(mac: string): Promise<MineResponse> {
     credit_balance: creditBalance,
     earn_passed_count: earnPassed,
     earn_total_minutes: earnMinutes,
+    available_groups: availableGroups,
   };
 }
 
@@ -275,26 +309,34 @@ export default async function MinePage({
           <KidPortal data={data} />
         ) : null}
 
+        {/* No person yet — first-time visitor on this device. Show the
+            self-registration form so they can claim it to a person.
+            Falls back to the technical DeviceView if anything goes wrong
+            with the registration UX (unlikely with the form mounted,
+            but keeps the page renderable). */}
         {data?.ok === true && !data.person ? (
-          <DeviceView data={data} />
+          <RegisterForm
+            mac={data.mac}
+            defaultLabel={data.label ?? data.hostname ?? ""}
+            availableGroups={data.available_groups}
+          />
         ) : null}
 
-        {/* Bottom note */}
-        {data?.ok === true ? (
+        {/* Bottom note — only for the kid portal. The registration form
+            has its own one-time-setup explainer, so a second
+            'sign in to your dashboard' line would be noise. */}
+        {data?.ok === true && data.person ? (
           <div className="mt-12 rounded-2xl border border-[var(--color-rule)] bg-[var(--color-cream)]/40 p-5 text-sm leading-relaxed text-[var(--color-ink-soft)]">
             <p>
-              {data.person
-                ? "Want to change something here? Ask a parent — they can adjust the rules at "
-                : "Want to change something here? Sign in to your dashboard at "}
+              Want to change something here? Ask a parent — they can adjust
+              the rules at{" "}
               <Link
                 href="/app"
                 className="font-medium text-[var(--color-accent)] hover:underline"
               >
                 getbraintech.com/app
-              </Link>
-              {data.person
-                ? " — or you can ask Bri."
-                : " and adjust the rule — or text Bri (“unlock YouTube for an hour” works)."}
+              </Link>{" "}
+              — or you can ask Bri.
             </p>
           </div>
         ) : null}
