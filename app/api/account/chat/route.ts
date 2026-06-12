@@ -659,6 +659,40 @@ export async function POST(req: Request) {
           return `error: ${(err as Error).message}`;
         }
       }
+      if (name === "set_group_kind") {
+        const personName = i.person_name ? String(i.person_name).trim() : "";
+        const newName = i.new_name ? String(i.new_name).trim().slice(0, 64) : "";
+        const ageRaw =
+          i.age === null || i.age === undefined ? null : Math.floor(Number(i.age));
+        const age =
+          ageRaw !== null && Number.isFinite(ageRaw) && ageRaw > 0 ? ageRaw : null;
+        const kindIn = i.kind;
+        const kind: "kid" | "adult" | null =
+          kindIn === "kid" || kindIn === "adult" ? kindIn : null;
+        if (!personName) {
+          return "error: person_name required";
+        }
+        const p = await resolvePersonName(sql, email, personName);
+        if (!p) {
+          return `error: no group matching "${personName}" — check CONTEXT > GROUPS.`;
+        }
+        await sql`
+          UPDATE account_groups
+             SET kind        = ${kind},
+                 person_name = COALESCE(${newName || null}, person_name),
+                 age         = COALESCE(${age}, age),
+                 updated_at  = NOW()
+           WHERE owner_email = ${email} AND group_id = ${p.group_id};
+        `;
+        const finalName = newName || p.person_name;
+        if (kind === null) {
+          return `Cleared the kid/adult tag on ${finalName}.`;
+        }
+        const parts: string[] = [`Tagged ${finalName} as ${kind}`];
+        if (newName) parts.push(`(now called "${newName}")`);
+        if (age !== null) parts.push(`· age ${age}`);
+        return parts.join(" ") + ".";
+      }
       if (name === "classify_app") {
         const personName = String(i.person_name ?? "").trim();
         const app = String(i.app ?? "").slice(0, 80).trim();

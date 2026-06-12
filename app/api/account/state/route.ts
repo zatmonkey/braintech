@@ -74,10 +74,19 @@ export async function GET() {
   const macGroups = await loadMacGroups(sql, email);
 
   const groups = (await sql`
-    SELECT group_id, name, description, is_default, created_at
+    SELECT group_id, name, description, is_default, kind, person_name, age, created_at
     FROM account_groups WHERE owner_email = ${email}
     ORDER BY is_default DESC, created_at;
-  `) as { group_id: string; name: string; description: string | null; is_default: boolean; created_at: string }[];
+  `) as {
+    group_id: string;
+    name: string;
+    description: string | null;
+    is_default: boolean;
+    kind: string | null;
+    person_name: string | null;
+    age: number | null;
+    created_at: string;
+  }[];
 
   const rules = (await sql`
     SELECT rule_id, device_id, name, rule_type, summary, params, ops, active, created_at, updated_at

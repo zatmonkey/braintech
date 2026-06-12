@@ -65,7 +65,11 @@ type MineResponse =
     }
   | { ok: false; reason: string };
 
-const GROUP_SCOPED = new Set(["pause_group", "block_brainrot_group"]);
+const GROUP_SCOPED = new Set([
+  "pause_group",
+  "block_brainrot_group",
+  "block_schedule_group",
+]);
 const DEVICE_SCOPED = new Set(["pause_device"]);
 
 /**

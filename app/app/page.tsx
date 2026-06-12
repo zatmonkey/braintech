@@ -205,6 +205,7 @@ export default async function Dashboard() {
       // (5s). Initial SSR shows 0 so the chip just reads "Earn log".
       earn_passed_count: 0,
       earn_total_minutes: 0,
+      kind: null,
     };
   });
   // Household minutes for the top-of-page Usage meter.

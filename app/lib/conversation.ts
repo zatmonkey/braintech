@@ -646,6 +646,34 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "set_group_kind",
+    description:
+      "Tag a household group as a kid or an adult, optionally setting their name + age too. Use this when the parent says 'mark Maya as a kid' / 'Julie is a 9-year-old' / 'Mom is an adult' / 'set Theo's age to 12' / 'just call her Mia, not Maya'. Pass kind='kid' or 'adult' to set; kind=null clears it. person_name and age are optional — omitted fields keep their existing values. The group is found by person_name match against CONTEXT > GROUPS (the EXISTING name; pass the NEW name in the same call if you're also renaming). Affects who the engine considers an individual + how /mine renders the portal greeting.",
+    input_schema: {
+      type: "object",
+      properties: {
+        person_name: {
+          type: "string",
+          description: "Current name of the group from CONTEXT > GROUPS. Case-insensitive match.",
+        },
+        kind: {
+          type: ["string", "null"],
+          enum: ["kid", "adult", null],
+          description: "'kid' | 'adult' | null. null clears.",
+        },
+        new_name: {
+          type: "string",
+          description: "Optional rename. Omit unless the parent asked to rename.",
+        },
+        age: {
+          type: "number",
+          description: "Optional age in years. Omit unless mentioned.",
+        },
+      },
+      required: ["person_name", "kind"],
+    },
+  },
+  {
     name: "classify_app",
     description:
       "Record the household's decision on whether an app is OK or needs limiting for a specific kid. Use this whenever the parent says 'Roblox is fine for Alex' / 'block TikTok for Maya' / 'I'm OK with him on Discord' / 'don't want her on Snapchat'. Status 'ok' means parent is happy with current usage (won't trigger alerts when usage grows); 'limit' flags it so we can suggest a rule. The kid is identified by person_name (matched against CONTEXT > GROUPS where kind='kid'); the app must match a name the agent reports in usage (e.g. 'Roblox', 'TikTok', 'YouTube'). Doesn't create or modify any blocking rule by itself — use block_brainrot_group or a custom rule if the parent wants enforcement.",

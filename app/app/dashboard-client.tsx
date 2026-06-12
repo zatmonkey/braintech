@@ -540,6 +540,9 @@ type TabGroup = {
   // earned" chip on the group toolbar; clicking it opens the audit modal.
   earn_passed_count: number;
   earn_total_minutes: number;
+  // Person identity. kind drives the engine + the /mine portal greeting;
+  // the dashboard surfaces it as a small inline picker on the toolbar.
+  kind: "kid" | "adult" | null;
 };
 
 function sumApps(parts: AppMinutes[][]): AppMinutes[] {
@@ -614,6 +617,7 @@ export function AllDevicesSection({
           }>;
           earn_passed_count?: number;
           earn_total_minutes?: number;
+          kind?: string | null;
         }>;
         credit_balance_by_mac?: Record<string, number>;
         usage?: {
@@ -658,6 +662,7 @@ export function AllDevicesSection({
               apps: newGroupApps,
               earn_passed_count: g.earn_passed_count ?? 0,
               earn_total_minutes: g.earn_total_minutes ?? 0,
+              kind: g.kind === "kid" || g.kind === "adult" ? g.kind : null,
             };
           });
         });
@@ -782,6 +787,7 @@ export function AllDevicesSection({
             apps: [],
             earn_passed_count: 0,
             earn_total_minutes: 0,
+            kind: null,
           },
         ]);
         setNewGroupName("");
@@ -946,7 +952,22 @@ export function AllDevicesSection({
                   withLabel={false}
                 />
                 <div>
-                  <div className="text-sm font-semibold">{activeGroup.name}</div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold">{activeGroup.name}</div>
+                    {activeGroup.is_default ? null : (
+                      <KindPicker
+                        groupId={activeGroup.group_id}
+                        kind={activeGroup.kind}
+                        onChange={(k) =>
+                          setGroups((gs) =>
+                            gs.map((g) =>
+                              g.group_id === activeGroup.group_id ? { ...g, kind: k } : g,
+                            ),
+                          )
+                        }
+                      />
+                    )}
+                  </div>
                   <div className="text-xs text-[var(--color-ink-soft)]">
                     {filtered.length} device{filtered.length === 1 ? "" : "s"} ·{" "}
                     {activeGroup.rule_count} rule
@@ -1152,6 +1173,57 @@ function TabCount({ children }: { children: React.ReactNode }) {
     <span className="rounded-full bg-white/15 px-1.5 py-0.5 font-mono text-[10px] leading-none">
       {children}
     </span>
+  );
+}
+
+/**
+ * Inline pill that shows + lets the parent change a group's kind
+ * (kid|adult|—). One-click cycle keeps the toolbar tidy: tap once to
+ * advance, no popover. Optimistic UI; POST silently retries via the
+ * 5-second state poll if it lost.
+ */
+function KindPicker({
+  groupId,
+  kind,
+  onChange,
+}: {
+  groupId: string;
+  kind: "kid" | "adult" | null;
+  onChange: (next: "kid" | "adult" | null) => void;
+}) {
+  const next: "kid" | "adult" | null =
+    kind === null ? "kid" : kind === "kid" ? "adult" : null;
+  const label =
+    kind === "kid" ? "👶 Kid" : kind === "adult" ? "🧑 Adult" : "+ Tag person";
+  const classes =
+    kind === "kid"
+      ? "border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+      : kind === "adult"
+        ? "border-[var(--color-ink)]/20 bg-[var(--color-ink)]/5 text-[var(--color-ink)]"
+        : "border-dashed border-[var(--color-rule)] text-[var(--color-ink-soft)] hover:text-[var(--color-ink)]";
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        onChange(next);
+        try {
+          await fetch("/api/account/groups/set-kind", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ group_id: groupId, kind: next }),
+          });
+        } catch {
+          // Next state poll restores reality if this failed.
+        }
+      }}
+      title="Tap to cycle: Kid → Adult → none"
+      className={
+        "rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition " +
+        classes
+      }
+    >
+      {label}
+    </button>
   );
 }
 
