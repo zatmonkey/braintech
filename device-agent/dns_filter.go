@@ -461,8 +461,9 @@ func ensureDNSFilterInfra(ctx context.Context) {
 		"",
 		"chain bt_dns_filter_dnat {",
 		"    type nat hook prerouting priority -100; policy accept;",
-		"    ether saddr @" + dnsFilterMacSet + " udp dport 53 dnat to " + dnsFilterListen,
-		"    ether saddr @" + dnsFilterMacSet + " tcp dport 53 dnat to " + dnsFilterListen,
+		// inet table requires the address family on the dnat target.
+		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv4 udp dport 53 dnat ip to " + dnsFilterListen,
+		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv4 tcp dport 53 dnat ip to " + dnsFilterListen,
 		"}",
 		"",
 	}, "\n")
