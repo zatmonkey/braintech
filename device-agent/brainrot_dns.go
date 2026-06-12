@@ -179,22 +179,13 @@ func brainrotDNSWatcher(ctx context.Context, path string) {
 					// rule's MAC list, so we record by MAC (not by rule
 					// alone) — two devices in the same group accumulate
 					// time honestly.
+					//
+					// IP-set population was removed when the architecture
+					// moved to DNS sinkhole (dns_filter.go) — destination
+					// IPs no longer drive enforcement; per-MAC DNS answers
+					// do. This loop is now quota-counting only.
 					if askerMAC != "" {
 						globalQuotaCounter.record(rule.RuleID, askerMAC, time.Now())
-					}
-
-					setName := rule.IP4Set
-					if strings.Contains(ip, ":") {
-						setName = rule.IP6Set
-					}
-					if setName == "" {
-						continue
-					}
-					sub, cancel := context.WithTimeout(ctx, 3*time.Second)
-					err := nftAddElements(sub, setName, []string{ip})
-					cancel()
-					if err != nil {
-						log.Printf("brainrot dns: nft add %s %s: %v", setName, ip, err)
 					}
 				}
 			}

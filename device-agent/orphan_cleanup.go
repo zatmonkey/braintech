@@ -73,6 +73,14 @@ var managedPrefixes = []struct {
 	{"/usr/share/nftables.d/chain-pre/forward/30-bt-*.nft", "firewall"},
 }
 
+// agentOwnedFiles are paths the agent itself maintains (NOT part of the cloud
+// desired state). They land inside the managedPrefixes globs, so without this
+// allow-list the cleanup loop would delete them on every tick. Keep this in
+// sync with whatever the agent writes outside the desired bundle.
+var agentOwnedFiles = map[string]bool{
+	dnsFilterInfraPath: true, // /etc/nftables.d/bt-self-dns-filter.nft
+}
+
 func reconcileManagedFiles(ctx context.Context, desiredPath string) {
 	expected, ok := readExpectedFiles(desiredPath)
 	if !ok {
@@ -90,7 +98,7 @@ func reconcileManagedFiles(ctx context.Context, desiredPath string) {
 			continue
 		}
 		for _, f := range matches {
-			if expected[f] {
+			if expected[f] || agentOwnedFiles[f] {
 				continue
 			}
 			log.Printf("orphan cleanup: removing %s (not in current desired)", f)

@@ -391,11 +391,12 @@ export function buildRuleOps(
       ];
     }
     case "block_brainrot_group": {
-      // Structural placeholders — MAC set + domain list are filled in at
-      // assembly time by materializeOps. The nft file defines static
-      // structure (MAC set, empty IP sets, chain); the JSON file tells the
-      // agent which domains to resolve into those IP sets. Agent refreshes
-      // IPs every ~30s — see device-agent/brainrot.go.
+      // DNS-sinkhole architecture: the agent reads the brainrot JSON to know
+      // (a) which MACs to add to the bt_dns_filter_macs nft set and (b) which
+      // domains to return 0.0.0.0 / captiveIP for from those MACs. No nft
+      // include file is emitted — destination-IP firewalling caused Google
+      // CDN collisions (Drive/Docs/Photos shared the YouTube IPs).
+      // See device-agent/dns_filter.go.
       return [
         {
           type: "file.write",
@@ -403,21 +404,14 @@ export function buildRuleOps(
           content: "",
           mode: "644",
         },
-        {
-          type: "file.write",
-          path: brainrotNftPath(ruleId),
-          content: "",
-          mode: "644",
-        },
-        { type: "service", name: "firewall", action: "reload" },
       ];
     }
     case "block_schedule_group": {
-      // Three files: nft (chain + empty sets), brainrot JSON (domains + macs
-      // for the DNS watcher), policy JSON (windows + quotas for the engine).
-      // The MAC set starts empty in the nft file — the policy engine
-      // populates it when enforcement is currently required and clears it
-      // when the schedule says "allow".
+      // DNS-sinkhole architecture: brainrot JSON (domains + macs the agent
+      // sinkholes when the policy engine says enforce) + policy JSON (the
+      // engine's input — windows, quotas, credit balances). The on-device
+      // engine flips its in-memory enforce/allow decision each minute; the
+      // dns_filter pulls from those decisions on every query.
       return [
         {
           type: "file.write",
@@ -431,13 +425,6 @@ export function buildRuleOps(
           content: "",
           mode: "644",
         },
-        {
-          type: "file.write",
-          path: brainrotNftPath(ruleId),
-          content: "",
-          mode: "644",
-        },
-        { type: "service", name: "firewall", action: "reload" },
       ];
     }
     case "force_router_dns": {
@@ -1088,13 +1075,10 @@ export async function materializeOps(
     const p = rule.params as BlockBrainrotGroupParams;
     const macs = ctx.groupMacs?.get(p.group_id) ?? [];
     const domains = p.domains?.length ? p.domains : DEFAULT_BRAINROT_DOMAINS;
-    const nftContent = nftBrainrotFile(rule.rule_id, macs);
     const jsonContent = brainrotStateJson(rule.rule_id, domains, macs);
-    const nftPath = brainrotNftPath(rule.rule_id);
     const jsonPath = brainrotJsonPath(rule.rule_id);
     return rule.ops.map((o) => {
       if (o.type !== "file.write") return o;
-      if (o.path === nftPath) return { ...o, content: nftContent };
       if (o.path === jsonPath) return { ...o, content: jsonContent };
       return o;
     });
@@ -1108,10 +1092,6 @@ export async function materializeOps(
     const domains = p.domains?.length
       ? p.domains
       : brainrotDomainsForApp(p.app_label) ?? DEFAULT_BRAINROT_DOMAINS;
-    // Schedule rules use the SAME nft chain + IP sets as block_brainrot_group,
-    // but the MAC set starts empty — the on-device policy engine populates
-    // it when the schedule says "enforce" and clears it when "allow".
-    const nftContent = nftBrainrotFile(rule.rule_id, []);
     const brainrotContent = brainrotStateJson(rule.rule_id, domains, macs);
     const baseline = ctx.scheduleBaselines?.get(rule.rule_id) ?? {};
     // Brain credit balances for this rule's MACs. The on-device engine
@@ -1145,12 +1125,10 @@ export async function materializeOps(
       creditByMac,
       earnByMac,
     );
-    const nftPath = brainrotNftPath(rule.rule_id);
     const brainrotPath = brainrotJsonPath(rule.rule_id);
     const policyPath = policyDocPath(rule.rule_id);
     return rule.ops.map((o) => {
       if (o.type !== "file.write") return o;
-      if (o.path === nftPath) return { ...o, content: nftContent };
       if (o.path === brainrotPath) return { ...o, content: brainrotContent };
       if (o.path === policyPath) return { ...o, content: policyContent };
       return o;

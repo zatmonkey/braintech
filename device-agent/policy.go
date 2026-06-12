@@ -405,6 +405,10 @@ func policyEvaluatorLoop(ctx context.Context) {
 			return
 		}
 		evaluateAllPolicies(ctx, time.Now())
+		// Push the new enforce/allow snapshot into the DNS filter's MAC
+		// set so a quota flip takes effect on the very next query, not
+		// after the 15s mac-sync loop catches up.
+		syncDNSFilterMacs(ctx)
 		select {
 		case <-ctx.Done():
 			globalQuotaCounter.snapshotToDisk(time.Now())

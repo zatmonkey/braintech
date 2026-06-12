@@ -36,12 +36,14 @@ func (a *Agent) Run(ctx context.Context) {
 	go a.telemetryLoop(ctx) // report network/system state every minute
 	go tailDNSLog(ctx, a.usage, "/tmp/dnsmasq.log")
 	go rotateDNSLog(ctx, "/tmp/dnsmasq.log", 4<<20) // 4 MiB cap
-	go brainrotRefreshLoop(ctx)                     // resolve brainrot domains → nft IP sets
-	go brainrotDNSWatcher(ctx, "/tmp/dnsmasq.log")  // catch CNAME chains + dynamic CDN subdomains in real time
+	go brainrotDNSWatcher(ctx, "/tmp/dnsmasq.log")  // count quota minutes from dnsmasq's query log (non-DNAT'd kids)
 	go ensureCaptiveInfra(ctx)                      // alias IP + dnsmasq "brain" hostname (one-time idempotent)
+	go ensureDNSFilterInfra(ctx)                    // bt_dns_filter_macs set + DNAT chain (one-time idempotent)
 	go captiveServer(ctx)                           // http://brain redirector + HTTP captive page
+	go dnsFilterServer(ctx, a.usage)                // per-MAC DNS sinkhole on 192.168.1.254:5453 (UDP+TCP)
+	go dnsFilterMacSyncLoop(ctx)                    // keep bt_dns_filter_macs in sync with current enforce-mode MACs
 	go mdnsResponder(ctx, net.ParseIP(captiveIP))   // answer brain.local on multicast 5353 (iOS demands mDNS for .local)
-	go policyEvaluatorLoop(ctx)                     // time/quota policy engine — toggles nft MAC sets per /etc/braintech/policy/*.json
+	go policyEvaluatorLoop(ctx)                     // time/quota policy engine — toggles enforce/allow per /etc/braintech/policy/*.json
 	go orphanCleanupLoop(ctx, a.cfg.DesiredPath)    // self-heal: delete managed files the current desired doesn't reference
 	backoff := time.Second
 	for {
