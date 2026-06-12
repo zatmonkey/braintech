@@ -105,10 +105,16 @@ Questions? Reply to this email — it goes straight to a human.
         </div>`,
       }),
     });
+    const responseBody = await res.text().catch(() => "");
     if (!res.ok) {
-      console.error("[email] resend (discount) failed", res.status, await res.text().catch(() => ""));
+      console.error("[email] resend (discount) failed", res.status, responseBody);
       return { delivered: false };
     }
+    // Log success too — Resend's `onboarding@resend.dev` sandbox sender
+    // accepts the request and returns 200 + an id even for recipients
+    // it won't actually deliver to. Surfacing the id + 'to' makes the
+    // "Resend says ok but nothing arrives" case debuggable from logs.
+    console.log("[email] resend (discount) sent", { to, body: responseBody.slice(0, 200) });
     return { delivered: true };
   } catch (err) {
     console.error("[email] discount send error", err);
