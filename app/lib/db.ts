@@ -288,6 +288,23 @@ export async function ensureAuthSchema(
       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `;
+  // Co-admins on a household. owner_email is the primary owner of all
+  // the data (devices, rules, kids, content); admin_email is another
+  // person allowed to sign in and act AS the household. On OTP verify
+  // for X, /api/auth/verify checks here and stamps the session cookie
+  // with owner_email (not X), so every existing query keyed on
+  // owner_email keeps working.
+  await sql`
+    CREATE TABLE IF NOT EXISTS account_admins (
+      owner_email   TEXT NOT NULL,
+      admin_email   TEXT NOT NULL,
+      invited_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      accepted_at   TIMESTAMPTZ,
+      invited_by    TEXT,
+      PRIMARY KEY (owner_email, admin_email)
+    );
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS account_admins_admin_idx ON account_admins (LOWER(admin_email));`;
   authSchemaReady = true;
 }
 

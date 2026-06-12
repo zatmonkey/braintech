@@ -38,7 +38,25 @@ export async function POST(req: Request) {
   // success — consume the code, link any unclaimed device, set the session
   await sql`DELETE FROM otps WHERE email = ${email};`;
 
+  // If `email` was invited as a co-admin on someone's household, the
+  // session represents the household, not them. They get to act AS the
+  // owner — all the existing owner_email-scoped queries keep working.
+  // Picks the most-recently-accepted household if they're an admin on
+  // more than one (rare for the demo but defensible).
+  const adminRows = (await sql`
+    SELECT owner_email, accepted_at FROM account_admins
+    WHERE LOWER(admin_email) = ${email}
+    ORDER BY accepted_at NULLS LAST, invited_at DESC LIMIT 1;
+  `) as { owner_email: string; accepted_at: string | null }[];
+  const householdEmail = adminRows[0]?.owner_email ?? email;
+  if (adminRows[0] && !adminRows[0].accepted_at) {
+    await sql`
+      UPDATE account_admins SET accepted_at = NOW()
+      WHERE owner_email = ${householdEmail} AND LOWER(admin_email) = ${email};
+    `;
+  }
+
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(sessionCookie.name, signSession(email), sessionCookie.options);
+  res.cookies.set(sessionCookie.name, signSession(householdEmail), sessionCookie.options);
   return res;
 }

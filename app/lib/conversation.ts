@@ -646,6 +646,30 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "invite_admin",
+    description:
+      "Invite another email as a co-admin on this household. They'll get an email and, once they sign in, can manage rules / kids / devices just like the primary. Use when the parent says 'add julie@example.com as an admin' / 'invite my partner' / 'let mom help manage this'. Idempotent — re-inviting is a no-op (no duplicate emails). Cannot invite the primary owner's own email.",
+    input_schema: {
+      type: "object",
+      properties: {
+        email: { type: "string", description: "Email address to invite." },
+      },
+      required: ["email"],
+    },
+  },
+  {
+    name: "remove_admin",
+    description:
+      "Revoke a co-admin's access. After this, that email can no longer sign in as this household. Use when the parent says 'remove julie' / 'kick X off the admins' / 'revoke that invite'. The primary owner cannot be removed this way — refuse politely if asked.",
+    input_schema: {
+      type: "object",
+      properties: {
+        email: { type: "string", description: "Email of the admin to revoke." },
+      },
+      required: ["email"],
+    },
+  },
+  {
     name: "set_group_kind",
     description:
       "Tag a household group as a kid or an adult, optionally setting their name + age too. Use this when the parent says 'mark Maya as a kid' / 'Julie is a 9-year-old' / 'Mom is an adult' / 'set Theo's age to 12' / 'just call her Mia, not Maya'. Pass kind='kid' or 'adult' to set; kind=null clears it. person_name and age are optional — omitted fields keep their existing values. The group is found by person_name match against CONTEXT > GROUPS (the EXISTING name; pass the NEW name in the same call if you're also renaming). Affects who the engine considers an individual + how /mine renders the portal greeting.",

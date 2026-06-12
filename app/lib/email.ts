@@ -201,3 +201,65 @@ ${opts.dashboard_url}
     return { delivered: false };
   }
 }
+
+/**
+ * "X invited you to co-admin their Braintech household." Lands on the
+ * normal /login page; the invited admin signs in with the email this
+ * was sent to and is automatically resolved to the household session
+ * by /api/auth/verify.
+ */
+export async function sendAdminInviteEmail(
+  to: string,
+  opts: { invited_by: string; household: string },
+): Promise<{ delivered: boolean }> {
+  const key = process.env.RESEND_API_KEY;
+  const from = process.env.EMAIL_FROM ?? "Braintech <onboarding@resend.dev>";
+  const site = process.env.NEXT_PUBLIC_SITE_URL ?? "https://getbraintech.com";
+  const loginUrl = `${site}/login?from=/app`;
+  if (!key) {
+    console.log(`[email] DEV — admin invite for ${to} (by ${opts.invited_by})`);
+    return { delivered: false };
+  }
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to,
+        subject: `${opts.invited_by} invited you to co-admin a Braintech household`,
+        text:
+`${opts.invited_by} added you as a co-admin on their Braintech household (${opts.household}).
+
+Sign in here to accept — same email, magic-code flow:
+
+${loginUrl}
+
+You'll have the same powers they do: manage rules, see device usage, run the kid earn flow. If this is a surprise, just ignore — nothing happens until you sign in.
+
+— Braintech`,
+        html: `<div style="font-family:system-ui,-apple-system,sans-serif;font-size:16px;line-height:1.55;color:#1a1714;max-width:520px;margin:0 auto;padding:24px">
+          <p style="margin:0 0 12px;font-size:20px;font-weight:600">${opts.invited_by} invited you to co-admin a Braintech household.</p>
+          <p style="margin:0 0 16px;color:#4a443d">Same powers they have — manage rules, see device usage, run the kid earn flow. Sign in with this email to accept.</p>
+          <p style="margin:0 0 24px">
+            <a href="${loginUrl}" style="display:inline-block;background:#d9550f;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600">Accept &amp; sign in →</a>
+          </p>
+          <p style="margin:0;color:#7a7368;font-size:13px">If this is a surprise, just ignore — nothing happens until you sign in.</p>
+        </div>`,
+      }),
+    });
+    const body = await res.text().catch(() => "");
+    if (!res.ok) {
+      console.error("[email] resend (admin invite) failed", res.status, body);
+      return { delivered: false };
+    }
+    console.log("[email] resend (admin invite) sent", { to, body: body.slice(0, 200) });
+    return { delivered: true };
+  } catch (err) {
+    console.error("[email] admin invite send error", err);
+    return { delivered: false };
+  }
+}

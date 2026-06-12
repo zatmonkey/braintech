@@ -41,6 +41,7 @@ import {
 import { loadGroupMacs } from "@/app/lib/groups";
 import { grantCredit, deductCredit } from "@/app/lib/credit-grant";
 import { resolvePersonName } from "@/app/lib/persons";
+import { sendAdminInviteEmail } from "@/app/lib/email";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -658,6 +659,55 @@ export async function POST(req: Request) {
         } catch (err) {
           return `error: ${(err as Error).message}`;
         }
+      }
+      if (name === "invite_admin") {
+        const target = String(i.email ?? "").trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
+          return "error: not a valid email";
+        }
+        if (target === email.toLowerCase()) {
+          return `error: ${target} is already the primary owner of this household.`;
+        }
+        const conflict = (await sql`
+          SELECT 1 FROM account_admins
+          WHERE LOWER(admin_email) = ${target} AND owner_email <> ${email}
+          LIMIT 1;
+        `) as { 1: number }[];
+        if (conflict.length > 0) {
+          return `error: ${target} is already an admin on another household.`;
+        }
+        await sql`
+          INSERT INTO account_admins (owner_email, admin_email, invited_by)
+          VALUES (${email}, ${target}, ${email})
+          ON CONFLICT (owner_email, admin_email) DO NOTHING;
+        `;
+        try {
+          await sendAdminInviteEmail(target, {
+            invited_by: email,
+            household: email,
+          });
+        } catch (err) {
+          console.error("[bri] invite_admin email failed", err);
+        }
+        return `Invited ${target} as a co-admin. They'll get an email; once they sign in they'll have your access.`;
+      }
+      if (name === "remove_admin") {
+        const target = String(i.email ?? "").trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
+          return "error: not a valid email";
+        }
+        if (target === email.toLowerCase()) {
+          return `error: can't remove yourself as the primary owner.`;
+        }
+        const result = (await sql`
+          DELETE FROM account_admins
+          WHERE owner_email = ${email} AND LOWER(admin_email) = ${target}
+          RETURNING admin_email;
+        `) as { admin_email: string }[];
+        if (result.length === 0) {
+          return `${target} isn't currently an admin on this household.`;
+        }
+        return `Revoked ${target}'s admin access.`;
       }
       if (name === "set_group_kind") {
         const personName = i.person_name ? String(i.person_name).trim() : "";
