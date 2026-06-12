@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"time"
 )
@@ -39,6 +40,7 @@ func (a *Agent) Run(ctx context.Context) {
 	go brainrotDNSWatcher(ctx, "/tmp/dnsmasq.log")  // catch CNAME chains + dynamic CDN subdomains in real time
 	go ensureCaptiveInfra(ctx)                      // alias IP + dnsmasq "brain" hostname (one-time idempotent)
 	go captiveServer(ctx)                           // http://brain redirector + HTTP captive page
+	go mdnsResponder(ctx, net.ParseIP(captiveIP))   // answer brain.local on multicast 5353 (iOS demands mDNS for .local)
 	go policyEvaluatorLoop(ctx)                     // time/quota policy engine — toggles nft MAC sets per /etc/braintech/policy/*.json
 	go orphanCleanupLoop(ctx, a.cfg.DesiredPath)    // self-heal: delete managed files the current desired doesn't reference
 	backoff := time.Second
