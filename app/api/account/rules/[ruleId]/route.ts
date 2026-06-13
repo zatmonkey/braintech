@@ -68,11 +68,15 @@ export async function DELETE(
       return base;
     }),
   );
-  const desired = assembleDesired(allRules);
-
   const dev = (await sql`
-    SELECT desired_version FROM devices WHERE device_id = ${r.device_id} AND owner_email = ${email};
-  `) as { desired_version: number }[];
+    SELECT desired_version, iana_timezone, posix_timezone FROM devices
+    WHERE device_id = ${r.device_id} AND owner_email = ${email};
+  `) as { desired_version: number; iana_timezone: string | null; posix_timezone: string | null }[];
+  const tz =
+    dev[0]?.iana_timezone && dev[0]?.posix_timezone
+      ? { iana: dev[0].iana_timezone, posix: dev[0].posix_timezone }
+      : undefined;
+  const desired = assembleDesired(allRules, { timezone: tz });
   const next = (dev[0]?.desired_version ?? 0) + 1;
   await sql`
     UPDATE devices SET desired = ${JSON.stringify(desired)}::jsonb, desired_version = ${next}, updated_at = NOW()

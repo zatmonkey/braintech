@@ -1154,7 +1154,17 @@ export async function materializeOps(
  * ops only; active rules contribute cleanup + apply. This makes the desired
  * state a pure function of (allRules) with no path-dependence.
  */
-export function assembleDesired(allRules: AccountRule[]): Op[] {
+export interface AssembleDesiredOpts {
+  /** Household timezone — sets system clock locale on the router so daily
+   *  quotas roll at local midnight, not UTC midnight. Both names recorded:
+   *  `iana` for display/audit, `posix` for what UCI actually consumes. */
+  timezone?: { iana: string; posix: string };
+}
+
+export function assembleDesired(
+  allRules: AccountRule[],
+  opts: AssembleDesiredOpts = {},
+): Op[] {
   const ops: Op[] = [];
 
   // (1) cleanup — every owned section across every rule we know about.
@@ -1171,7 +1181,29 @@ export function assembleDesired(allRules: AccountRule[]): Op[] {
     for (const o of r.ops) ops.push(o);
   }
 
-  // (3) commit + reload firewall + dhcp/dnsmasq unconditionally
+  // (3) system timezone — set/refresh on every assembly so a corrupted UCI
+  // doesn't leave the router on UTC forever. Idempotent at the agent: same
+  // values produce zero-effect uci.set + a cheap service reload.
+  if (opts.timezone) {
+    ops.push({
+      type: "uci.set",
+      config: "system",
+      section: "@system[0]",
+      option: "zonename",
+      value: opts.timezone.iana,
+    });
+    ops.push({
+      type: "uci.set",
+      config: "system",
+      section: "@system[0]",
+      option: "timezone",
+      value: opts.timezone.posix,
+    });
+    ops.push({ type: "uci.commit", config: "system" });
+    ops.push({ type: "service", name: "system", action: "reload" });
+  }
+
+  // (4) commit + reload firewall + dhcp/dnsmasq unconditionally
   ops.push({ type: "uci.commit", config: "firewall" });
   ops.push({ type: "uci.commit", config: "dhcp" });
   ops.push({ type: "service", name: "firewall", action: "reload" });

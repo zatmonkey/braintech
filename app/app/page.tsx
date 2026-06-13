@@ -29,6 +29,7 @@ import { InstallPrompt } from "./install-prompt";
 import { BrainrotMeter } from "./brainrot-meter";
 import { PushToggle } from "./push-toggle";
 import { AdminsPanel } from "./admins-panel";
+import { TimezoneSync } from "./timezone-sync";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -321,6 +322,7 @@ export default async function Dashboard() {
       </section>
 
       <AdminsPanel />
+      <TimezoneSync />
     </main>
   );
 }

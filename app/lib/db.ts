@@ -226,6 +226,8 @@ export async function ensureDeviceSchema(
   await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS owner_email TEXT;`;
   await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS telemetry JSONB;`;
   await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS telemetry_at TIMESTAMPTZ;`;
+  await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS iana_timezone TEXT;`;
+  await sql`ALTER TABLE devices ADD COLUMN IF NOT EXISTS posix_timezone TEXT;`;
   // Per-MAC presence history. Telemetry pushes upsert one row per visible
   // client each tick. The dashboard merges this with client_labels (friendly
   // name) and client_group_memberships (groups) into one canonical

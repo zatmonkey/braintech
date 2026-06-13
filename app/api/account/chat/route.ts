@@ -68,6 +68,8 @@ type DeviceRow = {
   reported_version: number;
   last_seen: string | null;
   telemetry: Telemetry | null;
+  iana_timezone: string | null;
+  posix_timezone: string | null;
 };
 type RuleRow = {
   rule_id: string;
@@ -218,7 +220,8 @@ export async function POST(req: Request) {
   await ensureDefaultGroup(sql, email);
 
   const devices = (await sql`
-    SELECT device_id, label, desired_version, reported_version, last_seen, telemetry
+    SELECT device_id, label, desired_version, reported_version, last_seen, telemetry,
+           iana_timezone, posix_timezone
     FROM devices WHERE owner_email = ${email} ORDER BY created_at;
   `) as DeviceRow[];
   const primary = devices[0]; // v1: act on the first device
@@ -544,7 +547,7 @@ export async function POST(req: Request) {
             return base;
           }),
         );
-        const desired = assembleDesired(allRules);
+        const desired = assembleDesired(allRules, { timezone: primary.iana_timezone && primary.posix_timezone ? { iana: primary.iana_timezone, posix: primary.posix_timezone } : undefined });
         const newVersion = primary.desired_version + 1;
         await sql`
           UPDATE devices SET desired = ${JSON.stringify(desired)}::jsonb, desired_version = ${newVersion}, updated_at = NOW()
@@ -832,7 +835,7 @@ export async function POST(req: Request) {
             return base;
           }),
         );
-        const desired = assembleDesired(allRules);
+        const desired = assembleDesired(allRules, { timezone: primary.iana_timezone && primary.posix_timezone ? { iana: primary.iana_timezone, posix: primary.posix_timezone } : undefined });
         const newVersion = primary.desired_version + 1;
         await sql`
           UPDATE devices SET desired = ${JSON.stringify(desired)}::jsonb, desired_version = ${newVersion}, updated_at = NOW()
