@@ -43,3 +43,5 @@ next-env.d.ts
 scripts/btnet.env
 .shot.png
 .shots/
+.gitsecret/keys/random_seed
+!*.secret
