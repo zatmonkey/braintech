@@ -324,14 +324,7 @@ func blockedForMAC(mac, queryName string) bool {
 	}
 	enforceByID := buildEnforceModeIndex()
 	for _, r := range rules {
-		scoped := false
-		for _, m := range r.MACs {
-			if strings.ToLower(m) == mac {
-				scoped = true
-				break
-			}
-		}
-		if !scoped {
+		if !macInScope(mac, r.MACs) {
 			continue
 		}
 		if isScheduledRule(r.RuleID) && !enforceByID[r.RuleID] {
@@ -355,14 +348,7 @@ func recordQuotaForBlockedMAC(mac, queryName string) {
 	rules := getCachedBrainrotRules()
 	now := time.Now()
 	for _, r := range rules {
-		scoped := false
-		for _, m := range r.MACs {
-			if strings.ToLower(m) == mac {
-				scoped = true
-				break
-			}
-		}
-		if !scoped {
+		if !macInScope(mac, r.MACs) {
 			continue
 		}
 		if !matchesAny(queryName, r.Domains) {

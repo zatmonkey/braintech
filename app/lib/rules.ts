@@ -144,12 +144,36 @@ export const DEFAULT_BRAINROT_DOMAINS: string[] = Object.values(
 ).flat();
 
 /**
+ * Whole-internet sentinel. A rule whose domains are exactly ["*"] sinkholes
+ * EVERY domain for its MACs while enforcing — the agent's matchesAny treats
+ * "*" as match-all. Used for "no internet after 9pm" style rules where
+ * enumerating domains is impossible.
+ */
+export const ALL_INTERNET_DOMAINS: string[] = ["*"];
+
+const INTERNET_LABELS = new Set([
+  "internet",
+  "the internet",
+  "all internet",
+  "everything",
+  "all",
+  "wifi",
+  "wi-fi",
+  "online",
+  "web",
+]);
+
+/**
  * Resolve an `app_label` (as the parent / Bri uses it — "YouTube", "tiktok",
- * "X / Twitter") to its domain bundle. Returns undefined if the label
- * doesn't match a known app; callers should fall back appropriately.
+ * "X / Twitter") to its domain bundle. Internet-ish labels ("Internet",
+ * "everything", "wifi") resolve to the match-all sentinel ["*"] — a bedtime
+ * "no internet" rule must block the whole network, not just the brainrot
+ * bundles. Returns undefined if the label doesn't match a known app;
+ * callers should fall back appropriately.
  */
 export function brainrotDomainsForApp(appLabel: string): string[] | undefined {
   const key = appLabel.trim().toLowerCase();
+  if (INTERNET_LABELS.has(key)) return ALL_INTERNET_DOMAINS;
   if (BRAINROT_DOMAINS_BY_APP[key]) return BRAINROT_DOMAINS_BY_APP[key];
   // Common aliases the model / parent might use
   const aliases: Record<string, keyof typeof BRAINROT_DOMAINS_BY_APP> = {

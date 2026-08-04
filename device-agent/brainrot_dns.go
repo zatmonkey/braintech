@@ -170,8 +170,17 @@ func brainrotDNSWatcher(ctx context.Context, path string) {
 				// just don't record to the per-MAC counter.
 				askerMAC := leaseCache[asker]
 
+				if askerMAC == "" {
+					continue
+				}
 				for _, rule := range rules {
 					if !matchesAny(original, rule.Domains) {
+						continue
+					}
+					// Only count queries from MACs the rule actually
+					// scopes — otherwise a parent's own YouTube minutes
+					// land in the kid's counter file.
+					if !macInScope(askerMAC, rule.MACs) {
 						continue
 					}
 					// Per-MAC quota record. countPeriod() in the policy
@@ -184,9 +193,7 @@ func brainrotDNSWatcher(ctx context.Context, path string) {
 					// moved to DNS sinkhole (dns_filter.go) — destination
 					// IPs no longer drive enforcement; per-MAC DNS answers
 					// do. This loop is now quota-counting only.
-					if askerMAC != "" {
-						globalQuotaCounter.record(rule.RuleID, askerMAC, time.Now())
-					}
+					globalQuotaCounter.record(rule.RuleID, askerMAC, time.Now())
 				}
 			}
 		}
@@ -217,10 +224,24 @@ func loadBrainrotRules() []brainrotState {
 	return out
 }
 
+// macInScope reports whether mac is one of the rule's member MACs.
+// Case-insensitive — server MACs are lowercase, lease-cache MACs should
+// be too, but don't bet quota accounting on it.
+func macInScope(mac string, ruleMACs []string) bool {
+	for _, m := range ruleMACs {
+		if strings.EqualFold(m, mac) {
+			return true
+		}
+	}
+	return false
+}
+
 // matchesAny suffix-matches a queried domain against a list of blocked
 // domains. `youtube.com` matches `youtube.com` itself OR anything ending
 // in `.youtube.com` (subdomains). Case-fold for safety. Trailing dots
-// from FQDN form are stripped.
+// from FQDN form are stripped. The single entry "*" matches every domain
+// — the server emits it for whole-internet rules ("no internet after
+// 9pm"), where enumerating domains is impossible.
 func matchesAny(domain string, blocked []string) bool {
 	d := strings.ToLower(strings.TrimSuffix(domain, "."))
 	for _, b := range blocked {
@@ -228,7 +249,7 @@ func matchesAny(domain string, blocked []string) bool {
 		if b == "" {
 			continue
 		}
-		if d == b || strings.HasSuffix(d, "."+b) {
+		if b == "*" || d == b || strings.HasSuffix(d, "."+b) {
 			return true
 		}
 	}

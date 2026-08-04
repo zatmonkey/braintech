@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -319,17 +318,14 @@ var globalDecisions = &decisionStore{m: make(map[string]PolicyDecision)}
 policyEvaluator — on-device rule engine.
 
 The cloud writes one JSON file per active policy to /etc/braintech/policy/.
-This goroutine reads them every minute, decides whether each policy should
-currently ENFORCE (block) or ALLOW (pass-through), and toggles the
-corresponding nft MAC set accordingly:
+This goroutine reads them every minute and decides whether each policy
+should currently ENFORCE (block) or ALLOW (pass-through). The decision
+lands in globalDecisions; syncDNSFilterMacs (called after every tick and
+every 15s) turns it into reality by rebuilding the bt_dns_filter_macs nft
+set — members get their DNS DNAT'd to the agent's sinkhole resolver:
 
-	enforce → MAC set populated with the kid's MACs → chain matches → reject
-	allow   → MAC set empty                          → chain doesn't match → packets pass
-
-The nft chain, IP sets, and DNS-tail IP-population are unchanged — they
-already exist from the brainrot rule mechanism. The only new pre-existing
-plumbing is "what's in the MAC set right this second", which is what we
-toggle.
+	enforce → MACs in bt_dns_filter_macs → DNS sinkholed for rule domains
+	allow   → MACs absent                → DNS passes through untouched
 
 Schema: see app/lib/rules.ts -> BlockUnlessPolicy. Kept tiny + stable.
 
@@ -442,11 +438,8 @@ func evaluateAllPolicies(ctx context.Context, now time.Time) {
 		if len(doc.CreditBalanceByMac) > 0 {
 			globalCreditPool.resync(doc.CreditBalanceByMac)
 		}
-		decision, report := evaluate(doc, now)
+		_, report := evaluate(doc, now)
 		globalDecisions.set(report)
-		if err := applyDecision(ctx, doc, decision); err != nil {
-			log.Printf("policy: apply %s (%s): %v", doc.RuleID, decision, err)
-		}
 	}
 }
 
@@ -703,39 +696,9 @@ func baselineFor(doc *policyDoc, macs []string, days []string) int {
 	return total
 }
 
-// applyDecision flips the nft MAC set to match the engine's decision.
-//
-//	enforce → flush + add the kid's MACs back
-//	allow   → flush (chain still installed, just doesn't match anyone)
-//
-// We flush-then-add rather than diff-by-element to keep the code dumb —
-// the set typically has 1–5 MACs, the churn is negligible.
-func applyDecision(ctx context.Context, doc *policyDoc, d decision) error {
-	if doc.NftMacSet == "" {
-		return fmt.Errorf("policy %s missing nft_mac_set", doc.RuleID)
-	}
-	sub, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	flush := exec.CommandContext(sub, "nft", "flush", "set", "inet", "fw4", doc.NftMacSet)
-	flushOut, flushErr := flush.CombinedOutput()
-	if flushErr != nil {
-		if strings.Contains(string(flushOut), "No such file") ||
-			strings.Contains(string(flushOut), "Could not process rule") {
-			return nil
-		}
-		return fmt.Errorf("flush %s: %v: %s", doc.NftMacSet, flushErr, strings.TrimSpace(string(flushOut)))
-	}
-	if d == decisionAllow || len(doc.MACs) == 0 {
-		return nil
-	}
-	macList := strings.Join(doc.MACs, ", ")
-	addArg := "{ " + macList + " }"
-	add := exec.CommandContext(sub, "nft",
-		"add", "element", "inet", "fw4", doc.NftMacSet, addArg,
-	)
-	addOut, addErr := add.CombinedOutput()
-	if addErr != nil {
-		return fmt.Errorf("add %s: %v: %s", doc.NftMacSet, addErr, strings.TrimSpace(string(addOut)))
-	}
-	return nil
-}
+// Enforcement is applied by syncDNSFilterMacs (dns_filter.go): every
+// policy tick and every 15s it rebuilds bt_dns_filter_macs from the
+// current enforce-mode decisions, which DNATs those MACs' DNS to the
+// sinkhole resolver. The old per-rule bt_sched_*_macs nft sets were part
+// of the retired destination-IP reject chain — nothing declares them
+// anymore, so there is nothing to toggle here.
