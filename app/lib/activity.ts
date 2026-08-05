@@ -5,7 +5,8 @@
  * client_group_memberships (which MACs belong to which group) and
  * app_classifications (parent's decision per app per group).
  *
- * Two windows: today (since DATE_TRUNC('day', NOW())) and last 7 days.
+ * Two windows: today (since local midnight in the household's timezone,
+ * from devices.iana_timezone — falls back to UTC) and last 7 days.
  *
  * The default rollup ('brainrot' | 'learning' | 'other') from
  * lib/usage-apps.ts is the household-agnostic prior. An explicit
@@ -41,13 +42,22 @@ export async function loadGroupActivity(
   if (macs.length === 0) return [];
   const macList = macs.map((m) => m.mac.toLowerCase());
 
+  // Household timezone — "today" must start at the family's midnight,
+  // not UTC's (5pm PDT), or evening usage double-reports the next day.
+  const tzRows = (await sql`
+    SELECT iana_timezone::text AS tz FROM devices
+    WHERE owner_email = ${email} AND iana_timezone IS NOT NULL
+    ORDER BY updated_at DESC LIMIT 1;
+  `) as { tz: string }[];
+  const tz = tzRows[0]?.tz ?? "UTC";
+
   // One query: per-app today minutes + 7d minutes, left-joined to
   // classifications. DISTINCT bucket_start per app dedupes co-watch
   // (same minute on 2 devices = 1 minute of attention).
   const rows = (await sql`
     WITH usage AS (
       SELECT app::text AS app,
-             COUNT(DISTINCT bucket_start) FILTER (WHERE bucket_start >= DATE_TRUNC('day', NOW()))::int AS minutes_today,
+             COUNT(DISTINCT bucket_start) FILTER (WHERE bucket_start >= DATE_TRUNC('day', NOW() AT TIME ZONE ${tz}) AT TIME ZONE ${tz})::int AS minutes_today,
              COUNT(DISTINCT bucket_start) FILTER (WHERE bucket_start >  NOW() - INTERVAL '7 days')::int AS minutes_7d
       FROM client_usage_minute
       WHERE owner_email = ${email}

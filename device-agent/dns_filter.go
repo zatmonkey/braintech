@@ -105,23 +105,27 @@ func handleUDPQuery(ctx context.Context, conn net.PacketConn, src *net.UDPAddr, 
 	name := strings.TrimSuffix(strings.ToLower(q.Name.String()), ".")
 	mac := lookupMACForFilter(src.IP.String())
 
-	// Record usage for the dashboard — same as the dnsmasq-log tail would,
-	// if our DNAT weren't in the way. Cheap: 1 map lookup + 1 mutex op.
-	if mac != "" && name != "" {
-		if app := classifyApp(name); app != "" {
-			store.record(mac, app, time.Now())
-		}
-	}
-
 	if mac != "" && blockedForMAC(mac, name) {
-		// Also count this against the rule's quota — brainrotDNSWatcher won't
-		// see this query because it never reaches dnsmasq's log.
+		// Sinkholed — the kid never reaches the app, so DON'T record it as
+		// usage: a blocked app retrying in the background would otherwise
+		// keep inflating the dashboard's minutes long after enforcement
+		// kicked in. It still counts against the rule's quota (a blocked
+		// attempt is still the kid trying) — brainrotDNSWatcher won't see
+		// this query because it never reaches dnsmasq's log.
 		recordQuotaForBlockedMAC(mac, name)
 		resp := buildSinkholeResponse(hdr, q)
 		if len(resp) > 0 {
 			_, _ = conn.WriteTo(resp, src)
 		}
 		return
+	}
+
+	// Record usage for the dashboard — same as the dnsmasq-log tail would,
+	// if our DNAT weren't in the way. Cheap: 1 map lookup + 1 mutex op.
+	if mac != "" && name != "" {
+		if app := classifyApp(name); app != "" {
+			store.record(mac, app, time.Now())
+		}
 	}
 
 	forwardUDP(ctx, conn, src, msg)
@@ -204,18 +208,19 @@ func handleTCPConn(ctx context.Context, c net.Conn, store *usageStore) {
 		if qerr == nil {
 			name := strings.TrimSuffix(strings.ToLower(q.Name.String()), ".")
 			mac := lookupMACForFilter(remoteIPOnly(c.RemoteAddr().String()))
-			if mac != "" && name != "" {
-				if app := classifyApp(name); app != "" {
-					store.record(mac, app, time.Now())
-				}
-			}
 			if mac != "" && blockedForMAC(mac, name) {
+				// Sinkholed — quota yes, dashboard usage no (see UDP path).
 				recordQuotaForBlockedMAC(mac, name)
 				resp := buildSinkholeResponse(hdr, q)
 				if len(resp) > 0 {
 					writeTCPDNS(c, resp)
 				}
 				return
+			}
+			if mac != "" && name != "" {
+				if app := classifyApp(name); app != "" {
+					store.record(mac, app, time.Now())
+				}
 			}
 		}
 	}
