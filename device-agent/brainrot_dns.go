@@ -173,6 +173,12 @@ func brainrotDNSWatcher(ctx context.Context, path string) {
 				if askerMAC == "" {
 					continue
 				}
+				// Ad/analytics pixels don't count against quota — see
+				// recordQuotaForBlockedMAC for the same rule on the
+				// sinkhole path.
+				if isTrackerDomain(original) {
+					continue
+				}
 				for _, rule := range rules {
 					if !matchesAny(original, rule.Domains) {
 						continue

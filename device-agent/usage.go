@@ -70,7 +70,10 @@ var appDomains = map[string]string{
 	"byteglb.com": "TikTok", "bytedance.com": "TikTok", "ttwstatic.com": "TikTok",
 	"instagram.com": "Instagram", "cdninstagram.com": "Instagram",
 	"snapchat.com": "Snapchat", "sc-cdn.net": "Snapchat", "snap.com": "Snapchat",
-	"twitter.com": "X", "x.com": "X", "twimg.com": "X", "t.co": "X",
+	// t.co deliberately absent: it's Twitter's link shortener, fired from
+	// articles/chats everywhere (Tracker Radar: "Ad Motivated Tracking") —
+	// x.com + twimg.com cover real usage.
+	"twitter.com": "X", "x.com": "X", "twimg.com": "X",
 	"facebook.com": "Facebook", "fbcdn.net": "Facebook", "fbsbx.com": "Facebook",
 	"reddit.com": "Reddit", "redd.it": "Reddit", "redditstatic.com": "Reddit",
 	"discord.com": "Discord", "discordapp.com": "Discord",
@@ -101,8 +104,19 @@ var appDomains = map[string]string{
 	"nationalgeographic.com": "National Geographic", "natgeokids.com": "National Geographic",
 }
 
+// normalizeDomain lowercases and strips the FQDN trailing dot. Shared by
+// classifyApp and isTrackerDomain (trackers_gen.go).
+func normalizeDomain(domain string) string {
+	return strings.ToLower(strings.TrimSuffix(domain, "."))
+}
+
 func classifyApp(domain string) string {
-	d := strings.ToLower(strings.TrimSuffix(domain, "."))
+	d := normalizeDomain(domain)
+	// Ad/analytics pixels inside app zones (tr.snapchat.com etc.) mean "a
+	// web page ran this company's ad tech", not app usage — don't bucket.
+	if isTrackerDomain(d) {
+		return ""
+	}
 	if app, ok := appDomains[d]; ok {
 		return app
 	}

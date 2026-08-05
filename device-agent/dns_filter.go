@@ -349,6 +349,11 @@ func recordQuotaForBlockedMAC(mac, queryName string) {
 	if mac == "" || queryName == "" {
 		return
 	}
+	// A pixel/beacon query isn't the kid trying to use the app — don't
+	// burn their quota for a web page's ad stack phoning home.
+	if isTrackerDomain(queryName) {
+		return
+	}
 	mac = strings.ToLower(mac)
 	rules := getCachedBrainrotRules()
 	now := time.Now()
