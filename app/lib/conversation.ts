@@ -1,6 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+// Marketing-side chats (onboarding interview, demo widget): simple flows,
+// unpredictable volume — the fast/cheap tier is the right fit.
 const MODEL = "claude-haiku-4-5";
+// Account chat (Bri): multi-step tool orchestration over live rules —
+// worth the bigger model. Sonnet 5 runs adaptive thinking by default and
+// max_tokens caps thinking + reply together, hence the larger budget on
+// its call site.
+const ACCOUNT_MODEL = "claude-sonnet-5";
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
@@ -820,8 +827,8 @@ export async function runAccountChatTurn(opts: {
 
   for (let i = 0; i < 5; i++) {
     const resp = await getClient().messages.create({
-      model: MODEL,
-      max_tokens: 700,
+      model: ACCOUNT_MODEL,
+      max_tokens: 4000,
       system: [
         { type: "text", text: ACCOUNT_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
         { type: "text", text: `CONTEXT (live, this parent's setup):\n${opts.context}` },

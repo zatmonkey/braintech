@@ -296,20 +296,32 @@ export async function POST(req: Request) {
     notes: memRows[0]?.notes ?? "",
   };
 
+  // Bounded conversation history: the last few turns from the past 24h,
+  // fetched BEFORE inserting the current message. This is what lets a
+  // clarifier reply ("the 29 mins") be interpreted against the question
+  // Bri just asked. State never comes from here — the LIVE STATE block
+  // below is re-sent fresh every turn and the system prompt's "trust
+  // CONTEXT over chat history" rule governs any conflict (that rule is
+  // what previously made stateless turns necessary; history rows are raw
+  // message text without LIVE STATE snapshots, so stale-state anchoring
+  // has nothing to anchor to).
+  const HISTORY_MESSAGES = 12;
+  const histRows = (await sql`
+    SELECT role::text AS role, content::text AS content FROM chat_messages
+    WHERE session_id = ${sessionId} AND created_at > NOW() - INTERVAL '24 hours'
+    ORDER BY created_at DESC LIMIT ${HISTORY_MESSAGES};
+  `) as { role: string; content: string }[];
+  histRows.reverse();
+  // Empty text blocks are rejected by the API — drop blank rows.
+  for (let i = histRows.length - 1; i >= 0; i--) {
+    if (!histRows[i].content?.trim()) histRows.splice(i, 1);
+  }
+  // The first message the API sees must be role 'user' — drop a leading
+  // assistant tail left over from the LIMIT cut.
+  while (histRows.length > 0 && histRows[0].role !== "user") histRows.shift();
+
   await sql`INSERT INTO chat_messages (session_id, role, content) VALUES (${sessionId}, 'user', ${message});`;
 
-  // No chat history. Every turn is stateless: CONTEXT (in system) +
-  // LIVE STATE (in this turn) + the user's actual message. The two
-  // things history WAS being kept for — multi-turn confirmation
-  // ("yes") and clarifier follow-ups — both work without it:
-  //   - "yes" + PENDING PROPOSAL in CONTEXT → apply_pending_rule.
-  //   - A short clarifier reply that needs prior context to interpret
-  //     is rare in practice; if it happens, Bri asks the parent to
-  //     re-state the full request.
-  // History anchoring was the source of "I apologise, I made a
-  // mistake" preambles and "already blocked" hallucinations — and
-  // both were costing apply turns where Bri talked instead of tool-
-  // calling. Cleanest fix is to delete the rope.
   const context = buildContext(devices, labels, groupRows, membership, activeRules, pendingInitial, memory);
 
   const userTurn = [
@@ -320,6 +332,12 @@ export async function POST(req: Request) {
     message,
   ].join("\n");
   const history: Anthropic.MessageParam[] = [
+    ...histRows.map(
+      (r): Anthropic.MessageParam => ({
+        role: r.role === "assistant" ? "assistant" : "user",
+        content: r.content,
+      }),
+    ),
     { role: "user", content: userTurn },
   ];
 
