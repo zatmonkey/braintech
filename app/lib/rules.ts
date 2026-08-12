@@ -151,6 +151,19 @@ export const DEFAULT_BRAINROT_DOMAINS: string[] = Object.values(
  */
 export const ALL_INTERNET_DOMAINS: string[] = ["*"];
 
+/**
+ * Per-app COUNT-ONLY domains: they tick the quota counter but are never
+ * sinkholed. googlevideo/ggpht are the YouTube playback CDN — shared with
+ * Google Photos/Drive, so blocking them breaks Photos — but during
+ * playback they resolve nearly every minute, which makes them the honest
+ * measure of watch time. Without them a 30-min quota only counts page
+ * loads: one youtube.com hit "buys" a 20-minute video and the meter
+ * reads 12 while the wall clock reads 50.
+ */
+export const COUNT_ONLY_DOMAINS_BY_APP: Record<string, string[]> = {
+  youtube: ["googlevideo.com", "ggpht.com"],
+};
+
 const INTERNET_LABELS = new Set([
   "internet",
   "the internet",
@@ -171,25 +184,41 @@ const INTERNET_LABELS = new Set([
  * bundles. Returns undefined if the label doesn't match a known app;
  * callers should fall back appropriately.
  */
+// Common aliases the model / parent might use, shared by the domain and
+// count-only lookups so they can't disagree about what "yt" means.
+const APP_LABEL_ALIASES: Record<string, keyof typeof BRAINROT_DOMAINS_BY_APP> = {
+  x: "twitter",
+  "x.com": "twitter",
+  "x / twitter": "twitter",
+  "twitter/x": "twitter",
+  "yt": "youtube",
+  "ig": "instagram",
+  "insta": "instagram",
+  "threads": "instagram",
+  "tt": "tiktok",
+  "snap": "snapchat",
+};
+
+function canonicalAppKey(appLabel: string): string {
+  const key = appLabel.trim().toLowerCase();
+  return APP_LABEL_ALIASES[key] ?? key;
+}
+
 export function brainrotDomainsForApp(appLabel: string): string[] | undefined {
   const key = appLabel.trim().toLowerCase();
   if (INTERNET_LABELS.has(key)) return ALL_INTERNET_DOMAINS;
-  if (BRAINROT_DOMAINS_BY_APP[key]) return BRAINROT_DOMAINS_BY_APP[key];
-  // Common aliases the model / parent might use
-  const aliases: Record<string, keyof typeof BRAINROT_DOMAINS_BY_APP> = {
-    x: "twitter",
-    "x.com": "twitter",
-    "x / twitter": "twitter",
-    "twitter/x": "twitter",
-    "yt": "youtube",
-    "ig": "instagram",
-    "insta": "instagram",
-    "threads": "instagram",
-    "tt": "tiktok",
-    "snap": "snapchat",
-  };
-  const aliased = aliases[key];
-  return aliased ? BRAINROT_DOMAINS_BY_APP[aliased] : undefined;
+  return BRAINROT_DOMAINS_BY_APP[canonicalAppKey(appLabel)];
+}
+
+/**
+ * Count-only domains for an app label (see COUNT_ONLY_DOMAINS_BY_APP).
+ * Empty for apps without a playback CDN split and for whole-internet
+ * rules (where domains is already ["*"], counting everything).
+ */
+export function countOnlyDomainsForApp(appLabel: string): string[] {
+  const key = appLabel.trim().toLowerCase();
+  if (INTERNET_LABELS.has(key)) return [];
+  return COUNT_ONLY_DOMAINS_BY_APP[canonicalAppKey(appLabel)] ?? [];
 }
 
 export interface AccountRule {
@@ -815,6 +844,12 @@ export function brainrotStateJson(
   ruleId: string,
   domains: string[],
   macs: string[],
+  /**
+   * Domains that COUNT toward the quota but are never sinkholed —
+   * playback CDNs shared with other products (googlevideo ↔ Google
+   * Photos). See COUNT_ONLY_DOMAINS_BY_APP.
+   */
+  countDomains: string[] = [],
 ): string {
   return JSON.stringify(
     {
@@ -823,6 +858,7 @@ export function brainrotStateJson(
       ip6_set: `bt_${ruleId}_ips6`,
       domains,
       macs,
+      ...(countDomains.length > 0 ? { count_domains: countDomains } : {}),
       updated_at: new Date().toISOString(),
     },
     null,
@@ -940,8 +976,18 @@ export function policyBlockUnlessJson(
    * the quiz is scored.
    */
   earnSessionsByMac: Record<string, string> = {},
+  /**
+   * YYYY-MM-DD key the baseline belongs to, in the HOUSEHOLD's timezone —
+   * the agent's counter keys days in local time (its clock is set from
+   * the router zonename), so a UTC key here lands the baseline on the
+   * wrong day for most of the US evening. Defaults to UTC for callers
+   * that don't know the household tz.
+   */
+  baselineDayKey?: string,
+  /** Count-toward-quota-but-never-block domains (see brainrotStateJson). */
+  countDomains: string[] = [],
 ): string {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = baselineDayKey ?? new Date().toISOString().slice(0, 10);
   const baselineByDay: Record<string, Record<string, number>> = {};
   if (Object.keys(baselineByMacToday).length > 0) {
     baselineByDay[today] = baselineByMacToday;
@@ -960,6 +1006,7 @@ export function policyBlockUnlessJson(
     allow_windows: allowWindows,
     allow_quotas: allowQuotas,
     updated_at: new Date().toISOString(),
+    ...(countDomains.length > 0 ? { count_domains: countDomains } : {}),
     ...(Object.keys(baselineByDay).length > 0 ? { baseline_by_day: baselineByDay } : {}),
     ...(Object.keys(creditByMac).length > 0 ? { credit_balance_by_mac: creditByMac } : {}),
     ...(Object.keys(earnSessionsByMac).length > 0
@@ -1032,6 +1079,14 @@ export type MaterializeContext = {
    * minutes the kid burned earlier in the day.
    */
   scheduleBaselines?: Map<string, Record<string, number>>;
+  /**
+   * YYYY-MM-DD day the baselines were computed for, in the HOUSEHOLD's
+   * timezone (the agent keys its counter on local days). Callers that
+   * pass scheduleBaselines should pass this too; without it the policy
+   * doc falls back to the UTC day, which is wrong for most of the US
+   * evening.
+   */
+  baselineDayKey?: string;
   /**
    * Current brain-credit balance per MAC, keyed lowercase. Embedded in
    * the policy.json file so the on-device engine knows how many bonus
@@ -1116,7 +1171,8 @@ export async function materializeOps(
     const domains = p.domains?.length
       ? p.domains
       : brainrotDomainsForApp(p.app_label) ?? DEFAULT_BRAINROT_DOMAINS;
-    const brainrotContent = brainrotStateJson(rule.rule_id, domains, macs);
+    const countDomains = countOnlyDomainsForApp(p.app_label);
+    const brainrotContent = brainrotStateJson(rule.rule_id, domains, macs, countDomains);
     const baseline = ctx.scheduleBaselines?.get(rule.rule_id) ?? {};
     // Brain credit balances for this rule's MACs. The on-device engine
     // spends from these when a kid hits their daily quota, before
@@ -1148,6 +1204,8 @@ export async function materializeOps(
       baseline,
       creditByMac,
       earnByMac,
+      ctx.baselineDayKey,
+      countDomains,
     );
     const brainrotPath = brainrotJsonPath(rule.rule_id);
     const policyPath = policyDocPath(rule.rule_id);

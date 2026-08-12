@@ -18,12 +18,18 @@ import (
 // rule. The agent uses it to know which nft sets to populate from which
 // domains. Schema is small + stable on purpose.
 type brainrotState struct {
-	RuleID    string   `json:"rule_id"`
-	IP4Set    string   `json:"ip4_set"`
-	IP6Set    string   `json:"ip6_set"`
-	Domains   []string `json:"domains"`
-	MACs      []string `json:"macs"`
-	UpdatedAt string   `json:"updated_at"`
+	RuleID  string   `json:"rule_id"`
+	IP4Set  string   `json:"ip4_set"`
+	IP6Set  string   `json:"ip6_set"`
+	Domains []string `json:"domains"`
+	MACs    []string `json:"macs"`
+	// CountDomains tick the quota counter but are never sinkholed —
+	// playback CDNs shared with other products (googlevideo ↔ Google
+	// Photos). They make the quota meter track actual watch time: the
+	// player re-resolves them nearly every minute during playback,
+	// while the blockable domains only appear on page loads.
+	CountDomains []string `json:"count_domains,omitempty"`
+	UpdatedAt    string   `json:"updated_at"`
 }
 
 const brainrotDir = "/etc/braintech/brainrot"

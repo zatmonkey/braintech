@@ -10,6 +10,8 @@ import {
   ensureDefaultGroup,
 } from "@/app/lib/db";
 import { runAccountChatTurn, ACCOUNT_TOOLS } from "@/app/lib/conversation";
+import { loadScheduleBaselines } from "@/app/lib/schedule-baselines";
+import { logRuleAudit } from "@/app/lib/rule-audit";
 import {
   newRuleId,
   newGroupId,
@@ -498,6 +500,14 @@ export async function POST(req: Request) {
           INSERT INTO account_rules (rule_id, owner_email, device_id, name, rule_type, summary, params, ops, active)
           VALUES (${p.rule_id}, ${email}, ${primary.device_id}, ${p.name}, ${p.rule_type}, ${p.summary}, ${JSON.stringify(p.params)}::jsonb, ${JSON.stringify(p.ops)}::jsonb, TRUE);
         `;
+        await logRuleAudit(sql, {
+          owner_email: email,
+          rule_id: p.rule_id,
+          action: "create",
+          source: "bri",
+          actor: email,
+          detail: p.name,
+        });
         // Rebuild desired from every rule we've ever issued (active or not).
         // Inactive ones contribute cleanup ops; active ones contribute apply too.
         // Active rule ops are MATERIALIZED fresh (block_managed_list pulls a
@@ -507,31 +517,11 @@ export async function POST(req: Request) {
           FROM account_rules WHERE owner_email = ${email} AND device_id = ${primary.device_id};
         `) as RuleRow[];
         const groupMacs = await loadGroupMacs(sql, email);
-        // Pre-fetch baseline minutes used today for each active schedule
-        // rule, keyed by rule_id then MAC. Seeds the agent's on-device
-        // quota counter so a "105 min/day" rule applied at 22:00 respects
-        // minutes already burned earlier in the day.
-        const scheduleBaselines = new Map<string, Record<string, number>>();
-        for (const r of allRows) {
-          if (r.rule_type !== "block_schedule_group" || !r.active) continue;
-          const sp = r.params as BlockScheduleGroupParams;
-          const macsForRule = groupMacs.get(sp.group_id) ?? [];
-          if (macsForRule.length === 0) continue;
-          const usage = (await sql`
-            SELECT mac::text AS mac, COUNT(DISTINCT bucket_start)::int AS minutes
-            FROM client_usage_minute
-            WHERE owner_email = ${email}
-              AND mac = ANY(${macsForRule}::text[])
-              AND app = ${sp.app_label}
-              AND bucket_start >= DATE_TRUNC('day', NOW())
-            GROUP BY mac;
-          `) as { mac: string; minutes: number }[];
-          const perMac: Record<string, number> = {};
-          for (const u of usage) {
-            perMac[u.mac.toLowerCase()] = Number(u.minutes);
-          }
-          scheduleBaselines.set(r.rule_id, perMac);
-        }
+        // Baseline minutes used since HOUSEHOLD-local midnight per active
+        // schedule rule — seeds the agent's counter so a "105 min/day"
+        // rule applied at 22:00 respects minutes burned earlier today.
+        const { baselines: scheduleBaselines, dayKey: baselineDayKey } =
+          await loadScheduleBaselines(sql, email, allRows, groupMacs);
         const allRules: AccountRule[] = await Promise.all(
           allRows.map(async (r) => {
             const base: AccountRule = {
@@ -543,7 +533,7 @@ export async function POST(req: Request) {
               summary: r.summary ?? undefined,
               active: r.active,
             };
-            if (r.active) base.ops = await materializeOps(base, { groupMacs, scheduleBaselines });
+            if (r.active) base.ops = await materializeOps(base, { groupMacs, scheduleBaselines, baselineDayKey });
             return base;
           }),
         );
@@ -793,6 +783,14 @@ export async function POST(req: Request) {
           UPDATE account_rules SET active = FALSE, updated_at = NOW()
           WHERE rule_id = ${ruleId} AND owner_email = ${email};
         `;
+        await logRuleAudit(sql, {
+          owner_email: email,
+          rule_id: ruleId,
+          action: "deactivate",
+          source: "bri",
+          actor: email,
+          detail: ruleName,
+        });
         // Rebuild desired from every rule we've ever issued. Same dance
         // as apply_pending_rule — the now-inactive rule contributes its
         // cleanup ops; remaining active rules still apply.
@@ -801,25 +799,8 @@ export async function POST(req: Request) {
           FROM account_rules WHERE owner_email = ${email} AND device_id = ${primary.device_id};
         `) as RuleRow[];
         const groupMacs = await loadGroupMacs(sql, email);
-        const scheduleBaselines = new Map<string, Record<string, number>>();
-        for (const r of allRows) {
-          if (r.rule_type !== "block_schedule_group" || !r.active) continue;
-          const sp = r.params as BlockScheduleGroupParams;
-          const macsForRule = groupMacs.get(sp.group_id) ?? [];
-          if (macsForRule.length === 0) continue;
-          const usage = (await sql`
-            SELECT mac::text AS mac, COUNT(DISTINCT bucket_start)::int AS minutes
-            FROM client_usage_minute
-            WHERE owner_email = ${email}
-              AND mac = ANY(${macsForRule}::text[])
-              AND app = ${sp.app_label}
-              AND bucket_start >= DATE_TRUNC('day', NOW())
-            GROUP BY mac;
-          `) as { mac: string; minutes: number }[];
-          const perMac: Record<string, number> = {};
-          for (const u of usage) perMac[u.mac.toLowerCase()] = Number(u.minutes);
-          scheduleBaselines.set(r.rule_id, perMac);
-        }
+        const { baselines: scheduleBaselines, dayKey: baselineDayKey } =
+          await loadScheduleBaselines(sql, email, allRows, groupMacs);
         const allRules: AccountRule[] = await Promise.all(
           allRows.map(async (r) => {
             const base: AccountRule = {
@@ -831,7 +812,7 @@ export async function POST(req: Request) {
               summary: r.summary ?? undefined,
               active: r.active,
             };
-            if (r.active) base.ops = await materializeOps(base, { groupMacs, scheduleBaselines });
+            if (r.active) base.ops = await materializeOps(base, { groupMacs, scheduleBaselines, baselineDayKey });
             return base;
           }),
         );

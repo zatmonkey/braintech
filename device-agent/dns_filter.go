@@ -126,6 +126,11 @@ func handleUDPQuery(ctx context.Context, conn net.PacketConn, src *net.UDPAddr, 
 		if app := classifyApp(name); app != "" {
 			store.record(mac, app, time.Now())
 		}
+		// Count-only domains (playback CDNs) tick the quota even though
+		// they're forwarded, not sinkholed. The dnsmasq watcher can't
+		// attribute these for DNAT'd MACs (the forward arrives from the
+		// router's own IP), so this is their only counting point.
+		recordQuotaForCountOnly(mac, name)
 	}
 
 	forwardUDP(ctx, conn, src, msg)
@@ -221,6 +226,7 @@ func handleTCPConn(ctx context.Context, c net.Conn, store *usageStore) {
 				if app := classifyApp(name); app != "" {
 					store.record(mac, app, time.Now())
 				}
+				recordQuotaForCountOnly(mac, name) // see UDP path
 			}
 		}
 	}
@@ -362,6 +368,30 @@ func recordQuotaForBlockedMAC(mac, queryName string) {
 			continue
 		}
 		if !matchesAny(queryName, r.Domains) {
+			continue
+		}
+		globalQuotaCounter.record(r.RuleID, mac, now)
+	}
+}
+
+// recordQuotaForCountOnly ticks the quota for count-only domains
+// (playback CDNs that are never blocked) queried by a DNAT'd MAC. The
+// tracker check mirrors the other two recording paths.
+func recordQuotaForCountOnly(mac, queryName string) {
+	if mac == "" || queryName == "" || isTrackerDomain(queryName) {
+		return
+	}
+	mac = strings.ToLower(mac)
+	rules := getCachedBrainrotRules()
+	now := time.Now()
+	for _, r := range rules {
+		if len(r.CountDomains) == 0 {
+			continue
+		}
+		if !macInScope(mac, r.MACs) {
+			continue
+		}
+		if !matchesAny(queryName, r.CountDomains) {
 			continue
 		}
 		globalQuotaCounter.record(r.RuleID, mac, now)

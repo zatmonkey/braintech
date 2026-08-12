@@ -8,6 +8,8 @@ import {
 } from "@/app/lib/db";
 import { assembleDesired, materializeOps, type AccountRule, type Op, type RuleType, type RuleParams } from "@/app/lib/rules";
 import { loadGroupMacs } from "@/app/lib/groups";
+import { loadScheduleBaselines } from "@/app/lib/schedule-baselines";
+import { logRuleAudit } from "@/app/lib/rule-audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,6 +47,14 @@ export async function DELETE(
   if (!r) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   await sql`UPDATE account_rules SET active = FALSE, updated_at = NOW() WHERE rule_id = ${ruleId};`;
+  await logRuleAudit(sql, {
+    owner_email: email,
+    rule_id: ruleId,
+    action: "deactivate",
+    source: "dashboard",
+    actor: email,
+    detail: r.name,
+  });
 
   // Rebuild desired from every rule we've ever issued (active or not).
   // Inactive ones contribute cleanup ops; active ones contribute cleanup + apply.
@@ -53,6 +63,8 @@ export async function DELETE(
     FROM account_rules WHERE owner_email = ${email} AND device_id = ${r.device_id};
   `) as RuleRow[];
   const groupMacs = await loadGroupMacs(sql, email);
+  const { baselines: scheduleBaselines, dayKey: baselineDayKey } =
+    await loadScheduleBaselines(sql, email, all, groupMacs);
   const allRules: AccountRule[] = await Promise.all(
     all.map(async (x) => {
       const base: AccountRule = {
@@ -64,7 +76,7 @@ export async function DELETE(
         summary: x.summary ?? undefined,
         active: x.active,
       };
-      if (x.active) base.ops = await materializeOps(base, { groupMacs });
+      if (x.active) base.ops = await materializeOps(base, { groupMacs, scheduleBaselines, baselineDayKey });
       return base;
     }),
   );

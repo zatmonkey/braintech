@@ -180,7 +180,11 @@ func brainrotDNSWatcher(ctx context.Context, path string) {
 					continue
 				}
 				for _, rule := range rules {
-					if !matchesAny(original, rule.Domains) {
+					// Blockable domains AND count-only domains (playback
+					// CDNs) both tick the quota; only the former are ever
+					// sinkholed.
+					if !matchesAny(original, rule.Domains) &&
+						!matchesAny(original, rule.CountDomains) {
 						continue
 					}
 					// Only count queries from MACs the rule actually

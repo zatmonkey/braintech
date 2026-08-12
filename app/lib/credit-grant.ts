@@ -26,6 +26,7 @@ import {
   type Op,
 } from "@/app/lib/rules";
 import { loadGroupMacs } from "@/app/lib/groups";
+import { loadScheduleBaselines } from "@/app/lib/schedule-baselines";
 import { primaryMacForGroup } from "@/app/lib/persons";
 
 type DeviceRow = { device_id: string; desired_version: number };
@@ -107,26 +108,10 @@ export async function rematerializePolicies(
 
   const groupMacs = await loadGroupMacs(sql, email);
 
-  // Per-rule baseline (today's minutes already used per MAC).
-  const scheduleBaselines = new Map<string, Record<string, number>>();
-  for (const r of allRows) {
-    if (r.rule_type !== "block_schedule_group" || !r.active) continue;
-    const sp = r.params as BlockScheduleGroupParams;
-    const macsForRule = groupMacs.get(sp.group_id) ?? [];
-    if (macsForRule.length === 0) continue;
-    const usage = (await sql`
-      SELECT mac::text AS mac, COUNT(DISTINCT bucket_start)::int AS minutes
-      FROM client_usage_minute
-      WHERE owner_email = ${email}
-        AND mac = ANY(${macsForRule}::text[])
-        AND app = ${sp.app_label}
-        AND bucket_start >= DATE_TRUNC('day', NOW())
-      GROUP BY mac;
-    `) as { mac: string; minutes: number }[];
-    const perMac: Record<string, number> = {};
-    for (const u of usage) perMac[u.mac.toLowerCase()] = Number(u.minutes);
-    scheduleBaselines.set(r.rule_id, perMac);
-  }
+  // Per-rule baseline (minutes already used since HOUSEHOLD-local
+  // midnight per MAC), keyed for the agent's local-day counter.
+  const { baselines: scheduleBaselines, dayKey: baselineDayKey } =
+    await loadScheduleBaselines(sql, email, allRows, groupMacs);
 
   // Union of every MAC any active schedule rule touches — minimum query
   // surface for the per-MAC credit balance pull.
@@ -167,6 +152,7 @@ export async function rematerializePolicies(
         base.ops = await materializeOps(base, {
           groupMacs,
           scheduleBaselines,
+          baselineDayKey,
           creditBalances,
           earnSessions,
         });
