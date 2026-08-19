@@ -486,10 +486,34 @@ func ensureDNSFilterInfra(ctx context.Context) {
 		"}",
 		"",
 		"chain bt_dns_filter_dnat {",
-		"    type nat hook prerouting priority -100; policy accept;",
+		// Priority -110, NOT dstnat (-100): only one DNAT decision applies
+		// per flow, and fw4's dstnat chain carries the force_router_dns
+		// redirect (LAN :53 → router dnsmasq). At equal priority that
+		// no-op redirect consumed the NAT decision before this chain ran,
+		// so filtered MACs were never steered into the sinkhole — the
+		// enforcement path silently did nothing. -110 runs first; the
+		// dnsforce redirect still catches every non-filtered device.
+		"    type nat hook prerouting priority -110; policy accept;",
 		// inet table requires the address family on the dnat target.
 		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv4 udp dport 53 dnat ip to " + dnsFilterListen,
 		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv4 tcp dport 53 dnat ip to " + dnsFilterListen,
+		"}",
+		"",
+		// The sinkhole resolver is IPv4-only, so IPv6 DNS would bypass it
+		// entirely on a dual-stack LAN. Reject port 53 over IPv6 from
+		// filtered MACs (router-bound = input hook, external resolvers =
+		// forward hook); dual-stack clients fall back to IPv4 DNS within
+		// milliseconds, which the DNAT above then catches.
+		"chain bt_dns_filter_block6_in {",
+		"    type filter hook input priority -10; policy accept;",
+		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv6 udp dport 53 reject",
+		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv6 tcp dport 53 reject",
+		"}",
+		"",
+		"chain bt_dns_filter_block6_fwd {",
+		"    type filter hook forward priority -10; policy accept;",
+		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv6 udp dport 53 reject",
+		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv6 tcp dport 53 reject",
 		"}",
 		"",
 	}, "\n")
