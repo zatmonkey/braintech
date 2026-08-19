@@ -43,6 +43,7 @@ func (a *Agent) Run(ctx context.Context) {
 	go dnsFilterServer(ctx, a.usage)                // per-MAC DNS sinkhole on 192.168.1.254:5453 (UDP+TCP)
 	go dnsFilterMacSyncLoop(ctx)                    // keep bt_dns_filter_macs in sync with current enforce-mode MACs
 	go controlledMacSyncLoop(ctx)                   // keep bt_controlled_macs in sync with controlled-macs.json (DPI scope)
+	go lockdownMacSyncLoop(ctx)                     // stage 1: bt_lockdown_macs = controlled ∩ whole-internet-enforce → forward-drop
 	go mdnsResponder(ctx, net.ParseIP(captiveIP))   // answer brain.local on multicast 5353 (iOS demands mDNS for .local)
 	go policyEvaluatorLoop(ctx)                     // time/quota policy engine — toggles enforce/allow per /etc/braintech/policy/*.json
 	go orphanCleanupLoop(ctx, a.cfg.DesiredPath)    // self-heal: delete managed files the current desired doesn't reference

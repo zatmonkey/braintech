@@ -405,6 +405,10 @@ func policyEvaluatorLoop(ctx context.Context) {
 		// set so a quota flip takes effect on the very next query, not
 		// after the 15s mac-sync loop catches up.
 		syncDNSFilterMacs(ctx)
+		// Same immediacy for the whole-internet lockdown set (stage 1):
+		// a bedtime window opening/closing drops or restores forward
+		// traffic on the same tick.
+		syncLockdownMacs(ctx)
 		select {
 		case <-ctx.Done():
 			globalQuotaCounter.snapshotToDisk(time.Now())

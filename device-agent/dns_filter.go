@@ -53,6 +53,13 @@ const (
 	// gates on membership so adult devices are never touched.
 	controlledMacSet  = "bt_controlled_macs"
 	controlledMacsPath = "/etc/braintech/controlled-macs.json"
+	// Stage 1 (DNS-gated firewall). bt_lockdown_macs = controlled MACs
+	// whose current enforcement is a WHOLE-INTERNET block (domains ["*"],
+	// e.g. bedtime). For those, the forward chain drops all new WAN-bound
+	// traffic — closing the cached-IP / hardcoded-IP / VPN holes that a
+	// DNS-only block leaves open. App-quota enforce (YouTube) is NOT here;
+	// it stays domain-scoped (sinkhole now, SNI in stage 2).
+	lockdownMacSet = "bt_lockdown_macs"
 	// policyDir is declared in policy.go — shared.
 )
 
@@ -517,6 +524,33 @@ func ensureDNSFilterInfra(ctx context.Context) {
 		"    type ether_addr",
 		"}",
 		"",
+		// Stage 1: whole-internet lockdown scope, kept in sync by
+		// lockdownMacSyncLoop (controlled ∩ whole-internet-enforce).
+		"set " + lockdownMacSet + " {",
+		"    type ether_addr",
+		"}",
+		"",
+		// Stage 1: for lockdown MACs, drop new WAN-bound forward traffic.
+		// priority -5 runs before fw4's own forward filtering. `accept` here
+		// is non-terminal (fw4's rules still apply), only `drop` is final —
+		// so this can only make a lockdown device MORE restricted, never
+		// less. Established/related keeps the captive page and in-flight
+		// teardown working; the LAN subnet stays reachable (printers, the
+		// captive host); DNS/DHCP to the router are input-hook, not forward,
+		// so they're unaffected. Everything else WAN-bound is dropped —
+		// cached IPs, hardcoded resolvers, and VPN endpoints included.
+		"chain bt_lockdown_fwd {",
+		"    type filter hook forward priority -5; policy accept;",
+		"    ether saddr @" + lockdownMacSet + " jump bt_lockdown_eval",
+		"}",
+		"chain bt_lockdown_eval {",
+		"    ct state established,related accept",
+		"    ip daddr 192.168.1.0/24 accept",
+		"    ip6 daddr fe80::/10 accept",
+		"    ip6 daddr fd00::/8 accept",
+		"    counter drop",
+		"}",
+		"",
 		"chain bt_dns_filter_block6_in {",
 		"    type filter hook input priority -10; policy accept;",
 		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv6 udp dport 53 reject",
@@ -755,6 +789,83 @@ func controlledMacSyncLoop(ctx context.Context) {
 			return
 		case <-t.C:
 			syncControlledMacs(ctx)
+		}
+	}
+}
+
+// isWholeInternetRule reports whether a brainrot rule blocks everything
+// (domains exactly ["*"]) — the server's sentinel for "no internet".
+func isWholeInternetRule(r brainrotState) bool {
+	return len(r.Domains) == 1 && strings.TrimSpace(r.Domains[0]) == "*"
+}
+
+// lockdownMacs is the set that gets whole-internet forward-drop right now:
+// a MAC that is (a) controlled, (b) scoped by a whole-internet rule, and
+// (c) that rule is currently in enforce mode. All three required — an
+// uncontrolled device is never dropped, and a controlled device with only
+// an app-quota block keeps its (domain-scoped) internet.
+func lockdownMacs() []string {
+	rules := getCachedBrainrotRules()
+	if len(rules) == 0 {
+		return nil
+	}
+	enforce := buildEnforceModeIndex()
+	want := map[string]bool{}
+	for _, r := range rules {
+		if !isWholeInternetRule(r) {
+			continue
+		}
+		if isScheduledRule(r.RuleID) && !enforce[r.RuleID] {
+			continue // scheduled + currently allowing → not locked down
+		}
+		for _, m := range r.MACs {
+			lm := strings.ToLower(m)
+			if isControlledMAC(lm) {
+				want[lm] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(want))
+	for m := range want {
+		out = append(out, m)
+	}
+	return out
+}
+
+// syncLockdownMacs rebuilds bt_lockdown_macs from the current decisions.
+func syncLockdownMacs(ctx context.Context) {
+	macs := lockdownMacs()
+	sub, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	flush := exec.CommandContext(sub, "nft", "flush", "set", "inet", "fw4", lockdownMacSet)
+	if out, err := flush.CombinedOutput(); err != nil {
+		if strings.Contains(string(out), "No such file") ||
+			strings.Contains(string(out), "Could not process rule") {
+			return
+		}
+		log.Printf("lockdown: flush %s: %v: %s", lockdownMacSet, err, strings.TrimSpace(string(out)))
+		return
+	}
+	if len(macs) == 0 {
+		return
+	}
+	arg := "{ " + strings.Join(macs, ", ") + " }"
+	add := exec.CommandContext(sub, "nft", "add", "element", "inet", "fw4", lockdownMacSet, arg)
+	if out, err := add.CombinedOutput(); err != nil {
+		log.Printf("lockdown: add %s: %v: %s", lockdownMacSet, err, strings.TrimSpace(string(out)))
+	}
+}
+
+func lockdownMacSyncLoop(ctx context.Context) {
+	t := time.NewTicker(15 * time.Second)
+	defer t.Stop()
+	syncLockdownMacs(ctx) // prime
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			syncLockdownMacs(ctx)
 		}
 	}
 }
