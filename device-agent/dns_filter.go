@@ -42,6 +42,10 @@ const (
 	dnsUpstreamAddr   = "127.0.0.1:53" // real dnsmasq on the router
 	dnsFilterMacSet   = "bt_dns_filter_macs"
 	dnsFilterInfraPath = "/etc/nftables.d/bt-self-dns-filter.nft"
+	// The IPv4 sinkhole DNAT lives OUTSIDE /etc/nftables.d (which fw4
+	// auto-includes at table level) — it is injected into fw4's own
+	// dstnat_lan chain via a uci `chain-pre` include instead.
+	dnsFilterRedirectPath = "/etc/braintech/bt-dns-filter-redirect.nft"
 	// policyDir is declared in policy.go — shared.
 )
 
@@ -467,43 +471,39 @@ func lookupMACForFilter(ip string) string {
 	return globalIPMacCache.m[ip]
 }
 
-// ensureDNSFilterInfra writes the agent-owned nft drop-in that declares the
-// global MAC set + DNAT chain. Idempotent; only reloads firewall when the
-// file changes.
+// ensureDNSFilterInfra installs the agent-owned DNS-filter plumbing.
+// Idempotent; only reloads the firewall when something changed. Two pieces:
+//
+//  1. A table-level nft include (auto-loaded from /etc/nftables.d) with the
+//     MAC set and IPv6 port-53 reject chains. The sinkhole resolver is
+//     IPv4-only, so v6 DNS from filtered MACs is rejected on the input
+//     (router-bound) and forward (external resolver) hooks — dual-stack
+//     clients fall back to IPv4 within milliseconds.
+//  2. The IPv4 sinkhole DNAT, injected at the TOP of fw4's own dstnat_lan
+//     chain via a uci `chain-pre` include. It must live INSIDE fw4's
+//     chain: only one DNAT decision applies per flow, and a separate nat
+//     chain either loses the race to force_router_dns's no-op redirect
+//     (equal priority — that redirect consumed the flow's NAT decision
+//     and enforcement silently did nothing) or fails fw4's atomic reload
+//     outright (different priority — the kernel rejects the second nat
+//     hook inside that transaction even though it loads standalone).
+//     chain-pre ordering is deterministic and survives every reload.
 //
 // Named bt-self-* (not bt-*) on purpose: orphan_cleanup's glob is bt-*.nft.
 // Anything matching that glob is considered server-owned and gets deleted on
-// the next reconcile if it's not in the cloud's desired list. This file is
-// agent-owned — keep it out of the cleanup's blast radius.
+// the next reconcile if it's not in the cloud's desired list. Both files
+// here are agent-owned — keep them out of the cleanup's blast radius.
 func ensureDNSFilterInfra(ctx context.Context) {
-	desired := strings.Join([]string{
-		"# Braintech agent — DNS filter DNAT (auto-managed by the agent)",
-		"# Redirects port 53 from members of " + dnsFilterMacSet + " to the",
-		"# agent's filter resolver on " + dnsFilterListen + ".",
+	tableInclude := strings.Join([]string{
+		"# Braintech agent — DNS filter (auto-managed by the agent)",
+		"# MAC set consumed by the dstnat_lan chain-pre redirect at",
+		"# " + dnsFilterRedirectPath + ", plus IPv6 port-53 rejects",
+		"# (the filter resolver on " + dnsFilterListen + " is IPv4-only).",
 		"",
 		"set " + dnsFilterMacSet + " {",
 		"    type ether_addr",
 		"}",
 		"",
-		"chain bt_dns_filter_dnat {",
-		// Priority -110, NOT dstnat (-100): only one DNAT decision applies
-		// per flow, and fw4's dstnat chain carries the force_router_dns
-		// redirect (LAN :53 → router dnsmasq). At equal priority that
-		// no-op redirect consumed the NAT decision before this chain ran,
-		// so filtered MACs were never steered into the sinkhole — the
-		// enforcement path silently did nothing. -110 runs first; the
-		// dnsforce redirect still catches every non-filtered device.
-		"    type nat hook prerouting priority -110; policy accept;",
-		// inet table requires the address family on the dnat target.
-		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv4 udp dport 53 dnat ip to " + dnsFilterListen,
-		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv4 tcp dport 53 dnat ip to " + dnsFilterListen,
-		"}",
-		"",
-		// The sinkhole resolver is IPv4-only, so IPv6 DNS would bypass it
-		// entirely on a dual-stack LAN. Reject port 53 over IPv6 from
-		// filtered MACs (router-bound = input hook, external resolvers =
-		// forward hook); dual-stack clients fall back to IPv4 DNS within
-		// milliseconds, which the DNAT above then catches.
 		"chain bt_dns_filter_block6_in {",
 		"    type filter hook input priority -10; policy accept;",
 		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv6 udp dport 53 reject",
@@ -517,16 +517,28 @@ func ensureDNSFilterInfra(ctx context.Context) {
 		"}",
 		"",
 	}, "\n")
-	current, err := os.ReadFile(dnsFilterInfraPath)
-	if err == nil && string(current) == desired {
+	// Bare rules, no table/chain wrapper — fw4 splices them verbatim at the
+	// top of dstnat_lan. `counter` kept for observability: nonzero packets
+	// here is the live proof that interception is happening.
+	redirectRules := strings.Join([]string{
+		"ether saddr @" + dnsFilterMacSet + " meta nfproto ipv4 udp dport 53 counter dnat ip to " + dnsFilterListen,
+		"ether saddr @" + dnsFilterMacSet + " meta nfproto ipv4 tcp dport 53 counter dnat ip to " + dnsFilterListen,
+		"",
+	}, "\n")
+
+	changed1, err := writeFileIfChanged(dnsFilterInfraPath, tableInclude)
+	if err != nil {
+		log.Printf("dns_filter: %s: %v", dnsFilterInfraPath, err)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(dnsFilterInfraPath), 0o755); err != nil {
-		log.Printf("dns_filter: mkdir: %v", err)
+	changed2, err := writeFileIfChanged(dnsFilterRedirectPath, redirectRules)
+	if err != nil {
+		log.Printf("dns_filter: %s: %v", dnsFilterRedirectPath, err)
 		return
 	}
-	if err := os.WriteFile(dnsFilterInfraPath, []byte(desired), 0o644); err != nil {
-		log.Printf("dns_filter: write %s: %v", dnsFilterInfraPath, err)
+	changed3 := ensureUciDNSFilterInclude(ctx)
+
+	if !changed1 && !changed2 && !changed3 {
 		return
 	}
 	sub, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -535,7 +547,53 @@ func ensureDNSFilterInfra(ctx context.Context) {
 		log.Printf("dns_filter: fw4 reload: %v: %s", err, strings.TrimSpace(string(out)))
 		return
 	}
-	log.Printf("dns_filter: nft infra installed at %s", dnsFilterInfraPath)
+	log.Printf("dns_filter: nft infra installed (%s, %s, uci chain-pre include)",
+		dnsFilterInfraPath, dnsFilterRedirectPath)
+}
+
+func writeFileIfChanged(path, content string) (bool, error) {
+	current, err := os.ReadFile(path)
+	if err == nil && string(current) == content {
+		return false, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, err
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ensureUciDNSFilterInclude registers the chain-pre include with fw4.
+// Returns true when any uci option had to be (re)written.
+func ensureUciDNSFilterInclude(ctx context.Context) bool {
+	// Ordered: the section must exist before its options.
+	pairs := [][2]string{
+		{"firewall.bt_dnsfilter", "include"},
+		{"firewall.bt_dnsfilter.type", "nftables"},
+		{"firewall.bt_dnsfilter.path", dnsFilterRedirectPath},
+		{"firewall.bt_dnsfilter.position", "chain-pre"},
+		{"firewall.bt_dnsfilter.chain", "dstnat_lan"},
+	}
+	changed := false
+	for _, kv := range pairs {
+		out, _ := exec.CommandContext(ctx, "uci", "-q", "get", kv[0]).Output()
+		if strings.TrimSpace(string(out)) == kv[1] {
+			continue
+		}
+		if err := exec.CommandContext(ctx, "uci", "set", kv[0]+"="+kv[1]).Run(); err != nil {
+			log.Printf("dns_filter: uci set %s: %v", kv[0], err)
+			return changed
+		}
+		changed = true
+	}
+	if changed {
+		if err := exec.CommandContext(ctx, "uci", "commit", "firewall").Run(); err != nil {
+			log.Printf("dns_filter: uci commit firewall: %v", err)
+		}
+	}
+	return changed
 }
 
 // syncDNSFilterMacs rebuilds bt_dns_filter_macs to the current union of
