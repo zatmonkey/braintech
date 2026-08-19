@@ -409,6 +409,9 @@ func policyEvaluatorLoop(ctx context.Context) {
 		// a bedtime window opening/closing drops or restores forward
 		// traffic on the same tick.
 		syncLockdownMacs(ctx)
+		// And the SNI-inspection scope (stage 2): a quota flip starts or
+		// stops queueing that MAC's TLS flows immediately.
+		syncSniMacs(ctx)
 		select {
 		case <-ctx.Done():
 			globalQuotaCounter.snapshotToDisk(time.Now())

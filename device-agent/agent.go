@@ -44,6 +44,8 @@ func (a *Agent) Run(ctx context.Context) {
 	go dnsFilterMacSyncLoop(ctx)                    // keep bt_dns_filter_macs in sync with current enforce-mode MACs
 	go controlledMacSyncLoop(ctx)                   // keep bt_controlled_macs in sync with controlled-macs.json (DPI scope)
 	go lockdownMacSyncLoop(ctx)                     // stage 1: bt_lockdown_macs = controlled ∩ whole-internet-enforce → forward-drop
+	go sniMacSyncLoop(ctx)                          // stage 2: bt_sni_macs = controlled ∩ app-block-enforce → NFQUEUE SNI
+	go startDPI(ctx)                                // stage 2: NFQUEUE ClientHello verdicts (observe mode until dpiEnforce)
 	go mdnsResponder(ctx, net.ParseIP(captiveIP))   // answer brain.local on multicast 5353 (iOS demands mDNS for .local)
 	go policyEvaluatorLoop(ctx)                     // time/quota policy engine — toggles enforce/allow per /etc/braintech/policy/*.json
 	go orphanCleanupLoop(ctx, a.cfg.DesiredPath)    // self-heal: delete managed files the current desired doesn't reference

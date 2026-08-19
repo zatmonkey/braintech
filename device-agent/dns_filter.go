@@ -60,6 +60,10 @@ const (
 	// DNS-only block leaves open. App-quota enforce (YouTube) is NOT here;
 	// it stays domain-scoped (sinkhole now, SNI in stage 2).
 	lockdownMacSet = "bt_lockdown_macs"
+	// Stage 2 (SNI verdicts). bt_sni_macs = controlled MACs with an
+	// enforcing app-block (non-whole-internet). Their new TCP:443 flows are
+	// queued to userspace for a ClientHello verdict; see dpi.go.
+	sniMacSet = "bt_sni_macs"
 	// policyDir is declared in policy.go — shared.
 )
 
@@ -507,6 +511,56 @@ func lookupMACForFilter(ip string) string {
 // Anything matching that glob is considered server-owned and gets deleted on
 // the next reconcile if it's not in the cloud's desired list. Both files
 // here are agent-owned — keep them out of the cleanup's blast radius.
+// nftQueueSupported is probed once: does this kernel have the nft `queue`
+// expression? Snapshot images without kmod-nft-queue don't, and emitting a
+// queue rule there fails the entire fw4 reload.
+var (
+	nftQueueOnce   sync.Once
+	nftQueueOK     bool
+)
+
+func nftSupportsQueue() bool {
+	nftQueueOnce.Do(func() {
+		// `nft -c` (check-only) resolves the expression against the kernel
+		// without committing. On a kernel without nft_queue this errors.
+		spec := "table inet btqprobe { chain c { type filter hook forward priority 0; queue num 99 bypass } }"
+		cmd := exec.Command("nft", "-c", "-f", "/dev/stdin")
+		cmd.Stdin = strings.NewReader(spec)
+		if err := cmd.Run(); err == nil {
+			nftQueueOK = true
+		}
+	})
+	return nftQueueOK
+}
+
+// sniQueueChains returns the stage-2 NFQUEUE chains, or "" when the kernel
+// can't do `queue` (so the include still loads and stages 0/1 keep working).
+func sniQueueChains() string {
+	if !nftSupportsQueue() {
+		log.Printf("dns_filter: kernel lacks nft queue support — stage-2 SNI chains skipped")
+		return ""
+	}
+	return strings.Join([]string{
+		// queue new TCP:443 flows from SNI-scope MACs to userspace (dpi.go)
+		// for a ClientHello verdict. ct mark carries the per-flow decision
+		// so only handshake packets reach userspace: mark 2 → blocked flow
+		// (drop every packet), mark 1 → allowed (fast-path accept), mark 0 →
+		// undecided (queue). `bypass`: daemon down = packets pass.
+		"chain bt_sni_q {",
+		"    type filter hook forward priority -7; policy accept;",
+		"    ether saddr @" + sniMacSet + " tcp dport 443 ct mark 2 counter drop",
+		"    ether saddr @" + sniMacSet + " tcp dport 443 ct mark 1 accept",
+		"    ether saddr @" + sniMacSet + " tcp dport 443 queue num 4 bypass",
+		"}",
+		"chain bt_sni_mark {",
+		"    type filter hook forward priority -6; policy accept;",
+		"    ether saddr @" + sniMacSet + " meta mark 1 ct mark set 1",
+		"    ether saddr @" + sniMacSet + " meta mark 2 ct mark set 2",
+		"}",
+		"",
+	}, "\n")
+}
+
 func ensureDNSFilterInfra(ctx context.Context) {
 	tableInclude := strings.Join([]string{
 		"# Braintech agent — DNS filter (auto-managed by the agent)",
@@ -530,6 +584,18 @@ func ensureDNSFilterInfra(ctx context.Context) {
 		"    type ether_addr",
 		"}",
 		"",
+		// Stage 2: SNI-inspection scope (controlled ∩ app-block enforce),
+		// kept in sync by sniMacSyncLoop.
+		"set " + sniMacSet + " {",
+		"    type ether_addr",
+		"}",
+		"",
+		// Stage 2 queue chains are appended below ONLY when the kernel has
+		// the nft `queue` expression (nft_queue kmod). On stock snapshot
+		// images it's absent — emitting `queue` there fails the whole fw4
+		// reload and would take the sinkhole down with it, so we probe and
+		// skip. See sniQueueChains / nftSupportsQueue.
+		sniQueueChains(),
 		// Stage 1: for lockdown MACs, drop new WAN-bound forward traffic.
 		// priority -5 runs before fw4's own forward filtering. `accept` here
 		// is non-terminal (fw4's rules still apply), only `drop` is final —
@@ -866,6 +932,73 @@ func lockdownMacSyncLoop(ctx context.Context) {
 			return
 		case <-t.C:
 			syncLockdownMacs(ctx)
+		}
+	}
+}
+
+// sniMacs is controlled ∩ (enforcing app-block). Whole-internet enforce is
+// excluded — those MACs are stage 1's forward-drop, not SNI inspection.
+func sniMacs() []string {
+	rules := getCachedBrainrotRules()
+	if len(rules) == 0 {
+		return nil
+	}
+	enforce := buildEnforceModeIndex()
+	want := map[string]bool{}
+	for _, r := range rules {
+		if isWholeInternetRule(r) {
+			continue
+		}
+		if isScheduledRule(r.RuleID) && !enforce[r.RuleID] {
+			continue
+		}
+		for _, m := range r.MACs {
+			lm := strings.ToLower(m)
+			if isControlledMAC(lm) {
+				want[lm] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(want))
+	for m := range want {
+		out = append(out, m)
+	}
+	return out
+}
+
+func syncSniMacs(ctx context.Context) {
+	macs := sniMacs()
+	sub, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	flush := exec.CommandContext(sub, "nft", "flush", "set", "inet", "fw4", sniMacSet)
+	if out, err := flush.CombinedOutput(); err != nil {
+		if strings.Contains(string(out), "No such file") ||
+			strings.Contains(string(out), "Could not process rule") {
+			return
+		}
+		log.Printf("sni: flush %s: %v: %s", sniMacSet, err, strings.TrimSpace(string(out)))
+		return
+	}
+	if len(macs) == 0 {
+		return
+	}
+	arg := "{ " + strings.Join(macs, ", ") + " }"
+	add := exec.CommandContext(sub, "nft", "add", "element", "inet", "fw4", sniMacSet, arg)
+	if out, err := add.CombinedOutput(); err != nil {
+		log.Printf("sni: add %s: %v: %s", sniMacSet, err, strings.TrimSpace(string(out)))
+	}
+}
+
+func sniMacSyncLoop(ctx context.Context) {
+	t := time.NewTicker(15 * time.Second)
+	defer t.Stop()
+	syncSniMacs(ctx) // prime
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			syncSniMacs(ctx)
 		}
 	}
 }
