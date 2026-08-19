@@ -21,6 +21,7 @@ import {
   type RuleParams,
 } from "@/app/lib/rules";
 import { loadGroupMacs } from "@/app/lib/groups";
+import { loadControlledMacs } from "@/app/lib/controlled";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -101,7 +102,8 @@ export async function POST(req: Request) {
     await sql`UPDATE account_rules SET ops = ${JSON.stringify(structural)}::jsonb, updated_at = NOW()
       WHERE rule_id = ${r.rule_id};`;
   }
-  const desired = assembleDesired(allRules);
+  const controlledMacs = await loadControlledMacs(sql, email);
+  const desired = assembleDesired(allRules, { controlledMacs });
   const next = dev.desired_version + 1;
   await sql`
     UPDATE devices SET desired = ${JSON.stringify(desired)}::jsonb, desired_version = ${next}, updated_at = NOW()

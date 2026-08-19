@@ -1241,6 +1241,20 @@ export interface AssembleDesiredOpts {
    *  quotas roll at local midnight, not UTC midnight. Both names recorded:
    *  `iana` for display/audit, `posix` for what UCI actually consumes. */
   timezone?: { iana: string; posix: string };
+  /** Union of MACs across the household's `controlled` groups. When
+   *  provided (including an empty array), a device-wide op writes
+   *  controlled-macs.json, from which the agent builds the
+   *  bt_controlled_macs nft set that scopes all DPI enforcement. Omit to
+   *  leave the on-device file untouched — only membership/flag changes
+   *  need to pass it, so rule pushes don't churn it. */
+  controlledMacs?: string[];
+}
+
+export const CONTROLLED_MACS_PATH = "/etc/braintech/controlled-macs.json";
+
+export function controlledMacsJson(macs: string[]): string {
+  const norm = [...new Set(macs.map((m) => m.trim().toLowerCase()).filter(Boolean))].sort();
+  return JSON.stringify({ macs: norm, updated_at: new Date().toISOString() }, null, 2) + "\n";
 }
 
 export function assembleDesired(
@@ -1261,6 +1275,19 @@ export function assembleDesired(
   for (const r of allRules) {
     if (!r.active) continue;
     for (const o of r.ops) ops.push(o);
+  }
+
+  // (2b) device-wide controlled-MAC list — the scope of DPI enforcement.
+  // Written only when the caller resolved it (membership/flag changes),
+  // so ordinary rule pushes leave the file intact. Empty array is a valid
+  // value: it disables DPI for every device.
+  if (opts.controlledMacs) {
+    ops.push({
+      type: "file.write",
+      path: CONTROLLED_MACS_PATH,
+      content: controlledMacsJson(opts.controlledMacs),
+      mode: "644",
+    });
   }
 
   // (3) system timezone — set/refresh on every assembly so a corrupted UCI

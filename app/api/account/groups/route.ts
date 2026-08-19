@@ -19,9 +19,9 @@ export async function GET() {
   await ensureDefaultGroup(sql, email);
 
   const groups = (await sql`
-    SELECT group_id, name, description, is_default, created_at
+    SELECT group_id, name, description, is_default, controlled, created_at
     FROM account_groups WHERE owner_email = ${email} ORDER BY is_default DESC, created_at;
-  `) as { group_id: string; name: string; description: string | null; is_default: boolean; created_at: string }[];
+  `) as { group_id: string; name: string; description: string | null; is_default: boolean; controlled: boolean; created_at: string }[];
   // Pull MACs from the junction; join client_labels for friendly names.
   const members = (await sql`
     SELECT cgm.group_id, cgm.mac, COALESCE(cl.name, cgm.mac) AS name

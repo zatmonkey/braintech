@@ -74,7 +74,7 @@ export async function GET() {
   const macGroups = await loadMacGroups(sql, email);
 
   const groups = (await sql`
-    SELECT group_id, name, description, is_default, kind, person_name, age, created_at
+    SELECT group_id, name, description, is_default, kind, person_name, age, controlled, created_at
     FROM account_groups WHERE owner_email = ${email}
     ORDER BY is_default DESC, created_at;
   `) as {
@@ -85,6 +85,7 @@ export async function GET() {
     kind: string | null;
     person_name: string | null;
     age: number | null;
+    controlled: boolean;
     created_at: string;
   }[];
 

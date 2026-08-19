@@ -24,6 +24,7 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -46,6 +47,12 @@ const (
 	// auto-includes at table level) — it is injected into fw4's own
 	// dstnat_lan chain via a uci `chain-pre` include instead.
 	dnsFilterRedirectPath = "/etc/braintech/bt-dns-filter-redirect.nft"
+	// Controlled-device scope for DPI enforcement. The server writes
+	// controlledMacsPath (union of MACs in `controlled` groups); the agent
+	// keeps the bt_controlled_macs nft set in sync with it. Every DPI stage
+	// gates on membership so adult devices are never touched.
+	controlledMacSet  = "bt_controlled_macs"
+	controlledMacsPath = "/etc/braintech/controlled-macs.json"
 	// policyDir is declared in policy.go — shared.
 )
 
@@ -504,6 +511,12 @@ func ensureDNSFilterInfra(ctx context.Context) {
 		"    type ether_addr",
 		"}",
 		"",
+		// Controlled-device scope for DPI enforcement (stages 1-3). Kept in
+		// sync with controlled-macs.json by controlledMacSyncLoop.
+		"set " + controlledMacSet + " {",
+		"    type ether_addr",
+		"}",
+		"",
 		"chain bt_dns_filter_block6_in {",
 		"    type filter hook input priority -10; policy accept;",
 		"    ether saddr @" + dnsFilterMacSet + " meta nfproto ipv6 udp dport 53 reject",
@@ -638,6 +651,111 @@ func syncDNSFilterMacs(ctx context.Context) {
 	add := exec.CommandContext(sub, "nft", "add", "element", "inet", "fw4", dnsFilterMacSet, arg)
 	if out, err := add.CombinedOutput(); err != nil {
 		log.Printf("dns_filter: add %s: %v: %s", dnsFilterMacSet, err, strings.TrimSpace(string(out)))
+	}
+}
+
+// loadControlledMacs reads controlled-macs.json. Missing file → empty
+// (no device is controlled; every DPI stage no-ops). A malformed file is
+// treated the same — fail open rather than guess a scope.
+func loadControlledMacs() []string {
+	b, err := os.ReadFile(controlledMacsPath)
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		Macs []string `json:"macs"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		log.Printf("controlled: parse %s: %v", controlledMacsPath, err)
+		return nil
+	}
+	out := make([]string, 0, len(doc.Macs))
+	for _, m := range doc.Macs {
+		m = strings.ToLower(strings.TrimSpace(m))
+		if m != "" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// isControlledMAC reports whether a MAC is in a controlled group. Cheap
+// enough (small set) to call on the per-query DNS path.
+func isControlledMAC(mac string) bool {
+	if mac == "" {
+		return false
+	}
+	mac = strings.ToLower(mac)
+	for _, m := range getControlledMacs() {
+		if m == mac {
+			return true
+		}
+	}
+	return false
+}
+
+type controlledMacsCache struct {
+	mu       sync.RWMutex
+	macs     []string
+	loadedAt time.Time
+}
+
+var globalControlledMacs controlledMacsCache
+
+func getControlledMacs() []string {
+	globalControlledMacs.mu.RLock()
+	if time.Since(globalControlledMacs.loadedAt) < 10*time.Second {
+		out := globalControlledMacs.macs
+		globalControlledMacs.mu.RUnlock()
+		return out
+	}
+	globalControlledMacs.mu.RUnlock()
+	globalControlledMacs.mu.Lock()
+	defer globalControlledMacs.mu.Unlock()
+	if time.Since(globalControlledMacs.loadedAt) < 10*time.Second {
+		return globalControlledMacs.macs
+	}
+	globalControlledMacs.macs = loadControlledMacs()
+	globalControlledMacs.loadedAt = time.Now()
+	return globalControlledMacs.macs
+}
+
+// syncControlledMacs rebuilds the bt_controlled_macs nft set from the
+// pushed file. Same flush-then-add shape as syncDNSFilterMacs.
+func syncControlledMacs(ctx context.Context) {
+	macs := loadControlledMacs()
+	sub, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	flush := exec.CommandContext(sub, "nft", "flush", "set", "inet", "fw4", controlledMacSet)
+	if out, err := flush.CombinedOutput(); err != nil {
+		if strings.Contains(string(out), "No such file") ||
+			strings.Contains(string(out), "Could not process rule") {
+			return // set not declared yet — infra hasn't landed
+		}
+		log.Printf("controlled: flush %s: %v: %s", controlledMacSet, err, strings.TrimSpace(string(out)))
+		return
+	}
+	if len(macs) == 0 {
+		return
+	}
+	arg := "{ " + strings.Join(macs, ", ") + " }"
+	add := exec.CommandContext(sub, "nft", "add", "element", "inet", "fw4", controlledMacSet, arg)
+	if out, err := add.CombinedOutput(); err != nil {
+		log.Printf("controlled: add %s: %v: %s", controlledMacSet, err, strings.TrimSpace(string(out)))
+	}
+}
+
+func controlledMacSyncLoop(ctx context.Context) {
+	t := time.NewTicker(15 * time.Second)
+	defer t.Stop()
+	syncControlledMacs(ctx) // prime
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			syncControlledMacs(ctx)
+		}
 	}
 }
 

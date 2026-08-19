@@ -391,6 +391,13 @@ export async function ensureAccountSchema(
   await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS person_name TEXT;`;
   await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS age INTEGER;`;
 
+  // `controlled` gates deep-packet enforcement (DNS-gated firewall drop,
+  // SNI verdicts, flow classification) to a group's devices. Off by
+  // default — adult devices must never be swept in. The device builds an
+  // nft set (bt_controlled_macs) from the union of controlled groups'
+  // MACs; every DPI stage checks membership before touching a packet.
+  await sql`ALTER TABLE account_groups ADD COLUMN IF NOT EXISTS controlled BOOLEAN NOT NULL DEFAULT FALSE;`;
+
   // Per-household per-group app decision log. Tracks the parent's call
   // on whether the kid is allowed to spend time on each app. `status` is
   // 'ok' (parent has decided it's fine — won't trigger alerts), 'limit'
