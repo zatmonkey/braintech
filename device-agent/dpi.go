@@ -83,7 +83,7 @@ func runDPIQueue(ctx context.Context) error {
 			verdict(nfqueue.NfAccept)
 			return 0
 		}
-		srcIP, l4payload, ok := ipv4TCPPayload(*a.Payload)
+		srcIP, l4payload, ok := tcpPayload(*a.Payload)
 		if !ok {
 			verdict(nfqueue.NfAccept)
 			return 0
@@ -159,26 +159,44 @@ func sniBlockedForMAC(mac, host string) bool {
 	return false
 }
 
-// ipv4TCPPayload returns (srcIP, tcpPayload, ok) for an IPv4/TCP packet.
-// IPv6 returns ok=false — controlled MACs have IPv6 DNS rejected and QUIC
-// dropped, so their TLS lands on IPv4; a v6 flow we can't parse is passed
-// (fail open), never dropped.
-func ipv4TCPPayload(pkt []byte) (string, []byte, bool) {
-	if len(pkt) < 20 || pkt[0]>>4 != 4 {
+// tcpPayload returns (srcIP, tcpPayload, ok) for an IPv4- or IPv6-carried
+// TCP packet. Dual-stack is mandatory here: Apple devices prefer IPv6, so
+// an IPv4-only parser sees none of their TLS (this was observed live — the
+// queue processed the packets but every ClientHello was dropped unparsed).
+// Unparseable (non-TCP, IPv6 extension headers, truncated) → ok=false,
+// caller accepts (fail open), never drops.
+func tcpPayload(pkt []byte) (string, []byte, bool) {
+	if len(pkt) < 1 {
 		return "", nil, false
 	}
-	ihl := int(pkt[0]&0x0f) * 4
-	if ihl < 20 || len(pkt) < ihl+20 {
+	var src string
+	var l4 []byte
+	switch pkt[0] >> 4 {
+	case 4:
+		if len(pkt) < 20 {
+			return "", nil, false
+		}
+		ihl := int(pkt[0]&0x0f) * 4
+		if ihl < 20 || len(pkt) < ihl+20 || pkt[9] != 6 { // proto 6 = TCP
+			return "", nil, false
+		}
+		src = net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
+		l4 = pkt[ihl:]
+	case 6:
+		// Fixed 40-byte IPv6 header; next_header at [6]. We don't walk
+		// extension headers — a TLS ClientHello sits on a plain TCP flow,
+		// so next_header != 6 is treated as "not for us" (fail open).
+		if len(pkt) < 40+20 || pkt[6] != 6 {
+			return "", nil, false
+		}
+		src = net.IP(pkt[8:24]).String()
+		l4 = pkt[40:]
+	default:
 		return "", nil, false
 	}
-	if pkt[9] != 6 { // TCP
+	dataOff := int(l4[12]>>4) * 4
+	if dataOff < 20 || len(l4) < dataOff {
 		return "", nil, false
 	}
-	src := net.IPv4(pkt[12], pkt[13], pkt[14], pkt[15]).String()
-	tcp := pkt[ihl:]
-	dataOff := int(tcp[12]>>4) * 4
-	if dataOff < 20 || len(tcp) < dataOff {
-		return "", nil, false
-	}
-	return src, tcp[dataOff:], true
+	return src, l4[dataOff:], true
 }

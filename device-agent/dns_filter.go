@@ -522,8 +522,19 @@ var (
 func nftSupportsQueue() bool {
 	nftQueueOnce.Do(func() {
 		// `nft -c` (check-only) resolves the expression against the kernel
-		// without committing. On a kernel without nft_queue this errors.
-		spec := "table inet btqprobe { chain c { type filter hook forward priority 0; queue num 99 bypass } }"
+		// without committing; on a kernel without nft_queue it errors.
+		// MUST be newline-separated — nft's parser rejects a whole chain
+		// body on one line ("unexpected }"), which would make this a false
+		// negative on a perfectly capable kernel (it did: it silently
+		// disabled stage 2 after a restart).
+		spec := strings.Join([]string{
+			"table inet btqprobe {",
+			"  chain c {",
+			"    type filter hook forward priority 0; policy accept;",
+			"    tcp dport 443 queue num 99 bypass",
+			"  }",
+			"}",
+		}, "\n")
 		cmd := exec.Command("nft", "-c", "-f", "/dev/stdin")
 		cmd.Stdin = strings.NewReader(spec)
 		if err := cmd.Run(); err == nil {
