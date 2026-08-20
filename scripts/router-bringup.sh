@@ -39,7 +39,8 @@ rssh '. /etc/os-release; echo "OpenWrt $VERSION_ID"; ping -c1 -w5 downloads.open
 echo "== 2. install DPI packages =="
 rssh 'opkg update && opkg install kmod-nft-queue libndpi netifyd'
 echo "   verify nft queue expression now resolves:"
-rssh 'echo "table inet p { chain c { type filter hook forward priority 0; queue num 99 bypass } }" | nft -c -f /dev/stdin && echo "   nft queue: SUPPORTED"'
+# Multi-line spec — nft rejects the whole chain body on one line.
+rssh 'printf "%s\n" "table inet btqp {" "chain c {" "  type filter hook forward priority 0; policy accept;" "  tcp dport 443 queue num 99 bypass" "}" "}" | nft -c -f /dev/stdin && echo "   nft queue: SUPPORTED" || echo "   nft queue: STILL MISSING (check kmod-nft-queue install)"'
 
 echo "== 3. restore braintech identity + agent =="
 rssh 'mkdir -p /etc/braintech'
