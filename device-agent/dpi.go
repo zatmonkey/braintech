@@ -75,41 +75,51 @@ func runDPIQueue(ctx context.Context) error {
 			return 0
 		}
 		id := *a.PacketID
-		// Default verdict is always ACCEPT — a parse miss, a non-TLS
-		// packet, or observe mode must never drop.
-		verdict := func(v int) { _ = nf.SetVerdict(id, v) }
-
 		if a.Payload == nil {
-			verdict(nfqueue.NfAccept)
+			_ = nf.SetVerdict(id, nfqueue.NfAccept)
 			return 0
 		}
-		srcIP, l4payload, ok := tcpPayload(*a.Payload)
-		if !ok {
-			verdict(nfqueue.NfAccept)
+		srcIP, l4, ok := tcpPayload(*a.Payload)
+		if !ok || len(l4) == 0 {
+			// Pure ACK / SYN / unparsable — no decision yet. Accept
+			// WITHOUT a conntrack mark so the flow stays "undecided" and
+			// its next (data) packet is still queued. The connbytes bound
+			// in the nft rule caps how long this can go on.
+			_ = nf.SetVerdict(id, nfqueue.NfAccept)
 			return 0
 		}
-		host, ok := parseClientHelloSNI(l4payload)
+		host, ok := parseClientHelloSNI(l4)
 		if !ok {
-			// Not the ClientHello yet (handshake packet) — let it pass;
-			// the next packet on this flow gets re-queued.
-			verdict(nfqueue.NfAccept)
+			if l4[0] == 0x16 {
+				// A TLS handshake record whose ClientHello spans more than
+				// this segment. Stay undecided and wait for the next one
+				// (bounded by connbytes) rather than guessing.
+				_ = nf.SetVerdict(id, nfqueue.NfAccept)
+			} else {
+				// First data byte isn't a TLS handshake — not something we
+				// classify by SNI. Allow and stop re-queueing this flow.
+				_ = nf.SetVerdictWithConnMark(id, nfqueue.NfAccept, ctMarkAllow)
+			}
 			return 0
 		}
 		mac := lookupMACForFilter(srcIP)
 		block := mac != "" && sniBlockedForMAC(mac, host)
-
 		if !dpiEnforce {
+			// Observe: record the verdict we WOULD make, but never drop.
+			// Mark allow so the conntrack fast-path engages and the flow
+			// stops re-queueing (this is also the live test that the
+			// connmark mechanism works — re-queue counts should stay tiny).
 			log.Printf("dpi(observe): mac=%s sni=%s wouldBlock=%v", mac, host, block)
-			verdict(nfqueue.NfAccept)
+			_ = nf.SetVerdictWithConnMark(id, nfqueue.NfAccept, ctMarkAllow)
 			return 0
 		}
 		if block {
-			// Mark the flow so every later packet is dropped by the
-			// ct-mark rule, and drop this one.
-			_ = nf.SetVerdictWithMark(id, nfqueue.NfAccept, dpiMarkBlock)
+			// Drop the ClientHello (kills the handshake) AND mark the flow
+			// so every later packet hits the `ct mark 2 drop` rule.
+			_ = nf.SetVerdictWithConnMark(id, nfqueue.NfDrop, ctMarkBlock)
 			return 0
 		}
-		_ = nf.SetVerdictWithMark(id, nfqueue.NfAccept, dpiMarkAllow)
+		_ = nf.SetVerdictWithConnMark(id, nfqueue.NfAccept, ctMarkAllow)
 		return 0
 	}
 	errFn := func(e error) int {
@@ -123,11 +133,15 @@ func runDPIQueue(ctx context.Context) error {
 	return nil
 }
 
-// nfmark values userspace sets; an nft chain copies them to ct mark so the
-// verdict persists for the whole flow (enforce mode only).
+// Conntrack marks set directly on the verdict (SetVerdictWithConnMark), so
+// the per-flow decision persists in conntrack without relying on an
+// nfmark→ct-mark copy across base chains (that cross-chain resume does not
+// work on this kernel — it produced a 273k-packet re-queue storm). The nft
+// chain reads these: mark 1 → flow already allowed (skip queue), mark 2 →
+// blocked (drop every packet).
 const (
-	dpiMarkAllow = 0x1
-	dpiMarkBlock = 0x2
+	ctMarkAllow = 1
+	ctMarkBlock = 2
 )
 
 // sniBlockedForMAC reports whether host matches the block-domain list of

@@ -127,6 +127,18 @@ func handleUDPQuery(ctx context.Context, conn net.PacketConn, src *net.UDPAddr, 
 	name := strings.TrimSuffix(strings.ToLower(q.Name.String()), ".")
 	mac := lookupMACForFilter(src.IP.String())
 
+	// Strip HTTPS/SVCB (type 65) records for everyone hitting this resolver
+	// (all of them are enforce-mode controlled devices). Those records carry
+	// the ECH config; without it the browser can't encrypt the ClientHello,
+	// so the SNI stays in cleartext for stage 2 to read. Return NOERROR/no-
+	// answer — buildSinkholeResponse's default arm does exactly that.
+	if uint16(q.Type) == 65 {
+		if resp := buildSinkholeResponse(hdr, q); len(resp) > 0 {
+			_, _ = conn.WriteTo(resp, src)
+		}
+		return
+	}
+
 	if mac != "" && blockedForMAC(mac, name) {
 		// Sinkholed — the kid never reaches the app, so DON'T record it as
 		// usage: a blocked app retrying in the background would otherwise
@@ -235,6 +247,12 @@ func handleTCPConn(ctx context.Context, c net.Conn, store *usageStore) {
 		if qerr == nil {
 			name := strings.TrimSuffix(strings.ToLower(q.Name.String()), ".")
 			mac := lookupMACForFilter(remoteIPOnly(c.RemoteAddr().String()))
+			if uint16(q.Type) == 65 { // strip HTTPS/SVCB (ECH) — see UDP path
+				if resp := buildSinkholeResponse(hdr, q); len(resp) > 0 {
+					writeTCPDNS(c, resp)
+				}
+				return
+			}
 			if mac != "" && blockedForMAC(mac, name) {
 				// Sinkholed — quota yes, dashboard usage no (see UDP path).
 				recordQuotaForBlockedMAC(mac, name)
@@ -551,25 +569,32 @@ func sniQueueChains() string {
 		log.Printf("dns_filter: kernel lacks nft queue support — stage-2 SNI chains skipped")
 		return ""
 	}
-	return strings.Join([]string{
-		// queue new TCP:443 flows from SNI-scope MACs to userspace (dpi.go)
-		// for a ClientHello verdict. ct mark carries the per-flow decision
-		// so only handshake packets reach userspace: mark 2 → blocked flow
-		// (drop every packet), mark 1 → allowed (fast-path accept), mark 0 →
-		// undecided (queue). `bypass`: daemon down = packets pass.
+	lines := []string{
+		// Per-flow SNI verdicts via NFQUEUE. The conntrack mark carries the
+		// decision (set directly by userspace with SetVerdictWithConnMark —
+		// no nfmark→ctmark chain copy, which doesn't work on this kernel):
+		//   ct mark 2 → blocked flow: drop every packet (all ports, so the
+		//               whole connection dies, not just :443).
+		//   ct mark 0 → undecided: queue only the first 12 client packets
+		//               (the ClientHello lives there) so we never funnel a
+		//               whole stream through userspace — this is what keeps
+		//               the queue from the 273k-packet re-queue storm.
+		//   ct mark 1 → allowed: matches neither rule, flows on the fast path.
+		// `bypass`: if the daemon isn't attached, packets pass (fail open).
 		"chain bt_sni_q {",
 		"    type filter hook forward priority -7; policy accept;",
-		"    ether saddr @" + sniMacSet + " tcp dport 443 ct mark 2 counter drop",
-		"    ether saddr @" + sniMacSet + " tcp dport 443 ct mark 1 accept",
-		"    ether saddr @" + sniMacSet + " tcp dport 443 queue num 4 bypass",
-		"}",
-		"chain bt_sni_mark {",
-		"    type filter hook forward priority -6; policy accept;",
-		"    ether saddr @" + sniMacSet + " meta mark 1 ct mark set 1",
-		"    ether saddr @" + sniMacSet + " meta mark 2 ct mark set 2",
-		"}",
-		"",
-	}, "\n")
+		"    ether saddr @" + sniMacSet + " ct mark 2 counter drop",
+		"    ether saddr @" + sniMacSet + " tcp dport 443 ct mark 0 ct original packets 1-12 queue num 4 bypass",
+	}
+	if dpiEnforce {
+		// QUIC (HTTP/3) has no cleartext SNI we can read on TCP, so a
+		// blocked app would just shift to UDP/443 and bypass us. Drop it
+		// for SNI-scope MACs so browsers fall back to TCP, where we see
+		// the ClientHello. Enforce-only — in observe we don't alter QUIC.
+		lines = append(lines, "    ether saddr @"+sniMacSet+" udp dport 443 counter drop")
+	}
+	lines = append(lines, "}", "")
+	return strings.Join(lines, "\n")
 }
 
 func ensureDNSFilterInfra(ctx context.Context) {
