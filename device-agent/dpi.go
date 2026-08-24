@@ -26,8 +26,11 @@ import (
 	nfqueue "github.com/florianl/go-nfqueue/v2"
 )
 
-// dpiEnforce = false ships observe-only (parse + log, never drop).
-const dpiEnforce = false
+// dpiEnforce = true: SNI verdicts actually drop. The path is fail-open at
+// every step (parse miss / unresolved MAC / daemon down all accept), and
+// scoped to bt_sni_macs (controlled ∩ app-block-enforce), so the blast
+// radius is one kid's blocked app, never adult devices or unrelated sites.
+const dpiEnforce = true
 
 const dpiQueueNum = 4
 
@@ -116,6 +119,7 @@ func runDPIQueue(ctx context.Context) error {
 		if block {
 			// Drop the ClientHello (kills the handshake) AND mark the flow
 			// so every later packet hits the `ct mark 2 drop` rule.
+			log.Printf("dpi(block): mac=%s sni=%s", mac, host)
 			_ = nf.SetVerdictWithConnMark(id, nfqueue.NfDrop, ctMarkBlock)
 			return 0
 		}
