@@ -5,6 +5,39 @@ import (
 	"time"
 )
 
+// Window + quota must AND: blocked outside the window, and inside it only
+// up to the quota. (Window-only and quota-only rules are covered by their
+// long-standing behavior; this pins the new combined mode.)
+func TestEvaluateWindowAndQuota(t *testing.T) {
+	mac := "11:22:33:44:55:66"
+	mkDoc := func() *policyDoc {
+		return &policyDoc{
+			Kind:         "block_unless",
+			RuleID:       "sched_wk",
+			MACs:         []string{mac},
+			AllowWindows: []timeWindow{{Days: []string{"sat"}, StartMinOfDay: 0, EndMinOfDay: 1440}},
+			AllowQuotas:  []quotaWindow{{Period: "day", MinutesMax: 30}},
+		}
+	}
+	sat := time.Date(2026, 8, 22, 10, 0, 0, 0, time.UTC) // Saturday, in window
+	wed := time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC) // Wednesday, out of window
+
+	// Out of window → enforce regardless of quota.
+	if d, _ := evaluate(mkDoc(), wed); d != decisionEnforce {
+		t.Errorf("out-of-window: got %s, want enforce", d)
+	}
+	// In window, under quota → allow.
+	if d, _ := evaluate(mkDoc(), sat); d != decisionAllow {
+		t.Errorf("in-window under-quota: got %s, want allow", d)
+	}
+	// In window, at/over quota → enforce. Seed the day's baseline to 30.
+	doc := mkDoc()
+	doc.BaselineByDay = map[string]map[string]int{"2026-08-22": {mac: 30}}
+	if d, _ := evaluate(doc, sat); d != decisionEnforce {
+		t.Errorf("in-window over-quota: got %s, want enforce", d)
+	}
+}
+
 // The live counter and the server-seeded baseline overlap (the server
 // re-seeds from its own usage table on every push), so usedMinutes must
 // take the per-day MAX of the two, never the sum — summing is how a kid

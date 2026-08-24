@@ -144,6 +144,47 @@ export const DEFAULT_BRAINROT_DOMAINS: string[] = Object.values(
 ).flat();
 
 /**
+ * Streaming + gaming + chat entertainment, beyond the infinite-scroll
+ * social apps above. Keyed per-app so per-app earn credits (Phase 2) can
+ * map a granted "20 min of Netflix" back to its domains. Playback CDNs
+ * that are NOT shared with productivity apps are safe to block outright
+ * (nflxvideo, rbxcdn); the Google-shared ones (googlevideo/ggpht) stay
+ * count-only via COUNT_ONLY_DOMAINS_BY_APP.
+ */
+export const ENTERTAINMENT_DOMAINS_BY_APP: Record<string, string[]> = {
+  netflix: ["netflix.com", "nflxvideo.net", "nflximg.net", "nflxext.com", "nflxso.net"],
+  disneyplus: ["disneyplus.com", "disney-plus.net", "dssott.com", "bamgrid.com"],
+  hulu: ["hulu.com", "hulustream.com", "huluim.com"],
+  primevideo: ["primevideo.com", "aiv-cdn.net", "aiv-delivery.net", "pv-cdn.net"],
+  hbomax: ["max.com", "hbomax.com", "hbomaxcdn.com", "hbo.com"],
+  roblox: ["roblox.com", "rbxcdn.com", "rbx.com"],
+  fortnite: ["epicgames.com", "fortnite.com", "unrealengine.com", "epicgames.dev"],
+  minecraft: ["minecraft.net", "mojang.com", "minecraftservices.com"],
+  steam: ["steampowered.com", "steamcommunity.com", "steamcontent.com", "steamstatic.com"],
+  discord: ["discord.com", "discordapp.com", "discord.gg", "discordapp.net"],
+};
+
+/**
+ * "All device-based entertainment" — the union of the social/brainrot set
+ * and the streaming/gaming/chat set. Backs the `Brainrot` / `Entertainment`
+ * app label used by weekend-allowance rules.
+ */
+export const ENTERTAINMENT_DOMAINS: string[] = [
+  ...Object.values(BRAINROT_DOMAINS_BY_APP).flat(),
+  ...Object.values(ENTERTAINMENT_DOMAINS_BY_APP).flat(),
+];
+
+/** Labels that mean "all device entertainment" → ENTERTAINMENT_DOMAINS. */
+const ENTERTAINMENT_LABELS = new Set([
+  "brainrot",
+  "entertainment",
+  "screen time",
+  "screens",
+  "all apps",
+  "all entertainment",
+]);
+
+/**
  * Whole-internet sentinel. A rule whose domains are exactly ["*"] sinkholes
  * EVERY domain for its MACs while enforcing — the agent's matchesAny treats
  * "*" as match-all. Used for "no internet after 9pm" style rules where
@@ -207,17 +248,21 @@ function canonicalAppKey(appLabel: string): string {
 export function brainrotDomainsForApp(appLabel: string): string[] | undefined {
   const key = appLabel.trim().toLowerCase();
   if (INTERNET_LABELS.has(key)) return ALL_INTERNET_DOMAINS;
+  if (ENTERTAINMENT_LABELS.has(key)) return ENTERTAINMENT_DOMAINS;
   return BRAINROT_DOMAINS_BY_APP[canonicalAppKey(appLabel)];
 }
 
 /**
  * Count-only domains for an app label (see COUNT_ONLY_DOMAINS_BY_APP).
  * Empty for apps without a playback CDN split and for whole-internet
- * rules (where domains is already ["*"], counting everything).
+ * rules (where domains is already ["*"], counting everything). The
+ * entertainment bundle includes YouTube, so it inherits the googlevideo/
+ * ggpht count-only treatment (block the frontend, count the shared CDN).
  */
 export function countOnlyDomainsForApp(appLabel: string): string[] {
   const key = appLabel.trim().toLowerCase();
   if (INTERNET_LABELS.has(key)) return [];
+  if (ENTERTAINMENT_LABELS.has(key)) return COUNT_ONLY_DOMAINS_BY_APP.youtube;
   return COUNT_ONLY_DOMAINS_BY_APP[canonicalAppKey(appLabel)] ?? [];
 }
 

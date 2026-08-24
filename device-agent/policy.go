@@ -520,17 +520,38 @@ func evaluate(doc *policyDoc, now time.Time) (decision, PolicyDecision) {
 		report.Decision = string(decisionEnforce)
 		return decisionEnforce, report
 	}
+	// Window gate. allow_windows and allow_quotas COMBINE (AND) when both
+	// are present: usage is permitted only inside a window, and there only
+	// up to the quota. Windows with no quota = a pure schedule (bedtime);
+	// a quota with no windows = a pure budget usable anytime. Historically
+	// a window match short-circuited straight to allow — but no rule ever
+	// set both, so ANDing them is backward-compatible and is exactly what
+	// "30 min, weekends only" needs.
+	var matched *DecisionWindow
 	for _, w := range doc.AllowWindows {
 		if windowMatches(w, now) {
-			report.Decision = string(decisionAllow)
-			report.ActiveWindow = &DecisionWindow{
+			matched = &DecisionWindow{
 				Days:     append([]string{}, w.Days...),
 				StartMin: w.StartMinOfDay,
 				EndMin:   w.EndMinOfDay,
 			}
-			return decisionAllow, report
+			break
 		}
 	}
+	if len(doc.AllowWindows) > 0 && matched == nil {
+		// Outside every allowed window → blocked; the quota is irrelevant.
+		report.Decision = string(decisionEnforce)
+		report.NextWindowAt = nextWindowOpen(doc.AllowWindows, now)
+		return decisionEnforce, report
+	}
+	if len(doc.AllowQuotas) == 0 {
+		// Window-only schedule, currently inside a window → allow.
+		report.Decision = string(decisionAllow)
+		report.ActiveWindow = matched
+		return decisionAllow, report
+	}
+	// In-window (or windowless) AND a quota exists → the quota decides.
+	report.ActiveWindow = matched
 	for _, q := range doc.AllowQuotas {
 		days := periodDayKeys(q.Period, now)
 		used := usedMinutes(doc, days)
