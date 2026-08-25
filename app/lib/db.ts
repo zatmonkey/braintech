@@ -517,6 +517,21 @@ export async function ensureAccountSchema(
       PRIMARY KEY (owner_email, mac)
     );
   `;
+  // Per-app earned bonus minutes: "Maya earned 20 min of Netflix". A
+  // weekly allowance for one app, spendable only inside a schedule rule's
+  // window and only once the general quota is used up (the on-device
+  // engine gates that). Separate from brain_credits (which is app-agnostic
+  // general credit) so the two don't entangle.
+  await sql`
+    CREATE TABLE IF NOT EXISTS brain_app_credits (
+      owner_email      TEXT NOT NULL,
+      mac              TEXT NOT NULL,
+      app              TEXT NOT NULL,    -- canonical app key: netflix, roblox, youtube, ...
+      balance_minutes  INTEGER NOT NULL DEFAULT 0,
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (owner_email, mac, app)
+    );
+  `;
   await sql`
     CREATE TABLE IF NOT EXISTS brain_credit_ledger (
       id            BIGSERIAL PRIMARY KEY,

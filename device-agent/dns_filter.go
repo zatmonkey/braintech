@@ -53,6 +53,7 @@ const (
 	// gates on membership so adult devices are never touched.
 	controlledMacSet  = "bt_controlled_macs"
 	controlledMacsPath = "/etc/braintech/controlled-macs.json"
+	appCreditsPath     = "/etc/braintech/app-credits.json"
 	// Stage 1 (DNS-gated firewall). bt_lockdown_macs = controlled MACs
 	// whose current enforcement is a WHOLE-INTERNET block (domains ["*"],
 	// e.g. bedtime). For those, the forward chain drops all new WAN-bound
@@ -382,6 +383,10 @@ func blockedForMAC(mac, queryName string) bool {
 			continue
 		}
 		if matchesAny(queryName, r.Domains) {
+			// Per-app weekend bonus can override a block for one app.
+			if appBonusAllows(mac, queryName) {
+				return false
+			}
 			return true
 		}
 	}
@@ -813,6 +818,100 @@ func loadControlledMacs() []string {
 		}
 	}
 	return out
+}
+
+// ---- Per-app earn bonuses (Phase 2) ------------------------------------
+//
+// The server pushes app-credits.json: {mac: {appKey: weeklyBonusMinutes}}.
+// When a controlled kid is over their general entertainment quota but
+// still inside the schedule window, an app with remaining weekly bonus is
+// let through (and only that app), until the bonus minutes are used. Bonus
+// usage is counted with the shared quota counter under a synthetic rule id
+// ("appbonus:<app>"), so it persists across reboots and resets weekly.
+
+type appCreditsCache struct {
+	mu       sync.RWMutex
+	byMac    map[string]map[string]int
+	loadedAt time.Time
+}
+
+var globalAppCredits appCreditsCache
+
+func loadAppCredits() map[string]map[string]int {
+	b, err := os.ReadFile(appCreditsPath)
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		Credits map[string]map[string]int `json:"credits"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		log.Printf("appcredit: parse %s: %v", appCreditsPath, err)
+		return nil
+	}
+	return doc.Credits
+}
+
+func appCreditFor(mac, app string) int {
+	globalAppCredits.mu.RLock()
+	fresh := time.Since(globalAppCredits.loadedAt) < 10*time.Second
+	m := globalAppCredits.byMac
+	globalAppCredits.mu.RUnlock()
+	if !fresh {
+		globalAppCredits.mu.Lock()
+		if time.Since(globalAppCredits.loadedAt) >= 10*time.Second {
+			globalAppCredits.byMac = loadAppCredits()
+			globalAppCredits.loadedAt = time.Now()
+		}
+		m = globalAppCredits.byMac
+		globalAppCredits.mu.Unlock()
+	}
+	if apps, ok := m[strings.ToLower(mac)]; ok {
+		return apps[app]
+	}
+	return 0
+}
+
+// appBonusAllows reports whether a queried domain should be let through on
+// this MAC's per-app weekend bonus (and counts a bonus minute if so). All
+// four conditions must hold: the domain classifies to an app; that app has
+// a weekly bonus for this MAC; an entertainment rule scoping this MAC is
+// currently enforcing AND in-window (i.e. weekend, general quota spent);
+// and the bonus isn't already used up this week.
+func appBonusAllows(mac, domain string) bool {
+	app := strings.ToLower(classifyApp(domain))
+	if app == "" || mac == "" {
+		return false
+	}
+	granted := appCreditFor(mac, app)
+	if granted <= 0 {
+		return false
+	}
+	// Confirm an in-window, enforcing rule that scopes this MAC and covers
+	// this domain — so the bonus only fires when the app would otherwise be
+	// blocked by the weekend rule, inside its window.
+	enforce := buildEnforceModeIndex()
+	inScope := false
+	for _, r := range getCachedBrainrotRules() {
+		if !enforce[r.RuleID] || !macInScope(mac, r.MACs) || !matchesAny(domain, r.Domains) {
+			continue
+		}
+		if v, ok := ruleInWindow.Load(r.RuleID); ok && v.(bool) {
+			inScope = true
+			break
+		}
+	}
+	if !inScope {
+		return false
+	}
+	now := time.Now()
+	counterID := "appbonus:" + app
+	used := globalQuotaCounter.countPeriod(counterID, []string{mac}, periodDayKeys("week", now))
+	if used >= granted {
+		return false // weekly bonus exhausted
+	}
+	globalQuotaCounter.record(counterID, mac, now)
+	return true
 }
 
 // isControlledMAC reports whether a MAC is in a controlled group. Cheap

@@ -240,6 +240,11 @@ func quotaSnapshotLoop(ctx context.Context) {
 // can share state without threading a struct everywhere.
 var globalQuotaCounter = newQuotaCounter()
 
+// ruleInWindow[ruleID] = is this rule currently inside an allowed time
+// window (or windowless)? Written each evaluation tick, read by the
+// per-app earn-bonus check in dns_filter.go.
+var ruleInWindow sync.Map
+
 // CreditsSpentToday on PolicyDecision is the running total of credit
 // minutes consumed for this rule today across all member MACs.
 
@@ -538,6 +543,11 @@ func evaluate(doc *policyDoc, now time.Time) (decision, PolicyDecision) {
 			break
 		}
 	}
+	// Record whether this rule is currently inside an allowed window (or is
+	// windowless). Per-app earn bonuses (dns_filter.go) only apply while a
+	// rule is in-window — earned Netflix minutes shouldn't unlock Netflix on
+	// a Tuesday.
+	ruleInWindow.Store(doc.RuleID, len(doc.AllowWindows) == 0 || matched != nil)
 	if len(doc.AllowWindows) > 0 && matched == nil {
 		// Outside every allowed window → blocked; the quota is irrelevant.
 		report.Decision = string(decisionEnforce)

@@ -601,21 +601,25 @@ export const ACCOUNT_TOOLS: Anthropic.Tool[] = [
   {
     name: "grant_credit",
     description:
-      "Award brain credits to a kid (or any household individual). Credits live on the person — when any of their devices hits a schedule rule's daily quota, the engine spends from this pool and they get a few more minutes of YouTube/TikTok/etc. instead of being blocked. Use this when the parent says 'Maya did her Khan lesson, give her 20 minutes' / 'reward Alex with 30 min for reading'. Prefer `person_name` (e.g. 'alex', 'Maya') — that's the kid's name from CONTEXT > GROUPS, and survives the kid switching devices. Only fall back to `target_mac` when you're grant-by-device for a reason (e.g. the parent specifically said 'on the iPad'). Pass `note` for a short audit-log line the parent will see.",
+      "Award earned minutes to a kid (or any household individual). Two kinds: (1) GENERAL credit (omit `app`) — a pool the engine spends when any device hits a schedule rule's quota, for a few more minutes of whatever's blocked. (2) APP-SPECIFIC earn (pass `app`, e.g. 'Netflix') — a weekly bonus for that ONE app only, spendable on top of the general allowance and only inside the rule's window (e.g. the weekend brainrot window). Use app-specific when the parent names an app: 'Maya earned 20 min of Netflix', 'give Mila 15 more minutes of Roblox for the weekend'. Use general otherwise: 'Maya did her Khan lesson, give her 20 minutes'. Prefer `person_name` (from CONTEXT > GROUPS); app-specific REQUIRES person_name. Pass `note` for the audit line.",
     input_schema: {
       type: "object",
       properties: {
         person_name: {
           type: "string",
-          description: "Kid's name (or adult's) — matched case-insensitively against CONTEXT > GROUPS (kind='kid' wins ties). Preferred over target_mac.",
+          description: "Kid's name (or adult's) — matched case-insensitively against CONTEXT > GROUPS (kind='kid' wins ties). Preferred over target_mac. Required for app-specific earn.",
         },
         target_mac: {
           type: "string",
-          description: "Fallback: MAC of a specific device receiving credits. Use only when person_name doesn't fit (e.g. credit a specific device, or the kid has no kid-group set yet).",
+          description: "Fallback: MAC of a specific device receiving GENERAL credits. Not used for app-specific earn.",
+        },
+        app: {
+          type: "string",
+          description: "For app-specific earn only: the app the bonus applies to, e.g. 'Netflix', 'Roblox', 'YouTube', 'Disney+', 'Minecraft'. Omit for general credit. The bonus is weekly and only usable inside the schedule rule's window.",
         },
         minutes: {
           type: "number",
-          description: "Minutes to add to the credit balance. Parent says how many; if they say '20 min of Khan = 30 min of YouTube', do the parent's math and pass the screen-time minutes (30 here).",
+          description: "Minutes to add. Parent says how many; if they say '20 min of Khan = 30 min of YouTube', do the parent's math and pass the screen-time minutes (30 here).",
         },
         note: {
           type: "string",

@@ -171,6 +171,12 @@ func sniBlockedForMAC(mac, host string) bool {
 			continue
 		}
 		if matchesAny(host, r.Domains) {
+			// A per-app weekend bonus can keep one app alive past the
+			// general quota (minute-bucketed, so the extra call here and on
+			// the DNS path don't double-count).
+			if appBonusAllows(mac, host) {
+				return false
+			}
 			return true
 		}
 	}

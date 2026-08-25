@@ -41,7 +41,8 @@ import {
   type IpSetSource,
 } from "@/app/lib/rules";
 import { loadGroupMacs } from "@/app/lib/groups";
-import { grantCredit, deductCredit } from "@/app/lib/credit-grant";
+import { grantCredit, deductCredit, rematerializePolicies } from "@/app/lib/credit-grant";
+import { grantAppCredit, normalizeAppKey } from "@/app/lib/app-credit";
 import { resolvePersonName } from "@/app/lib/persons";
 import { sendAdminInviteEmail } from "@/app/lib/email";
 
@@ -602,6 +603,33 @@ export async function POST(req: Request) {
           who = labels.get(macInput) ?? `device ${macInput}`;
         } else {
           return "error: pass either person_name or a valid target_mac";
+        }
+
+        // App-specific earn ("20 min of Netflix"): a weekly per-app bonus,
+        // spendable only inside the schedule window once the general quota
+        // is used up. Applies to every device the person owns.
+        const appRaw = i.app ? String(i.app).trim() : "";
+        if (appRaw) {
+          const appKey = normalizeAppKey(appRaw);
+          if (!appKey) {
+            return `error: don't recognize the app "${appRaw}" — try Netflix, Roblox, YouTube, Disney+, Hulu, Prime Video, HBO Max, Fortnite, Minecraft, Steam, Discord, Instagram, TikTok, Snapchat, Reddit, Twitch, or X.`;
+          }
+          if (!groupId) {
+            return "error: app-specific earn needs a person_name (the bonus follows the person across their devices).";
+          }
+          const macsByGroup = await loadGroupMacs(sql, email);
+          const targetMacs = macsByGroup.get(groupId) ?? [];
+          if (targetMacs.length === 0) {
+            return `error: ${who} has no devices assigned yet — assign a device to their group first.`;
+          }
+          try {
+            let bal = 0;
+            for (const m of targetMacs) bal = await grantAppCredit(sql, email, m, appKey, minutes);
+            await rematerializePolicies(sql, email);
+            return `Granted ${who} ${minutes} min of ${appRaw} for this weekend (on top of the 30-min allowance). It only works inside the Fri–Sun window.`;
+          } catch (err) {
+            return `error: ${(err as Error).message}`;
+          }
         }
 
         try {

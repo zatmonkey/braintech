@@ -1293,13 +1293,24 @@ export interface AssembleDesiredOpts {
    *  leave the on-device file untouched — only membership/flag changes
    *  need to pass it, so rule pushes don't churn it. */
   controlledMacs?: string[];
+  /** Per-app earned bonus minutes, {mac: {appKey: minutes}}. When provided
+   *  (even empty), a device-wide op writes app-credits.json, which the
+   *  agent reads to allow an app past the general quota inside a window.
+   *  Omit to leave the on-device file untouched (only credit grants change
+   *  it, so rule pushes don't churn it). */
+  appCredits?: Record<string, Record<string, number>>;
 }
 
 export const CONTROLLED_MACS_PATH = "/etc/braintech/controlled-macs.json";
+export const APP_CREDITS_PATH = "/etc/braintech/app-credits.json";
 
 export function controlledMacsJson(macs: string[]): string {
   const norm = [...new Set(macs.map((m) => m.trim().toLowerCase()).filter(Boolean))].sort();
   return JSON.stringify({ macs: norm, updated_at: new Date().toISOString() }, null, 2) + "\n";
+}
+
+export function appCreditsJson(byMac: Record<string, Record<string, number>>): string {
+  return JSON.stringify({ credits: byMac, updated_at: new Date().toISOString() }, null, 2) + "\n";
 }
 
 export function assembleDesired(
@@ -1331,6 +1342,14 @@ export function assembleDesired(
       type: "file.write",
       path: CONTROLLED_MACS_PATH,
       content: controlledMacsJson(opts.controlledMacs),
+      mode: "644",
+    });
+  }
+  if (opts.appCredits) {
+    ops.push({
+      type: "file.write",
+      path: APP_CREDITS_PATH,
+      content: appCreditsJson(opts.appCredits),
       mode: "644",
     });
   }

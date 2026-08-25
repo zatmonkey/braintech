@@ -22,7 +22,7 @@ import (
 	_ "time/tzdata"
 )
 
-const agentVersion = "0.8.0"
+const agentVersion = "0.9.0"
 
 // initTimezone points time.Local at the household timezone. Priority: an
 // explicit TZ env var (Go honors it via the embedded tzdata), then the
