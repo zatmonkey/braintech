@@ -5,6 +5,38 @@ import (
 	"time"
 )
 
+// Per-app weekend bonus: only the granted app is let past an in-window
+// enforcing rule, and only in-window.
+func TestAppBonusAllows(t *testing.T) {
+	mac := "aa:bb:cc:dd:ee:01"
+	rid := "sched_ent_test"
+	globalBrainrotCache.mu.Lock()
+	globalBrainrotCache.rules = []brainrotState{{
+		RuleID:  rid,
+		MACs:    []string{mac},
+		Domains: []string{"netflix.com", "roblox.com", "youtube.com"},
+	}}
+	globalBrainrotCache.loadedAt = time.Now()
+	globalBrainrotCache.mu.Unlock()
+	globalDecisions.set(PolicyDecision{RuleID: rid, Decision: "enforce"})
+	ruleInWindow.Store(rid, true)
+	globalAppCredits.mu.Lock()
+	globalAppCredits.byMac = map[string]map[string]int{mac: {"netflix": 20}}
+	globalAppCredits.loadedAt = time.Now()
+	globalAppCredits.mu.Unlock()
+
+	if !appBonusAllows(mac, "netflix.com") {
+		t.Error("netflix should be allowed via its weekend bonus")
+	}
+	if appBonusAllows(mac, "roblox.com") {
+		t.Error("roblox has no bonus — must stay blocked")
+	}
+	ruleInWindow.Store(rid, false) // out of window
+	if appBonusAllows(mac, "netflix.com") {
+		t.Error("bonus must NOT apply outside the rule's window")
+	}
+}
+
 // Window + quota must AND: blocked outside the window, and inside it only
 // up to the quota. (Window-only and quota-only rules are covered by their
 // long-standing behavior; this pins the new combined mode.)
