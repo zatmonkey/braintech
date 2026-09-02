@@ -29,6 +29,7 @@ import { loadGroupMacs } from "@/app/lib/groups";
 import { loadScheduleBaselines } from "@/app/lib/schedule-baselines";
 import { loadControlledMacs } from "@/app/lib/controlled";
 import { loadAppCreditsByMac } from "@/app/lib/app-credit";
+import { loadPausedRules } from "@/app/lib/pause";
 import { primaryMacForGroup } from "@/app/lib/persons";
 
 type DeviceRow = { device_id: string; desired_version: number };
@@ -166,7 +167,8 @@ export async function rematerializePolicies(
   // credit grant doesn't blank them (and so an app-credit grant lands).
   const controlledMacs = await loadControlledMacs(sql, email);
   const appCredits = await loadAppCreditsByMac(sql, email, controlledMacs);
-  const desired = assembleDesired(allRules, { controlledMacs, appCredits });
+  const pausedRules = await loadPausedRules(sql, email);
+  const desired = assembleDesired(allRules, { controlledMacs, appCredits, pausedRules });
   const newVersion = primary.desired_version + 1;
   await sql`
     UPDATE devices SET desired = ${JSON.stringify(desired)}::jsonb, desired_version = ${newVersion}, updated_at = NOW()

@@ -36,7 +36,7 @@ export async function logRuleAudit(
   entry: {
     owner_email: string;
     rule_id: string;
-    action: "create" | "deactivate";
+    action: "create" | "deactivate" | "pause" | "resume";
     source: "dashboard" | "bri" | "system";
     actor?: string;
     detail?: string;

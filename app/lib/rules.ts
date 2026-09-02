@@ -1299,10 +1299,20 @@ export interface AssembleDesiredOpts {
    *  Omit to leave the on-device file untouched (only credit grants change
    *  it, so rule pushes don't churn it). */
   appCredits?: Record<string, Record<string, number>>;
+  /** Temporarily-paused rules, {ruleId: untilRFC3339}. When provided
+   *  (even empty), a device-wide op writes paused-rules.json; the engine
+   *  treats a rule as "allow" while now < its until, then auto-resumes.
+   *  Omit to leave the on-device file untouched. */
+  pausedRules?: Record<string, string>;
 }
 
 export const CONTROLLED_MACS_PATH = "/etc/braintech/controlled-macs.json";
 export const APP_CREDITS_PATH = "/etc/braintech/app-credits.json";
+export const PAUSED_RULES_PATH = "/etc/braintech/paused-rules.json";
+
+export function pausedRulesJson(byRule: Record<string, string>): string {
+  return JSON.stringify({ paused: byRule, updated_at: new Date().toISOString() }, null, 2) + "\n";
+}
 
 export function controlledMacsJson(macs: string[]): string {
   const norm = [...new Set(macs.map((m) => m.trim().toLowerCase()).filter(Boolean))].sort();
@@ -1350,6 +1360,14 @@ export function assembleDesired(
       type: "file.write",
       path: APP_CREDITS_PATH,
       content: appCreditsJson(opts.appCredits),
+      mode: "644",
+    });
+  }
+  if (opts.pausedRules) {
+    ops.push({
+      type: "file.write",
+      path: PAUSED_RULES_PATH,
+      content: pausedRulesJson(opts.pausedRules),
       mode: "644",
     });
   }

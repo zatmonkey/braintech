@@ -275,6 +275,8 @@ type PolicyDecision struct {
 	// allow state. Surfaced so the dashboard can say "Allowing — earn
 	// session active" instead of the misleading "under quota".
 	EarnSessionActive bool `json:"earn_session_active,omitempty"`
+	// Paused is true when the rule is currently snoozed (paused-rules.json).
+	Paused bool `json:"paused,omitempty"`
 }
 
 type DecisionWindow struct {
@@ -500,6 +502,13 @@ func evaluate(doc *policyDoc, now time.Time) (decision, PolicyDecision) {
 	if doc.Kind != "block_unless" {
 		report.Decision = string(decisionEnforce)
 		return decisionEnforce, report
+	}
+	// Snoozed rule → allow everything until the pause expires. Auto-resumes
+	// when now passes the pushed until time; no server round-trip.
+	if isRulePaused(doc.RuleID, now) {
+		report.Decision = string(decisionAllow)
+		report.Paused = true
+		return decisionAllow, report
 	}
 	// Earn-session punch-through — if ANY of the rule's MACs is in an
 	// active earn session (i.e. the kid just clicked Watch on a video in

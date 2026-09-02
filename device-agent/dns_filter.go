@@ -54,6 +54,7 @@ const (
 	controlledMacSet  = "bt_controlled_macs"
 	controlledMacsPath = "/etc/braintech/controlled-macs.json"
 	appCreditsPath     = "/etc/braintech/app-credits.json"
+	pausedRulesPath    = "/etc/braintech/paused-rules.json"
 	// Stage 1 (DNS-gated firewall). bt_lockdown_macs = controlled MACs
 	// whose current enforcement is a WHOLE-INTERNET block (domains ["*"],
 	// e.g. bedtime). For those, the forward chain drops all new WAN-bound
@@ -818,6 +819,63 @@ func loadControlledMacs() []string {
 		}
 	}
 	return out
+}
+
+// ---- Rule pause (snooze) -----------------------------------------------
+//
+// The server writes paused-rules.json: {ruleId: untilRFC3339}. While now
+// is before a rule's until, the engine treats it as "allow" — enforcement
+// stops (and its MACs drain from every enforce set, since those key off
+// the engine decision) — then auto-resumes when the time passes, with no
+// server round-trip.
+
+type pausedRulesCache struct {
+	mu       sync.RWMutex
+	until    map[string]time.Time
+	loadedAt time.Time
+}
+
+var globalPausedRules pausedRulesCache
+
+func loadPausedRules() map[string]time.Time {
+	b, err := os.ReadFile(pausedRulesPath)
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		Paused map[string]string `json:"paused"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		log.Printf("paused: parse %s: %v", pausedRulesPath, err)
+		return nil
+	}
+	out := make(map[string]time.Time, len(doc.Paused))
+	for id, s := range doc.Paused {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			out[id] = t
+		}
+	}
+	return out
+}
+
+// isRulePaused reports whether ruleID is currently snoozed. Cached 5s —
+// evaluate() calls it every tick per rule.
+func isRulePaused(ruleID string, now time.Time) bool {
+	globalPausedRules.mu.RLock()
+	fresh := time.Since(globalPausedRules.loadedAt) < 5*time.Second
+	m := globalPausedRules.until
+	globalPausedRules.mu.RUnlock()
+	if !fresh {
+		globalPausedRules.mu.Lock()
+		if time.Since(globalPausedRules.loadedAt) >= 5*time.Second {
+			globalPausedRules.until = loadPausedRules()
+			globalPausedRules.loadedAt = time.Now()
+		}
+		m = globalPausedRules.until
+		globalPausedRules.mu.Unlock()
+	}
+	until, ok := m[ruleID]
+	return ok && now.Before(until)
 }
 
 // ---- Per-app earn bonuses (Phase 2) ------------------------------------

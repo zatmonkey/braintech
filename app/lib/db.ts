@@ -343,6 +343,11 @@ export async function ensureAccountSchema(
     );
   `;
   await sql`CREATE INDEX IF NOT EXISTS account_rules_owner_idx ON account_rules(owner_email, active);`;
+  // Temporary snooze: a rule with paused_until in the future is not
+  // enforced (the on-device engine treats it as "allow" until then, then
+  // auto-resumes). NULL = not paused. Parent-set via the dashboard Pause
+  // button (30 min / 1 day).
+  await sql`ALTER TABLE account_rules ADD COLUMN IF NOT EXISTS paused_until TIMESTAMPTZ;`;
 
   // Household memory: who lives here, what devices they own, free-form notes.
   // This is the canonical long-term state Bri reads from EVERY turn. The

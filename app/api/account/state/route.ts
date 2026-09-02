@@ -47,6 +47,7 @@ type RuleRow = {
   params: Record<string, unknown>;
   ops: unknown;
   active: boolean;
+  paused_until: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -90,7 +91,7 @@ export async function GET() {
   }[];
 
   const rules = (await sql`
-    SELECT rule_id, device_id, name, rule_type, summary, params, ops, active, created_at, updated_at
+    SELECT rule_id, device_id, name, rule_type, summary, params, ops, active, paused_until, created_at, updated_at
     FROM account_rules WHERE owner_email = ${email} ORDER BY created_at;
   `) as RuleRow[];
 
@@ -298,6 +299,9 @@ export async function GET() {
           name: r.name,
           summary: r.summary,
           status: r.status,
+          // RFC3339 while the rule is snoozed; null otherwise. Drives the
+          // "paused · resumes in Xh" UI + the resume button.
+          paused_until: r.paused_until && new Date(r.paused_until) > new Date() ? r.paused_until : null,
           // Live policy decision for schedule rules. undefined for
           // static block_brainrot_group / pause_group rules.
           policy: policyByRule.get(r.rule_id),

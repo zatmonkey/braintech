@@ -533,6 +533,7 @@ type TabGroup = {
     status: RuleStatus;
     policy?: PolicyDecisionUI;
     credits_spent_today: number;
+    paused_until?: string | null;
   }>;
   brainrot_minutes: number | null;
   apps: AppMinutes[];
@@ -614,6 +615,7 @@ export function AllDevicesSection({
             status: RuleStatus;
             policy?: PolicyDecisionUI;
             credits_spent_today?: number;
+            paused_until?: string | null;
           }>;
           earn_passed_count?: number;
           earn_total_minutes?: number;
@@ -1032,6 +1034,7 @@ export function AllDevicesSection({
                       status={r.status}
                       policy={r.policy}
                       creditsSpentToday={r.credits_spent_today}
+                      pausedUntil={r.paused_until ?? null}
                     />
                   ))}
                 </ul>
@@ -1506,6 +1509,16 @@ export function ClientRow({
   );
 }
 
+function resumesIn(untilISO: string): string {
+  const ms = new Date(untilISO).getTime() - Date.now();
+  if (ms <= 0) return "resuming…";
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `resumes in ${mins}m`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `resumes in ${hrs}h`;
+  return `resumes in ${Math.round(hrs / 24)}d`;
+}
+
 export function RuleRow({
   ruleId,
   name,
@@ -1514,6 +1527,7 @@ export function RuleRow({
   status = "active",
   policy,
   creditsSpentToday = 0,
+  pausedUntil = null,
 }: {
   ruleId: string;
   name: string;
@@ -1530,9 +1544,29 @@ export function RuleRow({
   /** Brain-credit minutes consumed against this rule today (any MAC).
    *  Surfaces as "+18 from credits today" beside the live decision. */
   creditsSpentToday?: number;
+  /** RFC3339 while the rule is snoozed; null otherwise. */
+  pausedUntil?: string | null;
 }) {
   const [removing, setRemoving] = useState(false);
+  const [pauseMenu, setPauseMenu] = useState(false);
+  const [pauseBusy, setPauseBusy] = useState(false);
   const isRemovingState = status === "removing";
+  const isPaused = !!pausedUntil && new Date(pausedUntil) > new Date();
+
+  async function setPause(minutes: number | "resume") {
+    setPauseBusy(true);
+    setPauseMenu(false);
+    try {
+      await fetch(`/api/account/rules/${ruleId}/pause`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(minutes === "resume" ? { resume: true } : { minutes }),
+      });
+      window.dispatchEvent(new CustomEvent("braintech:state-changed"));
+    } finally {
+      setPauseBusy(false);
+    }
+  }
   // For schedule rules, the live policy decision overrides the static
   // colour: green when currently allowing, red when currently enforcing.
   // Static rules keep the original semantics (red while enforced, amber
@@ -1562,6 +1596,10 @@ export function RuleRow({
           ? "Removing — device cleaning up"
           : "Propagating — device picking it up";
   }
+  if (isPaused && !isRemovingState) {
+    dotCls = "bg-slate-400";
+    dotTitle = "Paused — not enforcing";
+  }
   return (
     <li className="flex items-start justify-between gap-3 py-2.5">
       <div className="min-w-0">
@@ -1585,7 +1623,12 @@ export function RuleRow({
         {summary && !isRemovingState && (
           <p className="ml-4 mt-1 text-xs text-[var(--color-ink-soft)]">{summary}</p>
         )}
-        {policy && !isRemovingState && (
+        {isPaused && !isRemovingState && (
+          <p className="ml-4 mt-1 text-xs font-medium text-[var(--color-ink-soft)]">
+            Paused · {resumesIn(pausedUntil!)}
+          </p>
+        )}
+        {policy && !isRemovingState && !isPaused && (
           <p className="ml-4 mt-1 text-xs font-medium">
             <PolicyLine policy={policy} />
             {creditsSpentToday > 0 && (
@@ -1596,24 +1639,52 @@ export function RuleRow({
           </p>
         )}
       </div>
-      <button
-        onClick={async () => {
-          if (!confirm(`Remove rule "${name}"?`)) return;
-          setRemoving(true);
-          try {
-            await fetch(`/api/account/rules/${ruleId}`, { method: "DELETE" });
-            // No reload — the polling refresh in AllDevicesSection will
-            // pick the change up within a few seconds.
-            window.dispatchEvent(new CustomEvent("braintech:state-changed"));
-          } catch {
-            setRemoving(false);
-          }
-        }}
-        disabled={removing || isRemovingState}
-        className="shrink-0 text-xs text-[var(--color-ink-soft)] underline hover:text-[var(--color-accent)] disabled:opacity-50"
-      >
-        {isRemovingState ? "removing" : removing ? "removing…" : "remove"}
-      </button>
+      <div className="shrink-0 flex items-center gap-2 text-xs">
+        {/* Pause / resume — only for enforcing rule types (schedule rules
+            carry a `policy`; static/structural ones don't yet honor pause). */}
+        {policy && !isRemovingState && (
+          isPaused ? (
+            <button
+              onClick={() => setPause("resume")}
+              disabled={pauseBusy}
+              className="text-[var(--color-ink-soft)] underline hover:text-[var(--color-accent)] disabled:opacity-50"
+            >
+              {pauseBusy ? "…" : "resume"}
+            </button>
+          ) : pauseMenu ? (
+            <span className="flex items-center gap-1.5">
+              <button onClick={() => setPause(30)} disabled={pauseBusy} className="rounded border border-[var(--color-rule)] px-1.5 py-0.5 hover:border-[var(--color-ink)] disabled:opacity-50">30m</button>
+              <button onClick={() => setPause(60)} disabled={pauseBusy} className="rounded border border-[var(--color-rule)] px-1.5 py-0.5 hover:border-[var(--color-ink)] disabled:opacity-50">1h</button>
+              <button onClick={() => setPause(1440)} disabled={pauseBusy} className="rounded border border-[var(--color-rule)] px-1.5 py-0.5 hover:border-[var(--color-ink)] disabled:opacity-50">1d</button>
+              <button onClick={() => setPauseMenu(false)} className="text-[var(--color-ink-soft)]">✕</button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setPauseMenu(true)}
+              disabled={pauseBusy}
+              className="text-[var(--color-ink-soft)] underline hover:text-[var(--color-accent)] disabled:opacity-50"
+            >
+              pause
+            </button>
+          )
+        )}
+        <button
+          onClick={async () => {
+            if (!confirm(`Remove rule "${name}"?`)) return;
+            setRemoving(true);
+            try {
+              await fetch(`/api/account/rules/${ruleId}`, { method: "DELETE" });
+              window.dispatchEvent(new CustomEvent("braintech:state-changed"));
+            } catch {
+              setRemoving(false);
+            }
+          }}
+          disabled={removing || isRemovingState}
+          className="text-[var(--color-ink-soft)] underline hover:text-[var(--color-accent)] disabled:opacity-50"
+        >
+          {isRemovingState ? "removing" : removing ? "removing…" : "remove"}
+        </button>
+      </div>
     </li>
   );
 }
