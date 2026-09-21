@@ -2,7 +2,8 @@
 # btnet — Braintech network test CLI.
 #
 # Drives the production stack end-to-end: log in with a real OTP (the
-# 30-day session cookie is cached at ~/.cache/btnet.cookies, so this is
+# session cookie is cached at ~/.cache/btnet.cookies and slides forward on
+# every `btnet login` check (90-day window, 1-year absolute cap), so this is
 # usually a one-time step), inspect dashboard state, rename connected
 # clients, talk to Bri, watch the OpenWrt One for the rule landing, and
 # clean up after the test run.
@@ -15,7 +16,7 @@
 #
 # Usage:
 #   btnet help
-#   btnet login                       # real OTP — paste the 6-digit code from email (lasts 30 days)
+#   btnet login                       # real OTP — paste the 6-digit code from email (renews itself on use)
 #   btnet state                       # dump dashboard JSON
 #   btnet clients                     # list connected clients (table)
 #   btnet rename <mac> <name>         # rename a client via the dashboard API
@@ -133,10 +134,15 @@ cmd_help() {
 }
 
 cmd_login() {
-  # If we already have a working session, skip.
-  if curl -sS -o /dev/null -w '%{http_code}' --cookie "$COOKIE_JAR" \
-       "$BASE/api/account/state" 2>/dev/null | grep -q '^200$'; then
-    echo "session in $COOKIE_JAR is still valid"
+  # If we already have a working session, slide it forward and skip the OTP.
+  # /api/auth/refresh re-issues the cookie when it's >24h old (no-op
+  # otherwise); --cookie-jar in api_post persists the new Set-Cookie.
+  local refresh
+  if refresh=$(api_post /api/auth/refresh 2>/dev/null) \
+       && echo "$refresh" | jq -e '.ok == true' >/dev/null 2>&1; then
+    local exp
+    exp=$(echo "$refresh" | jq -r '.exp / 1000 | floor | todate')
+    echo "session in $COOKIE_JAR is still valid (expires $exp)"
     return 0
   fi
 
@@ -169,7 +175,7 @@ cmd_login() {
     echo "verify failed: $resp" >&2
     exit 1
   fi
-  echo "logged in as $EMAIL (cookie saved to $COOKIE_JAR, valid 30 days)"
+  echo "logged in as $EMAIL (cookie saved to $COOKIE_JAR; renews on use, 1-year max)"
 }
 
 cmd_state() {
