@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { refreshSession, sessionCookie } from "@/app/lib/auth";
 
 /**
  * Sticky A/B rotation across landing-page variations.
@@ -16,8 +17,10 @@ import type { NextRequest } from "next/server";
  * boundary. 30-day TTL: long enough that a revisit within a campaign window
  * sees the same hero, short enough that we eventually re-roll a stale visitor.
  *
- * Anything that's NOT the landing page (api routes, static assets, the
- * authed /app dashboard, etc.) is excluded via `config.matcher`.
+ * Also runs on every non-API page (including the authed /app dashboard) to
+ * slide the `bt_session` cookie forward — see the session block at the
+ * bottom of `proxy()`. API routes are excluded via `config.matcher`; the
+ * btnet CLI refreshes via `POST /api/auth/refresh` instead.
  */
 
 const TOTAL_VARIATIONS = 7; // keep in sync with app/variations.ts
@@ -143,6 +146,16 @@ export function proxy(request: NextRequest) {
       httpOnly: false,
       secure: true,
     });
+  }
+
+  // Sliding login session. If the visitor carries a valid bt_session that's
+  // due for renewal (issued >24h ago, still inside the 1-year absolute cap),
+  // re-issue it so an actively used account never hits the expiry wall.
+  // Invalid/expired/fresh tokens return null and the cookie is left alone —
+  // the page's own verifySession() handles the redirect to /login.
+  const refreshed = refreshSession(request.cookies.get(sessionCookie.name)?.value);
+  if (refreshed) {
+    response.cookies.set(sessionCookie.name, refreshed, sessionCookie.options);
   }
 
   return response;
